@@ -1,4 +1,4 @@
-# typespec
+# Type Spec
 
 1. Number
     - `\d+` -> int
@@ -17,3 +17,14 @@
     - `S` -> text
 4. datetime
     - `t` -> datetime
+
+
+## Ecosystem
+
+1. [DB CREATE](https://github.com/maronghai/dbspec)
+
+## License
+
+[MIT](https://opensource.org/licenses/MIT)
+
+Copyright (c) 2023-present, Ronghai Ma
