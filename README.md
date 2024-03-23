@@ -21,7 +21,7 @@
 
 ## Ecosystem
 
-1. [DB CREATE](https://github.com/maronghai/dbspec)
+1. [DB Spec](https://github.com/maronghai/dbspec)
 
 ## License
 
