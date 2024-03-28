@@ -14,11 +14,28 @@
     - `S` -> text
 4. datetime
     - `t` -> datetime
+  
+## Token
 
+```asm
+n            ; int
+|N           ; bigint
+
+|m           ; decimal(16, 2)
+|M           ; decimal(20, 6)
+
+|\d+         ; int(n)
+|\d+,\d+     ; decimal(m, n)
+
+|s(?:\d+)?   ; varchar(n)
+|S           ; text
+|t           ; datetime
+```
 
 ## Ecosystem
 
 1. [DB Spec](https://github.com/maronghai/dbspec)
+2. [ZZ](https://github.com/maronghai/zz)
 
 ## License
 
