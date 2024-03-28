@@ -15,7 +15,7 @@
 4. datetime
     - `t` -> datetime
   
-## Token
+## Type.zz
 
 ```asm
 n            ; int
