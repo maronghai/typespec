@@ -1,17 +1,13 @@
 # Type Spec
 
 1. Number
-    - `\d+` -> int
-        - int(n)
+    - `\d+` -> int(n)
     - `n` -> int
     - `N` -> bigint
-    - `\d+` `,` `\d+` -> decimal
-        - decimal(m, n)
+    - `\d+` `,` `\d+` -> decimal(m, n)
 2. Money
-    - `m` -> money
-        - decimal(16, 2)
-    - `M` -> money plus
-        - decimal(20, 6)
+    - `m` -> decimal(16, 2)
+    - `M` -> decimal(20, 6)
 3. String
     - `s` -> varchar
         - `s` `\d+` -> varchar(n)
