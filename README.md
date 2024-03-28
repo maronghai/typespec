@@ -5,7 +5,7 @@
         - int(n)
     - `n` -> int
     - `N` -> bigint
-    - `\d+` `,` `\d+` -> float or double
+    - `\d+` `,` `\d+` -> decimal
         - decimal(m, n)
 2. Money
     - `m` -> money
