@@ -13,7 +13,8 @@
     - `M` -> money plus
         - decimal(20, 6)
 3. String
-    - `s` -> string
+    - `s` -> varchar
+        - `s\d+` -> varchar(n)
     - `S` -> text
 4. datetime
     - `t` -> datetime
