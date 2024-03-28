@@ -5,7 +5,7 @@
         - int(n)
     - `n` -> int
     - `N` -> bigint
-    - `\d+,\d+` -> float or double
+    - `\d+` `,` `\d+` -> float or double
         - decimal(m, n)
 2. Money
     - `m` -> money
@@ -14,7 +14,7 @@
         - decimal(20, 6)
 3. String
     - `s` -> varchar
-        - `s\d+` -> varchar(n)
+        - `s` `\d+` -> varchar(n)
     - `S` -> text
 4. datetime
     - `t` -> datetime
