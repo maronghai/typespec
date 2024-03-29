@@ -32,6 +32,10 @@ n            ; int
 |t           ; datetime
 ```
 
+```
+[nNmMSt]|s\d+?|\d+(?:,\d+)
+```
+
 ## Ecosystem
 
 1. [DB Spec](https://github.com/maronghai/dbspec)
