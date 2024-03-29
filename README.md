@@ -1,5 +1,25 @@
 # Type Spec
 
+## Abstract
+
+This document defines a mapping between specific symbols or regular expressions and corresponding data types. This mapping is intended to be used for parsing and converting data in various scenarios, such as databases, data analysis, and programming language parsing.
+
+## 1. Introduction
+
+The need for a standardized mapping between symbols or regular expressions and data types has been identified in order to ensure consistency and interoperability across different systems and applications. This document provides such a mapping.
+
+The mapping is defined as follows:
+
+- `n`: corresponds to the `int` type.
+- `N`: corresponds to the `bigint` type.
+- `m`: corresponds to the `decimal(16, 2)` type.
+- `M`: corresponds to the `decimal(20, 6)` type.
+- `\d+`: corresponds to the `int(n)` type, where `n` is a number.
+- `\d+,\d+`: corresponds to the `decimal(m, n)` type, where `m` and `n` are numbers.
+- `s(?:\d+)?`: corresponds to the `varchar(n)` type, where `n` is an optional number.
+- `S`: corresponds to the `text` type.
+- `t`: corresponds to the `datetime` type.
+
 1. Number
     - `\d+` -> int(n)
     - `n` -> int
@@ -14,7 +34,19 @@
     - `S` -> text
 4. datetime
     - `t` -> datetime
-  
+
+## 3. Examples
+
+```
+id n
+name s
+avatar S
+
+balance m
+version N
+create_at t
+```
+
 ## Type.zz
 
 ```asm
