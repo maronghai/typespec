@@ -1,12 +1,10 @@
 # Type Spec
 
-## Abstract
-
-This document defines a mapping between specific symbols or regular expressions and corresponding data types. This mapping is intended to be used for parsing and converting data in various scenarios, such as databases, data analysis, and programming language parsing.
-
 ## 1. Introduction
 
-The need for a standardized mapping between symbols or regular expressions and data types has been identified in order to ensure consistency and interoperability across different systems and applications. This document provides such a mapping.
+This project provides a mapping between specific symbols or regular expressions and corresponding data types. This mapping is intended to be used for parsing and converting data in various scenarios, such as databases, data analysis, and programming language parsing.
+
+## 2. Specification
 
 The mapping is defined as follows:
 
@@ -35,7 +33,7 @@ The mapping is defined as follows:
 4. datetime
     - `t` -> datetime
 
-## 3. Examples
+## 3. Usage
 
 ```
 id n
@@ -47,7 +45,9 @@ version N
 create_at t
 ```
 
-## Type.zz
+## 4. Regex Expression
+
+> This multi-line regular expression is described using the [ZZ](https://github.com/maronghai/zz)
 
 ```asm
 n            ; int
