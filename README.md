@@ -33,7 +33,7 @@ n            ; int
 ```
 
 ```
-[nNmMSt]|s\d+?|\d+(?:,\d+)
+[nNmMSt]|s(?:\d+)?|\d+(?:,\d+)?
 ```
 
 ## Ecosystem
