@@ -32,7 +32,7 @@ n            ; int
 |t           ; datetime
 ```
 
-```
+```asm
 [nNmMSt]|s(?:\d+)?|\d+(?:,\d+)?
 ```
 
