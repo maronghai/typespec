@@ -33,7 +33,7 @@ n            ; int
 ```
 
 ```asm
-[nNmMSt]|s(?:\d+)?|\d+(?:,\d+)?
+\b(?:[nNmMSt]|s(?:\d+)?|\d+(?:,\d+)?)\b
 ```
 
 ## Ecosystem
