@@ -68,12 +68,12 @@ n            ; int
 \b(?:[nNmMSt]|s(?:\d+)?|\d+(?:,\d+)?)\b
 ```
 
-## Ecosystem
+## 5. Ecosystem
 
 1. [DB Spec](https://github.com/maronghai/dbspec)
 2. [ZZ](https://github.com/maronghai/zz)
 
-## License
+## 6. License
 
 [MIT](https://opensource.org/licenses/MIT)
 
