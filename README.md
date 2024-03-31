@@ -8,16 +8,6 @@ This project provides a mapping between specific symbols or regular expressions 
 
 The mapping is defined as follows:
 
-- `n`: corresponds to the `int` type.
-- `N`: corresponds to the `bigint` type.
-- `m`: corresponds to the `decimal(16, 2)` type.
-- `M`: corresponds to the `decimal(20, 6)` type.
-- `\d+`: corresponds to the `int(n)` type, where `n` is a number.
-- `\d+,\d+`: corresponds to the `decimal(m, n)` type, where `m` and `n` are numbers.
-- `s(?:\d+)?`: corresponds to the `varchar(n)` type, where `n` is an optional number.
-- `S`: corresponds to the `text` type.
-- `t`: corresponds to the `datetime` type.
-
 1. Number
     - `\d+` -> int(n)
     - `n` -> int
@@ -36,13 +26,15 @@ The mapping is defined as follows:
 ## 3. Usage
 
 ```
-id n
-name s
-avatar S
+id        n     ; int(n)
 
-balance m
-version N
-create_at t
+name            ; Default type is 's'
+pin       s100  ; varchar(100)
+avatar    S     ; text
+
+balance   m     ; decimal(16, 2)
+version   N     ; bigint
+create_at t     ; datetime
 ```
 
 ## 4. Regex Expression
