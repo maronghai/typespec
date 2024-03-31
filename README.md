@@ -25,7 +25,7 @@ The mapping is defined as follows:
 
 ## 3. Usage
 
-```
+```asm
 id        n     ; int(n)
 
 name            ; Default type is 's'
