@@ -28,7 +28,9 @@ The mapping is defined as follows:
 ## 3. Usage
 
 ```asm
-id        n     ; int(n)
+id        n     ; int
+group_id  n     ; int
+type      1     ; int(1)
 
 name            ; Default type is 's'
 pin       s100  ; varchar(100)
@@ -36,7 +38,12 @@ avatar    S     ; text
 
 balance   m     ; decimal(16, 2)
 version   N     ; bigint
+
+vip_on    d     ; date
+delete_on       ; date
 create_at t     ; datetime
+update_at       ; datetime
+
 ```
 
 ## 4. Regex Expression
