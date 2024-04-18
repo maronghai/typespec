@@ -10,7 +10,7 @@ The mapping is defined as follows:
 
 1. Number
     - `\d+` -> int(n)
-    - `n`, `_id` -> int
+    - `n` -> int
     - `N` -> bigint
     - `\d+` `,` `\d+` -> decimal(m, n)
 2. Money
@@ -21,9 +21,13 @@ The mapping is defined as follows:
         - `s` `\d+` -> varchar(n)
     - `S` -> text
     - `DEFAULT` -> varchar
-4. datetime
-    - `t`, `_at` -> datetime
-    - `d`, `_on` -> date
+4. Date & Datetime
+    - `d` -> date
+    - `t` -> datetime
+5. Suffix
+    - `_id` -> int
+    - `_on` -> date
+    - `_at` -> datetime
 
 ## 3. Usage
 
