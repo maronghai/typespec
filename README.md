@@ -19,13 +19,13 @@ The mapping is defined as follows:
 3. String
     - `s` -> varchar
         - `s` `/` `\d+` -> varchar(n)
-        - `s1` -> varchar(32)
-        - `s2` -> varchar(64)
-        - `s3` -> varchar(128)
-        - `s4` -> varchar(256)
-        - `s5` -> varchar(512)
-        - `s6` -> varchar(1024)
-        - `s7` -> varchar(2048)
+            - `s1` = `s/32` -> varchar(32)
+            - `s2` = `s/64` -> varchar(64)
+            - `s3` = `s/128`-> varchar(128)
+            - `s4` = `s/256`-> varchar(256)
+            - `s5` = `s/512` -> varchar(512)
+            - `s6` = `s/1024` -> varchar(1024)
+            - `s7` = `s/2048` -> varchar(2048)
     - `S` -> text
     - `DEFAULT` -> s
 4. Date & Datetime
