@@ -18,9 +18,16 @@ The mapping is defined as follows:
     - `M` -> decimal(20, 6)
 3. String
     - `s` -> varchar
-        - `s` `\d+` -> varchar(n)
+        - `s` `/` `\d+` -> varchar(n)
+        - `s1` -> varchar(32)
+        - `s2` -> varchar(64)
+        - `s3` -> varchar(128)
+        - `s4` -> varchar(256)
+        - `s5` -> varchar(512)
+        - `s6` -> varchar(1024)
+        - `s7` -> varchar(2048)
     - `S` -> text
-    - `DEFAULT` -> varchar
+    - `DEFAULT` -> s
 4. Date & Datetime
     - `d` -> date
     - `t` -> datetime
@@ -32,21 +39,21 @@ The mapping is defined as follows:
 ## 3. Usage
 
 ```asm
-id        n     ; int
-group_id  n     ; int
-type      1     ; int(1)
+id        n       ; int
+group_id  n       ; int
+type      1       ; int(1)
 
-name            ; Default type is 's'
-pin       s100  ; varchar(100)
-avatar    S     ; text
+name              ; Default type is 's'
+pin       s/100   ; varchar(100)
+avatar    S       ; text
 
-balance   m     ; decimal(16, 2)
-version   N     ; bigint
+balance   m       ; decimal(16, 2)
+version   N       ; bigint
 
-vip_on    d     ; date
-delete_on       ; date
-create_at t     ; datetime
-update_at       ; datetime
+vip_on    d       ; date
+delete_on         ; date
+create_at t       ; datetime
+update_at         ; datetime
 
 ```
 
@@ -55,22 +62,23 @@ update_at       ; datetime
 > This multi-line regular expression is described using the [ZZ](https://github.com/maronghai/zz)
 
 ```asm
-n            ; int
-|N           ; bigint
+n             ; int
+|N            ; bigint
 
-|m           ; decimal(16, 2)
-|M           ; decimal(20, 6)
+|m            ; decimal(16, 2)
+|M            ; decimal(20, 6)
 
-|\d+         ; int(n)
-|\d+,\d+     ; decimal(m, n)
+|\d+          ; int(n)
+|\d+,\d+      ; decimal(m, n)
 
-|s(?:\d+)?   ; varchar(n)
-|S           ; text
-|t           ; datetime
+|s/(?:\d+)?   ; varchar(n)
+|s(?:\d+)?    ; varchar(2^(n+5))
+|S            ; text
+|t            ; datetime
 ```
 
 ```asm
-\b(?:[nNmMSt]|s(?:\d+)?|\d+(?:,\d+)?)\b
+\b(?:[nNmMSt]|s(?:/)?(?:\d+)?|\d+(?:,\d+)?)\b
 ```
 
 ## 5. Ecosystem
