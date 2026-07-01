@@ -1232,10 +1232,10 @@ Example workflow:
 
 ```bash
 # Create initial schema
-typespec compile schema.ts -o schema_v1.sql
+typespec compile schema.tps -o schema_v1.sql
 
 # Make changes
-typespec compile schema.ts -o schema_v2.sql
+typespec compile schema.tps -o schema_v2.sql
 
 # Generate migration
 typespec diff schema_v1.sql schema_v2.sql > migration.sql

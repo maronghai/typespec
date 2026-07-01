@@ -273,6 +273,8 @@ ZZ concatenates the branches into a single alternation, wrapped with word bounda
 | `?` (outer) | Entire type is optional — when absent, suffix inference applies |
 | `\b` | Word boundary — prevents partial matches |
 
+> **Note:** The ZZ format lists `|s` (bare varchar) as a separate branch, but it is absorbed into the `[nNmMSBbdjt]` character class in the compiled form. Both produce identical matching behavior.
+
 ---
 
 ## 6. Design Principles
