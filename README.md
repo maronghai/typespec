@@ -195,6 +195,8 @@ Explicit type always wins: `user_id s32` → varchar(32), not int.
 | `[...]` | CHECK constraint | any | `age n [0,150]` |
 | `//` | COMMENT clause | — | `name s32 // 用户名` |
 
+> **Note**: `+` and `++` only have defined behavior on numeric types (`n`, `N`, `\d+`) and datetime types (`t`, `d`). Using them on other types (e.g., `s+`, `m++`) is undefined and should be avoided.
+
 ### Foreign Keys
 
 ```asm
@@ -212,6 +214,8 @@ Explicit type always wins: `user_id s32` → varchar(32), not int.
 @! uk_email (email)            ; unique index
 @f ft_content (title, content) ; fulltext index
 ```
+
+> **Note**: `@f!` (unique fulltext) is not supported — MySQL does not allow UNIQUE on FULLTEXT indexes.
 
 ### CHECK Constraints
 
@@ -363,6 +367,12 @@ TypeSpec supports single-column FKs. For composite FKs, use `ALTER TABLE` in SQL
 
 **Q: Does it support PostgreSQL?**
 TypeSpec generates MySQL DDL by default. The compiler can be extended for other dialects.
+
+**Q: What if a field name ends with `_at`/`_on`/`_id` but isn't a timestamp/foreign key?**
+Use an explicit type to override suffix inference. For example, `point_at s32` → varchar(32), not datetime.
+
+**Q: Can I use `+` on a varchar or decimal field?**
+No. `+`/`++` only work on numeric types (`n`, `N`, `\d+`) for AUTO_INCREMENT, and datetime types (`t`, `d`) for timestamp defaults. Using them on other types is undefined.
 
 ## Contributing
 

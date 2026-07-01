@@ -597,6 +597,7 @@ CREATE TABLE `user` (
 
 **Note**: TypeSpec supports basic index types. For advanced features, you may need to write SQL manually:
 
+- Unique fulltext index (`@f!`): MySQL does not allow UNIQUE on FULLTEXT indexes
 - Prefix indexes: `INDEX idx_name (name(10))`
 - Descending indexes: `INDEX idx_name (name DESC)`
 - Partial indexes (PostgreSQL): `CREATE INDEX idx ON t(c) WHERE condition`
@@ -1102,6 +1103,8 @@ The full EBNF grammar is defined in [`grammar.ebnf`](grammar.ebnf). It covers sc
 | any type + `=` | `=` | DEFAULT value |
 | any type + `!` | `!` | PRIMARY KEY |
 | any type + `*` | `*` | NOT NULL |
+
+> **Note**: `+`/`++` only have defined behavior on numeric and datetime types. Using them on other types (e.g., `s+`, `m++`) is undefined and should be avoided.
 
 ---
 

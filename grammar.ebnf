@@ -44,19 +44,24 @@ type_symbol      = numeric_type
                  | atomic_type ;
 
 numeric_type     = int_short | int_explicit | decimal_explicit ;
-int_short        = "n" | "N" ;
-int_explicit     = positive_int ;
-decimal_explicit = positive_int, ",", positive_int ;
+int_short        = "n" | "N" ;                     (* MySQL: int | bigint *)
+int_explicit     = positive_int ;                  (* MySQL: int(n) *)
+decimal_explicit = positive_int, ",", positive_int ; (* MySQL: decimal(m,n) *)
 positive_int     = digit, { digit } ;
 
-money_type       = "m" | "M" ;
+money_type       = "m" | "M" ;                     (* MySQL: decimal(16,2) | decimal(20,6) *)
 
 string_type      = varchar_short | varchar_explicit | text_type ;
-varchar_short    = "s" ;
-varchar_explicit = "s", positive_int ;
-text_type        = "S" ;
+varchar_short    = "s" ;                           (* MySQL: varchar *)
+varchar_explicit = "s", positive_int ;             (* MySQL: varchar(n) *)
+text_type        = "S" ;                           (* MySQL: text *)
 
 atomic_type      = "b" | "B" | "j" | "d" | "t" ;
+                   (* b → MySQL: tinyint(1) (boolean) *)
+                   (* B → MySQL: blob *)
+                   (* j → MySQL: json *)
+                   (* d → MySQL: date *)
+                   (* t → MySQL: datetime *)
 
 (* ── Modifiers ── *)
 (* `+` is syntactically unambiguous but semantically               *)
@@ -65,6 +70,8 @@ atomic_type      = "b" | "B" | "j" | "d" | "t" ;
 (* `+` on t/d = DEFAULT CURRENT_TIMESTAMP;                        *)
 (* `++` on n/N/\d+ = AUTO_INCREMENT PRIMARY KEY;                  *)
 (* `++` on t/d = DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP *)
+(* `+`/`++` on other types (s, m, b, etc.) is undefined           *)
+(* and should be reported as an error by the compiler.            *)
 (* `=` always requires a value; see §4 and §13                    *)
 (* Modifier Resolution for details.                               *)
 
@@ -101,6 +108,9 @@ fk_on_update     = "UPDATE", WS, fk_on_delete ;
 template_slot    = "..." ;
 
 (* ── Index ── *)
+(* Note: `@f` (fulltext) and `@!` (unique) are separate prefix *)
+(* combinations. `@f!` (unique fulltext) is not supported —      *)
+(* MySQL does not allow UNIQUE on FULLTEXT indexes.              *)
 
 index_decl       = "@", [ "!" | "f" ], WS, index_name, WS, "(", WS, field_list_comma, WS, ")", newline ;
 index_name       = word ;
