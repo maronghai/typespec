@@ -1,0 +1,132 @@
+(* ── Top Level ── *)
+
+spec             = { blank_line | schema_decl | template_def | table_decl } ;
+blank_line       = newline ;
+
+(* ── Schema ── *)
+
+schema_decl      = "$", WS, schema_name, [ WS, comment_trailing ], newline ;
+schema_name      = word ;
+
+(* ── Template ── *)
+
+template_def     = "%", [ WS, template_name ], [ WS, "extends", WS, parent_template ], newline, field_list ;
+template_name    = word ;
+parent_template  = word ;
+
+(* ── Table ── *)
+
+table_decl       = "#", [ template_ref ], WS, table_name, [ WS, table_comment ], [ WS, comment_trailing ], newline, field_list ;
+template_ref     = template_name ;
+template_name    = word ;
+table_name       = word ;
+table_comment    = "//", { char } ;
+
+(* ── Field List ── *)
+
+field_list       = { field_decl | blank_line | foreign_key_decl | index_decl | template_slot } ;
+field_decl       = field_name, [ WS, type_symbol ], [ WS, modifier_list ], [ WS, check_clause ], [ WS, comment_line ], newline ;
+modifier_list    = modifier, { WS, modifier } ;
+
+(* ── Field Name ── *)
+
+field_name       = name_char, { name_char } ;
+name_char        = letter | digit | "_" ;
+
+(* ── Type Symbol ── *)
+
+(* See type.md §3 for the full type_symbol definition.
+   Included here for self-containedness. *)
+
+type_symbol      = numeric_type
+                 | money_type
+                 | string_type
+                 | atomic_type ;
+
+numeric_type     = int_short | int_explicit | decimal_explicit ;
+int_short        = "n" | "N" ;
+int_explicit     = positive_int ;
+decimal_explicit = positive_int, ",", positive_int ;
+positive_int     = digit, { digit } ;
+
+money_type       = "m" | "M" ;
+
+string_type      = varchar_short | varchar_explicit | text_type ;
+varchar_short    = "s" ;
+varchar_explicit = "s", positive_int ;
+text_type        = "S" ;
+
+atomic_type      = "b" | "B" | "j" | "d" | "t" ;
+
+(* ── Modifiers ── *)
+(* `+` is syntactically unambiguous but semantically               *)
+(* context-dependent:                                             *)
+(* `+` on n/N/\d+ = AUTO_INCREMENT;                               *)
+(* `+` on t/d = DEFAULT CURRENT_TIMESTAMP;                        *)
+(* `++` on n/N/\d+ = AUTO_INCREMENT PRIMARY KEY;                  *)
+(* `++` on t/d = DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP *)
+(* `=` always requires a value; see §4 and §13                    *)
+(* Modifier Resolution for details.                               *)
+
+modifier         = default_val | auto_inc_pk | auto_inc | primary_key
+                 | not_null ;
+
+auto_inc_pk      = "++" ;
+auto_inc         = "+" ;
+primary_key      = "!" ;
+not_null         = "*" ;
+default_val      = "=", WS, default_value ;
+default_value    = default_word, { WS, default_word } | string_literal | number_literal ;
+default_word     = letter, { letter | digit | "_" } ;
+
+(* ── CHECK Constraint ── *)
+
+check_clause     = "[", check_expr, "]" ;
+check_expr       = { char } ;
+
+(* ── Foreign Key ── *)
+
+foreign_key_decl = "->", WS, field_name, WS, "->", WS, ref_table, ".", ref_field
+                 , [ WS, fk_action_list ], newline ;
+ref_table        = word ;
+ref_field        = word ;
+
+fk_action_list   = "[", fk_action, { ",", WS, fk_action }, "]" ;
+fk_action        = fk_on_delete | fk_on_update ;
+fk_on_delete     = "CASCADE" | "SET NULL" | "NO ACTION" | "RESTRICT" ;
+fk_on_update     = "UPDATE", WS, fk_on_delete ;
+
+(* ── Template Slot ── *)
+
+template_slot    = "..." ;
+
+(* ── Index ── *)
+
+index_decl       = "@", [ "!" | "f" ], WS, index_name, WS, "(", WS, field_list_comma, WS, ")", newline ;
+index_name       = word ;
+field_list_comma = field_name, { ",", WS, field_name } ;
+
+(* ── Comments ── *)
+(* Three comment styles:                                          *)
+(*   `//` → COMMENT clause in DDL (column or table)              *)
+(*   `--` → SQL comment passed through to output                 *)
+(*   `;`  → spec comment, stripped from output                   *)
+(* `comment_line` allows any one of these on a field line.       *)
+(* `comment_trailing` is for schema/table header lines.          *)
+
+comment_line     = comment | sql_comment | spec_comment ;
+comment_trailing = sql_comment | comment ;
+comment          = "//", { char } ;
+sql_comment      = "--", { char } ;
+spec_comment     = ";", { char } ;
+
+(* ── Lexical ── *)
+
+newline          = ? platform line terminator ? ;
+WS               = { " " | "\t" } ;
+letter           = "a".."z" | "A".."Z" ;
+digit            = "0".."9" ;
+word             = ( letter | "_" ), { letter | digit | "_" } ;
+char             = ? any character except newline ? ;
+string_literal   = "'", { char | "''" }, "'" ;
+number_literal   = [ "-" ], digit, { digit }, [ ".", { digit } ] ;
