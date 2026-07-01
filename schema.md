@@ -24,7 +24,7 @@ A minimal DSL for declaring database schemas — tables, fields, constraints, in
 | `+` | DEFAULT CURRENT_TIMESTAMP | t, d | `create_at t+` |
 | `++` | DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP | t, d | `update_at t++` |
 | `!` | PRIMARY KEY | any | `id n!` |
-| `=` | DEFAULT value | any | `status 1=0` |
+| `=` | DEFAULT value | any | `status 1 =0` |
 | `*` | NOT NULL | any | `name s32 *` |
 | `[...]` | CHECK constraint | any | `status 1 =0 [0,1]` |
 | `//` | Column/table COMMENT | — | `name // 用户名` |
@@ -377,7 +377,7 @@ CREATE TABLE `user_role` (
 Foreign key relationships are declared with `->`:
 
 ```asm
-order.user_id -> user.id
+-> user_id -> user.id
 ```
 
 ### FK Syntax

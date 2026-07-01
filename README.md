@@ -144,8 +144,8 @@ One character = one type. Case matters.
 |--------|----------|-------------|
 | `n` | int | 32-bit integer |
 | `N` | bigint | 64-bit integer |
-| `\d+` | int(n) | Integer with display width |
-| `\d+,\d+` | decimal(m,n) | Fixed-point number |
+| `\d+` | int(n) | Integer with display width (e.g. `128` → int(128)) |
+| `\d+,\d+` | decimal(m,n) | Fixed-point number (e.g. `10,2` → decimal(10,2)) |
 | `m` | decimal(16,2) | Standard currency |
 | `M` | decimal(20,6) | High-precision currency |
 | `s` | varchar | Variable-length string (default) |
@@ -205,6 +205,7 @@ Explicit type always wins: `user_id s32` → varchar(32), not int.
 -> user_id -> user.id [SET NULL]             ; ON DELETE SET NULL
 -> user_id -> user.id [CASCADE, UPDATE CASCADE]  ; ON DELETE + ON UPDATE
 -> user_id -> user.id [NO ACTION]            ; ON DELETE NO ACTION
+-> user_id -> user.id [RESTRICT]             ; ON DELETE RESTRICT
 ```
 
 ### Indexes
