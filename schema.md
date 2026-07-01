@@ -36,6 +36,7 @@ A minimal DSL for declaring database schemas — tables, fields, constraints, in
 | `[CASCADE]` | ON DELETE CASCADE | `-> uid -> user.id [CASCADE]` |
 | `[SET NULL]` | ON DELETE SET NULL | `-> uid -> user.id [SET NULL]` |
 | `[NO ACTION]` | ON DELETE NO ACTION | `-> uid -> user.id [NO ACTION]` |
+| `[RESTRICT]` | ON DELETE RESTRICT | `-> uid -> user.id [RESTRICT]` |
 | `[CASCADE, UPDATE CASCADE]` | ON DELETE + ON UPDATE | `-> uid -> user.id [CASCADE, UPDATE CASCADE]` |
 
 ### Comment Styles
@@ -1193,7 +1194,7 @@ created_at t+  ; DEFAULT NOW()
 
 ### Q5: How do I migrate from SQL to TypeSpec?
 
-Convert table structure → field types → modifiers → constraints. See the [Quick Start](README.md#5-minute-quick-start) in README for a walkthrough example.
+Convert table structure → field types → modifiers → constraints. See the [Quick Start](README.md#quick-start) in README for a walkthrough example.
 
 ### Q6: Can I use TypeSpec with ORMs?
 

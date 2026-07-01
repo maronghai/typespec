@@ -6,7 +6,7 @@
 ;   - Default template for implicit tables
 ;   - All type symbols: n, N, m, M, s, S, b, B, j, d, t
 ;   - Suffix inference: _id, _on, _at
-;   - FK actions: CASCADE, SET NULL, NO ACTION, UPDATE
+;   - FK actions: CASCADE, SET NULL, NO ACTION, RESTRICT, UPDATE
 ;   - CHECK constraints: range, IN, comparison
 ;   - Composite primary keys
 ;   - Composite unique indexes
@@ -99,7 +99,8 @@ refresh_token S
 expires_on    t
 
 -> user_id -> user.id [CASCADE]
--> (user_id, provider) -> user.id [NO ACTION]
+; NOTE: composite FKs (e.g. -> (a, b) -> t.id) are not supported by the grammar.
+;       Use multiple single-column FKs or ALTER TABLE in SQL.
 
 @! uk_provider_open (provider, open_id)
 @ idx_user (user_id)
@@ -144,6 +145,8 @@ cost_price  m =0
 stock     n =0 [>=0]
 sales     N =0
 weight    M =0
+rating    4,2 =0        ; explicit decimal: decimal(4,2)
+raw_data  B             ; binary attachment (blob)
 is_on_sale b =1
 sort_order n =0
 main_image s256
@@ -298,7 +301,7 @@ status     1 =0 [0,1,2,3]  -- 0=pending, 1=success, 2=failed, 3=refunded
 paid_on    t
 extra      j
 
--> order_id -> order.id [NO ACTION]
+-> order_id -> order.id [RESTRICT]
 -> user_id -> user.id [NO ACTION]
 
 @ idx_order (order_id)

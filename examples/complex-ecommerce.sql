@@ -144,6 +144,8 @@ CREATE TABLE `product` (
   `stock`       int DEFAULT 0 CHECK (stock >= 0),
   `sales`       bigint DEFAULT 0,
   `weight`      decimal(20, 6) DEFAULT 0,
+  `rating`      decimal(4, 2) DEFAULT 0,
+  `raw_data`    blob,
   `is_on_sale`  boolean DEFAULT 1,
   `sort_order`  int DEFAULT 0,
   `main_image`  varchar(256),
@@ -353,7 +355,7 @@ CREATE TABLE `payment` (
   `deleted_at`  datetime,
   `deleted_by`  int,
 
-  FOREIGN KEY (`order_id`) REFERENCES `order`(`id`) ON DELETE NO ACTION,
+  FOREIGN KEY (`order_id`) REFERENCES `order`(`id`) ON DELETE RESTRICT,
   FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON DELETE NO ACTION,
   INDEX `idx_order` (`order_id`),
   INDEX `idx_user` (`user_id`),

@@ -267,9 +267,10 @@ ZZ concatenates the branches into a single alternation, wrapped with word bounda
 
 | Segment | Matches |
 |---------|---------|
-| `[nNmMSBbdjt]` | Single-character type symbols |
-| `\d+(?:,\d+)?` | Numeric: `int(n)` or `decimal(m,n)` |
-| `s\d+` | String with explicit length: `s100`, `s32`, etc. |
+| `[nNmMSBbdjt]` | Single-character type symbols (`n`=int, `N`=bigint, `m`=decimal(16,2), etc.) |
+| `s\d+` | VARCHAR with explicit length: `s100`, `s32`, etc. (note: `s` alone is also in the character class above) |
+| `\d+(?:,\d+)?` | Numeric: `int(n)` (e.g. `128`) or `decimal(m,n)` (e.g. `16,2`) |
+| `?` (outer) | Entire type is optional — when absent, suffix inference applies |
 | `\b` | Word boundary — prevents partial matches |
 
 ---

@@ -84,6 +84,9 @@ primary_key      = "!" ;
 not_null         = "*" ;
 default_val      = "=", WS, default_value ;
 default_value    = default_word, { WS, default_word } | string_literal | number_literal ;
+(* Note: multi-word defaults (e.g. `=hello world`) are syntactically valid  *)
+(* but may produce invalid SQL depending on the target dialect. The         *)
+(* compiler should validate default values against the column type.        *)
 default_word     = letter, { letter | digit | "_" } ;
 
 (* ── CHECK Constraint ── *)
