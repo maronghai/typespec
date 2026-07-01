@@ -190,6 +190,8 @@ Fields without a type symbol inherit the default type per [Type Spec suffix infe
 | `_at` | datetime |
 | *(none)* | varchar |
 
+> **Note**: If a field name ends with `_at`/`_on`/`_id` but isn't a timestamp or foreign key, use an explicit type to override suffix inference. For example, `point_at s32` → varchar(32), not datetime.
+
 ### Example
 
 ```asm
