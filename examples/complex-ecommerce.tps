@@ -105,7 +105,8 @@ expires_on    t
 @! uk_provider_open (provider, open_id)
 @ idx_user (user_id)
 
-; ──────────────────────────────────────────────────────────────; Product Domain
+; ──────────────────────────────────────────────────────────────
+; Product Domain
 ; ──────────────────────────────────────────────────────────────
 
 ; ── Category (self-referencing tree) ──
@@ -388,6 +389,7 @@ target   s32
 target_id N
 detail   j
 ip       s64
+created_at t+
 
 #log_base op_log  // 操作日志
 
