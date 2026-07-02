@@ -29,6 +29,8 @@ balance   m =0
 | `balance m =0` | `decimal(16, 2) DEFAULT 0` | 30 chars |
 | `create_at t+` | `datetime DEFAULT CURRENT_TIMESTAMP` | 39 chars |
 | `email s128 *` | `varchar(128) NOT NULL` | 24 chars |
+| `@ name` | `INDEX idx_name (name)` | 29 chars (shorthand saves 70%) |
+| `-> uid user.id` | `FOREIGN KEY (uid) REFERENCES user(id)` | 42 chars (shorthand saves 37%) |
 | Template inheritance | Define once, apply everywhere | Copy-paste |
 | Suffix inference | `_id`→int, `_at`→datetime | Explicit type every time |
 
@@ -61,8 +63,8 @@ is_admin  b =0
 balance   m =0
 settings  j
 
-@! uk_email (email)
-@ idx_name (name)
+@! email           ; shorthand → UNIQUE INDEX uk_email (email)
+@ name             ; shorthand → INDEX idx_name (name)
 
 #base order  // 订单表
 
@@ -73,10 +75,10 @@ discount    M =0
 note        s512
 paid_on     d
 
--> user_id -> user.id [CASCADE]
+-> user_id user.id [CASCADE]   ; single-arrow shorthand
 
-@! uk_order_no (order_no)
-@ idx_user (user_id)
+@! order_no       ; shorthand → UNIQUE INDEX uk_order_no (order_no)
+@ user_id         ; shorthand → INDEX idx_user (user_id)
 ```
 
 ### 2. Generate SQL
@@ -200,33 +202,39 @@ Explicit type always wins: `user_id s32` → varchar(32), not int.
 ### Foreign Keys
 
 ```asm
--> user_id -> user.id                        ; basic FK
--> user_id -> user.id [CASCADE]              ; ON DELETE CASCADE
--> user_id -> user.id [SET NULL]             ; ON DELETE SET NULL
--> user_id -> user.id [CASCADE, UPDATE CASCADE]  ; ON DELETE + ON UPDATE
--> user_id -> user.id [NO ACTION]            ; ON DELETE NO ACTION
--> user_id -> user.id [RESTRICT]             ; ON DELETE RESTRICT
+-> user_id user.id                          ; basic FK (shorthand)
+-> user_id -> user.id                       ; basic FK (full form)
+-> user_id user.id [CASCADE]                ; ON DELETE CASCADE
+-> user_id user.id [SET NULL]               ; ON DELETE SET NULL
+-> user_id user.id [CASCADE, UPDATE CASCADE]  ; ON DELETE + ON UPDATE
+-> user_id user.id [NO ACTION]              ; ON DELETE NO ACTION
+-> user_id user.id [RESTRICT]               ; ON DELETE RESTRICT
 ```
 
 ### Indexes
 
 ```asm
-@ idx_name (name)              ; regular index
-@! uk_email (email)            ; unique index
-@f ft_content (title, content) ; fulltext index
+@ name                  ; shorthand: INDEX idx_name (name)
+@! email                ; shorthand: UNIQUE INDEX uk_email (email)
+@f content              ; shorthand: FULLTEXT INDEX ft_content (content)
+@ idx_name (name)       ; full syntax (same result as shorthand above)
+@! uk_email (email)     ; full syntax
+@f ft_content (title, content)  ; full syntax for composite
 ```
 
-> **Note**: `@f!` (unique fulltext) is not supported — MySQL does not allow UNIQUE on FULLTEXT indexes.
+> **Note**: Shorthand is single-column only. Composite indexes (`@ idx_name (f1, f2)`) require the full syntax. `@f!` (unique fulltext) is not supported — MySQL does not allow UNIQUE on FULLTEXT indexes.
 
 ### CHECK Constraints
 
 ```asm
-age     n [0,150]              ; CHECK (age BETWEEN 0 AND 150)
-status  1 [0,1,2]             ; CHECK (status IN (0, 1, 2))
-amount  m [>0]                 ; CHECK (amount > 0)
-ratio   M [>=0, <=1]          ; CHECK (ratio >= 0 AND ratio <= 1)
-type    s32 ['a','b','c']     ; CHECK (type IN ('a', 'b', 'c'))
+age     n [0,150]              ; CHECK (age BETWEEN 0 AND 150)    — 2 bare nums = range
+status  1 [0,1,2]             ; CHECK (status IN (0, 1, 2))      — 3+ values = IN list
+amount  m [>0]                 ; CHECK (amount > 0)               — comparison
+ratio   M [>=0, <=1]          ; CHECK (ratio >= 0 AND ratio <= 1) — compound
+type    s32 ['a','b','c']     ; CHECK (type IN ('a', 'b', 'c'))  — string IN list
 ```
+
+> **Disambiguation**: `[a,b]` with exactly 2 bare numbers → BETWEEN. `[a,b,c,...]` with 3+ values → IN.
 
 ### Comments
 
@@ -343,11 +351,12 @@ See [schema.md §13](schema.md#13-ebnf-grammar) for grammar notes and [type.md �
 
 1. **Minimal syntax** — every construct is a single character or short symbol
 2. **Convention over configuration** — suffix inference eliminates redundant declarations
-3. **Type Spec as foundation** — field types are fully delegated to the type system
-4. **Modifier composition** — `++` composes `+` + `!` (numeric) or `+` + `+` (timestamp)
-5. **Three-layer comments** — spec (`;`), SQL (`--`), column (`//`)
-6. **Template-driven** — define once, apply everywhere with precise slot control
-7. **DB-agnostic core** — symbols map to SQL standards; the compiler handles dialects
+3. **Shorthand where unambiguous** — single-column indexes and FKs omit redundant names/brackets
+4. **Type Spec as foundation** — field types are fully delegated to the type system
+5. **Modifier composition** — `++` composes `+` + `!` (numeric) or `+` + `+` (timestamp)
+6. **Three-layer comments** — spec (`;`), SQL (`--`), column (`//`)
+7. **Template-driven** — define once, apply everywhere with precise slot control
+8. **DB-agnostic core** — symbols map to SQL standards; the compiler handles dialects
 
 ## FAQ
 

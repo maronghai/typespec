@@ -90,13 +90,28 @@ default_value    = default_word, { WS, default_word } | string_literal | number_
 default_word     = letter, { letter | digit | "_" } ;
 
 (* ── CHECK Constraint ── *)
+(* Disambiguation rules:                                              *)
+(*   [a,b]           where a,b are bare numbers → BETWEEN a AND b     *)
+(*   [a,b,c,...]      3+ bare numbers             → IN (a, b, c, …)  *)
+(*   [>0] / [>=1]     single comparison            → direct compare   *)
+(*   [>=0, <=1]       compound comparisons         → AND-joined       *)
+(*   ['a','b','c']    strings with quotes           → IN list          *)
 
-check_clause     = "[", check_expr, "]" ;
-check_expr       = { char } ;
+check_clause     = "[", check_body, "]" ;
+check_body       = in_list | between_range | comparison_list | compound_comparison ;
+in_list          = check_val, { ",", check_val } ;                   (* ≥2 values *)
+between_range    = number_literal, ",", number_literal ;             (* exactly 2 bare numbers *)
+check_val        = number_literal | string_literal | comparison_op, number_literal ;
+comparison_list  = comparison_op, number_literal ;                   (* e.g. >0, >=1 *)
+compound_comparison = comparison_op, number_literal, ",", WS, comparison_op, number_literal ;
+comparison_op    = ">=" | "<=" | ">" | "<" ;
 
 (* ── Foreign Key ── *)
+(* Full:   -> field_name -> table.field [action]                     *)
+(* Shorthand: -> field_name table.field [action]                    *)
+(* The second arrow is optional — table.field format is unambiguous. *)
 
-foreign_key_decl = "->", WS, field_name, WS, "->", WS, ref_table, ".", ref_field
+foreign_key_decl = "->", WS, field_name, [ WS, "->", WS ], ref_table, ".", ref_field
                  , [ WS, fk_action_list ], newline ;
 ref_table        = word ;
 ref_field        = word ;
@@ -111,11 +126,17 @@ fk_on_update     = "UPDATE", WS, fk_on_delete ;
 template_slot    = "..." ;
 
 (* ── Index ── *)
-(* Note: `@f` (fulltext) and `@!` (unique) are separate prefix *)
-(* combinations. `@f!` (unique fulltext) is not supported —      *)
-(* MySQL does not allow UNIQUE on FULLTEXT indexes.              *)
+(* Full:    @ idx_name (field1, field2)                              *)
+(* Shorthand: @ field   → INDEX `idx_field` (field)                  *)
+(*            @! field  → UNIQUE INDEX `uk_field` (field)            *)
+(*            @f field  → FULLTEXT INDEX `ft_field` (field)          *)
+(* Shorthand is single-column only; composite requires full form.    *)
 
-index_decl       = "@", [ "!" | "f" ], WS, index_name, WS, "(", WS, field_list_comma, WS, ")", newline ;
+index_decl       = "@", [ "!" | "f" ], WS, index_name
+                 , [ WS, "(", WS, field_list_comma, WS, ")" ], newline ;
+(* When parentheses are omitted, index_name is the field name.       *)
+(* The compiler auto-generates the index name with the               *)
+(* appropriate prefix (idx_ / uk_ / ft_).                            *)
 index_name       = word ;
 field_list_comma = field_name, { ",", WS, field_name } ;
 

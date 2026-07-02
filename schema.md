@@ -33,11 +33,11 @@ A minimal DSL for declaring database schemas — tables, fields, constraints, in
 
 | Symbol | Meaning | Example |
 |--------|---------|---------|
-| `[CASCADE]` | ON DELETE CASCADE | `-> uid -> user.id [CASCADE]` |
-| `[SET NULL]` | ON DELETE SET NULL | `-> uid -> user.id [SET NULL]` |
-| `[NO ACTION]` | ON DELETE NO ACTION | `-> uid -> user.id [NO ACTION]` |
-| `[RESTRICT]` | ON DELETE RESTRICT | `-> uid -> user.id [RESTRICT]` |
-| `[CASCADE, UPDATE CASCADE]` | ON DELETE + ON UPDATE | `-> uid -> user.id [CASCADE, UPDATE CASCADE]` |
+| `[CASCADE]` | ON DELETE CASCADE | `-> uid user.id [CASCADE]` |
+| `[SET NULL]` | ON DELETE SET NULL | `-> uid user.id [SET NULL]` |
+| `[NO ACTION]` | ON DELETE NO ACTION | `-> uid user.id [NO ACTION]` |
+| `[RESTRICT]` | ON DELETE RESTRICT | `-> uid user.id [RESTRICT]` |
+| `[CASCADE, UPDATE CASCADE]` | ON DELETE + ON UPDATE | `-> uid user.id [CASCADE, UPDATE CASCADE]` |
 
 ### Comment Styles
 
@@ -46,6 +46,15 @@ A minimal DSL for declaring database schemas — tables, fields, constraints, in
 | `;` | Spec comment | Line, not in output |
 | `--` | SQL comment | Passed to DDL output |
 | `//` | COMMENT clause | Table or column |
+
+### Index Marks
+
+| Symbol | Meaning | Example |
+|--------|---------|---------|
+| `@ name` | Single-column INDEX (shorthand) | `@ name` → `INDEX idx_name (name)` |
+| `@ name (f1, f2)` | Composite INDEX (full) | `@ idx_a (a, b)` |
+| `@! name` | Single-column UNIQUE INDEX | `@! email` → `UNIQUE INDEX uk_email (email)` |
+| `@f name` | Single-column FULLTEXT INDEX | `@f content` → `FULLTEXT INDEX ft_content (content)` |
 
 ---
 
@@ -400,6 +409,8 @@ This is a **spec comment** (`; -> user.id`) — it documents the FK intent in th
 
 #### Style 2: Standalone Declaration (enforced FK)
 
+**Full syntax** — double arrow:
+
 ```asm
 # order
 
@@ -411,7 +422,13 @@ amount      m
 -> user_id -> user.id
 ```
 
-This generates a real `FOREIGN KEY` constraint in the DDL:
+**Shorthand** — single arrow (the second `->` is optional):
+
+```asm
+-> user_id user.id
+```
+
+Both forms produce the same DDL:
 
 ```sql
 FOREIGN KEY (`user_id`) REFERENCES `user`(`id`)
@@ -445,8 +462,11 @@ order_no    s64
 user_id     n
 amount      m
 
--> user_id -> user.id
+-> user_id -> user.id        ; full: double arrow
+-> order_no order.id         ; shorthand: single arrow (equivalent)
 ```
+
+Both forms produce the same DDL:
 
 ```sql
 CREATE TABLE `order` (
@@ -455,7 +475,8 @@ CREATE TABLE `order` (
   `user_id`    int,
   `amount`     decimal(16, 2),
 
-  FOREIGN KEY (`user_id`) REFERENCES `user`(`id`)
+  FOREIGN KEY (`user_id`) REFERENCES `user`(`id`),
+  FOREIGN KEY (`order_no`) REFERENCES `order`(`id`)
 )
 ```
 
@@ -468,8 +489,8 @@ order_id    n
 product_id  n
 quantity    n =1
 
--> order_id -> order.id [CASCADE]
--> product_id -> product.id [SET NULL, UPDATE CASCADE]
+-> order_id order.id [CASCADE]
+-> product_id product.id [SET NULL, UPDATE CASCADE]
 ```
 
 ```sql
@@ -494,8 +515,8 @@ order_id    n
 product_id  n
 quantity    n =1
 
--> order_id -> order.id [CASCADE]
--> product_id -> product.id [CASCADE]
+-> order_id order.id [CASCADE]
+-> product_id product.id [CASCADE]
 ```
 
 ```sql
@@ -525,35 +546,33 @@ Indexes are declared with `@`:
 
 ### Index Syntax
 
-#### Basic Index
+#### Full Syntax
 
 ```asm
 @ idx_name (name)
-```
-
-```sql
-INDEX `idx_name` (`name`)
-```
-
-#### Unique Index
-
-```asm
 @! uk_email (email)
-```
-
-```sql
-UNIQUE INDEX `uk_email` (`email`)
-```
-
-#### Composite Index
-
-```asm
+@f ft_content (content)
 @ idx_status_created (status, created_at)
 ```
 
 ```sql
+INDEX `idx_name` (`name`),
+UNIQUE INDEX `uk_email` (`email`),
+FULLTEXT INDEX `ft_content` (`content`),
 INDEX `idx_status_created` (`status`, `created_at`)
 ```
+
+#### Shorthand (Single-Column Only)
+
+For single-column indexes, omit the name and parentheses — the field name is used directly:
+
+```asm
+@ name              ; → INDEX `idx_name` (`name`)
+@! email            ; → UNIQUE INDEX `uk_email` (`email`)
+@f content          ; → FULLTEXT INDEX `ft_content` (`content`)
+```
+
+The compiler auto-generates the index name using the naming convention prefix (`idx_` / `uk_` / `ft_`). Composite indexes require the full syntax.
 
 ### Index Naming Conventions
 
@@ -575,10 +594,10 @@ email   s128
 status  1 =0
 content S
 
-@ idx_name (name)
-@! uk_email (email)
-@ idx_status (status, created_at)
-@f ft_content (content)
+@ name              ; shorthand: INDEX `idx_name` (`name`)
+@! email            ; shorthand: UNIQUE INDEX `uk_email` (`email`)
+@ idx_status (status, created_at)   ; full: composite index
+@f content          ; shorthand: FULLTEXT INDEX `ft_content` (`content`)
 ```
 
 ```sql
@@ -644,6 +663,17 @@ amount  m =0 [>0]            ; CHECK (amount > 0)
 ### CHECK Syntax
 
 The CHECK constraint syntax supports several patterns. **String values use single quotes** (`'a'`), while **numeric values are bare** (`0`, `150`).
+
+### Disambiguation Rules
+
+| Pattern | Example | SQL Output |
+|---------|---------|------------|
+| `[a,b]` — exactly 2 bare numbers | `[0,150]` | `CHECK (field BETWEEN 0 AND 150)` |
+| `[a,b,c,…]` — 3+ bare numbers or strings | `[0,1,2]` | `CHECK (field IN (0, 1, 2))` |
+| `[>X]` / `[>=X]` / `[<X]` / `[<=X]` | `[>0]` | `CHECK (field > 0)` |
+| `[op a, op b]` — compound comparisons | `[>=0, <=1]` | `CHECK (field >= 0 AND field <= 1)` |
+
+> **Note**: `[0,1]` is `BETWEEN 0 AND 1` (range), not `IN (0, 1)`. For a 2-element IN list, use 3+ values or an explicit comparison: `[>=0, <=1]` produces the same result as `BETWEEN 0 AND 1`.
 
 #### Range Constraints
 
@@ -981,8 +1011,8 @@ is_admin  b =0
 balance   m =0
 settings  j
 
-@! uk_email (email)
-@ idx_name (name)
+@! email           ; shorthand → UNIQUE INDEX uk_email (email)
+@ name             ; shorthand → INDEX idx_name (name)
 
 #base product  // 商品表
 
@@ -992,8 +1022,8 @@ price       m *
 stock       n =0
 category_id         ; suffix _id → int
 
-@ idx_category (category_id)
-@ idx_price (price)
+@ category_id      ; shorthand → INDEX idx_category (category_id)
+@ price            ; shorthand → INDEX idx_price (price)
 
 #base order  // 订单表
 
@@ -1004,11 +1034,11 @@ discount    M =0
 note        s512
 paid_on     d
 
--> user_id -> user.id [CASCADE]
+-> user_id user.id [CASCADE]   ; single-arrow shorthand
 
-@! uk_order_no (order_no)
-@ idx_user (user_id)
-@ idx_paid (paid_on)
+@! order_no       ; shorthand → UNIQUE INDEX uk_order_no (order_no)
+@ user_id         ; shorthand → INDEX idx_user (user_id)
+@ paid_on         ; shorthand → INDEX idx_paid (paid_on)
 ```
 
 ```sql
@@ -1115,11 +1145,12 @@ The full EBNF grammar is defined in [`grammar.ebnf`](grammar.ebnf). It covers sc
 
 1. **Minimal syntax** — every construct is a single character or short symbol. No keywords, no braces, no quotes around names.
 2. **Convention over configuration** — suffix inference (`_id`, `_on`, `_at`) and sensible defaults (no type = varchar) eliminate redundancy.
-3. **Type Spec as foundation** — field types are fully delegated to [Type Spec](type.md); schema.md only adds structure and constraints.
-4. **Modifier composition** — symbols like `++` compose primitive modifiers (`+` + `!` for numeric, `+` + `+` for timestamp) into common patterns.
-5. **Three-layer comments** — spec (`;`) for authoring notes, SQL (`--`) for DDL comments, column (`//`) for COMMENT clauses.
-6. **Template-driven** — define table patterns once, apply them everywhere. The `...` slot gives precise control over field ordering.
-7. **DB-agnostic core** — symbols map to SQL standard concepts; the consuming tool handles dialect-specific DDL (MySQL, PostgreSQL, etc.).
+3. **Shorthand where unambiguous** — single-column indexes (`@ field`) and FKs (`-> field table.field`) omit redundant names/brackets when the context is clear.
+4. **Type Spec as foundation** — field types are fully delegated to [Type Spec](type.md); schema.md only adds structure and constraints.
+5. **Modifier composition** — symbols like `++` compose primitive modifiers (`+` + `!` for numeric, `+` + `+` for timestamp) into common patterns.
+6. **Three-layer comments** — spec (`;`) for authoring notes, SQL (`--`) for DDL comments, column (`//`) for COMMENT clauses.
+7. **Template-driven** — define table patterns once, apply them everywhere. The `...` slot gives precise control over field ordering.
+8. **DB-agnostic core** — symbols map to SQL standard concepts; the consuming tool handles dialect-specific DDL (MySQL, PostgreSQL, etc.).
 
 ---
 
