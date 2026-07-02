@@ -18,7 +18,6 @@ parent_template  = word ;
 
 table_decl       = "#", [ template_ref ], WS, table_name, [ WS, table_comment ], [ WS, comment_trailing ], newline, field_list ;
 template_ref     = template_name ;
-template_name    = word ;
 table_name       = word ;
 table_comment    = "//", { char } ;
 
@@ -83,10 +82,7 @@ auto_inc         = "+" ;
 primary_key      = "!" ;
 not_null         = "*" ;
 default_val      = "=", WS, default_value ;
-default_value    = default_word, { WS, default_word } | string_literal | number_literal ;
-(* Note: multi-word defaults (e.g. `=hello world`) are syntactically valid  *)
-(* but may produce invalid SQL depending on the target dialect. The         *)
-(* compiler should validate default values against the column type.        *)
+default_value    = default_word | string_literal | number_literal ;
 default_word     = letter, { letter | digit | "_" } ;
 
 (* ── CHECK Constraint ── *)

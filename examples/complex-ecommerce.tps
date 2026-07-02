@@ -66,9 +66,9 @@ role        1 =0 [0,1,2,3]
 balance     m =0
 settings    j
 
-@! uk_email (email)
-@ idx_name (name)
-@ idx_phone (phone)
+@! email
+@ name
+@ phone
 
 ; ── User Address ──
 #soft_delete user_address  // 用户地址
@@ -83,9 +83,9 @@ zip       s10
 phone     s20
 is_default b =0
 
--> user_id -> user.id [CASCADE, UPDATE CASCADE]
+-> user_id user.id [CASCADE, UPDATE CASCADE]
 
-@ idx_user (user_id)
+@ user_id
 @ idx_default (user_id, is_default)
 
 ; ── User OAuth ──
@@ -98,12 +98,12 @@ access_token  S
 refresh_token S
 expires_on    t
 
--> user_id -> user.id [CASCADE]
+-> user_id user.id [CASCADE]
 ; NOTE: composite FKs (e.g. -> (a, b) -> t.id) are not supported by the grammar.
 ;       Use multiple single-column FKs or ALTER TABLE in SQL.
 
 @! uk_provider_open (provider, open_id)
-@ idx_user (user_id)
+@ user_id
 
 ; ──────────────────────────────────────────────────────────────
 ; Product Domain
@@ -118,9 +118,9 @@ sort_order n =0
 icon      s128
 is_active b =1
 
--> parent_id -> category.id [SET NULL]
-@ idx_parent (parent_id)
-@ idx_sort (sort_order)
+-> parent_id category.id [SET NULL]
+@ parent_id
+@ sort_order
 
 ; ── Brand ──
 #soft_delete brand  // 品牌
@@ -131,7 +131,7 @@ description S
 website   s256
 is_active b =1
 
-@! uk_name (name)
+@! name
 
 ; ── Product ──
 #soft_delete product  // 商品表
@@ -154,13 +154,13 @@ main_image s256
 images    j
 attributes j
 
--> brand_id -> brand.id [SET NULL]
--> category_id -> category.id [SET NULL]
+-> brand_id brand.id [SET NULL]
+-> category_id category.id [SET NULL]
 
-@ idx_category (category_id)
-@ idx_brand (brand_id)
-@ idx_price (price)
-@ idx_sales (sales)
+@ category_id
+@ brand_id
+@ price
+@ sales
 @ idx_sale_status (is_on_sale, sort_order)
 
 ; ── Product SKU ──
@@ -174,10 +174,10 @@ stock      n =0 [>=0]
 image      s256
 sort_order n =0
 
--> product_id -> product.id [CASCADE]
+-> product_id product.id [CASCADE]
 
-@! uk_sku_code (sku_code)
-@ idx_product (product_id)
+@! sku_code
+@ product_id
 
 ; ── Product Review ──
 #soft_delete product_review  // 商品评价
@@ -193,12 +193,12 @@ is_anonymous b =0
 reply      S
 replied_on t
 
--> product_id -> product.id [CASCADE]
--> user_id -> user.id [CASCADE]
+-> product_id product.id [CASCADE]
+-> user_id user.id [CASCADE]
 
-@ idx_product (product_id)
-@ idx_user (user_id)
-@ idx_rating (rating)
+@ product_id
+@ user_id
+@ rating
 
 ; ──────────────────────────────────────────────────────────────
 ; Order Domain
@@ -224,7 +224,7 @@ used      n =0
 per_user  n =1
 is_active b =1
 
-@! uk_code (code)
+@! code
 
 ; ── Order ──
 #soft_delete order  // 订单表
@@ -244,13 +244,13 @@ paid_on    t
 shipped_on t
 completed_on t
 
--> user_id -> user.id [NO ACTION]
--> coupon_id -> coupon.id [SET NULL]
+-> user_id user.id [NO ACTION]
+-> coupon_id coupon.id [SET NULL]
 
-@! uk_order_no (order_no)
-@ idx_user (user_id)
-@ idx_status (status)
-@ idx_paid (paid_on)
+@! order_no
+@ user_id
+@ status
+@ paid_on
 @ idx_created (create_at)
 
 ; ── Order Item ──
@@ -266,11 +266,11 @@ quantity     n * [>=1]
 subtotal     m *
 image        s256
 
--> order_id -> order.id [CASCADE]
--> product_id -> product.id [NO ACTION]
--> sku_id -> product_sku.id [SET NULL]
+-> order_id order.id [CASCADE]
+-> product_id product.id [NO ACTION]
+-> sku_id product_sku.id [SET NULL]
 
-@ idx_order (order_id)
+@ order_id
 
 ; ── Shipping ──
 #audit shipping  // 物流信息
@@ -282,10 +282,10 @@ status      1 =0 [0,1,2,3]
 shipped_on  t
 delivered_on t
 
--> order_id -> order.id [CASCADE]
+-> order_id order.id [CASCADE]
 
 @! uk_tracking (carrier, tracking_no)
-@ idx_order (order_id)
+@ order_id
 
 ; ──────────────────────────────────────────────────────────────
 ; Payment Domain
@@ -302,12 +302,12 @@ status     1 =0 [0,1,2,3]  -- 0=pending, 1=success, 2=failed, 3=refunded
 paid_on    t
 extra      j
 
--> order_id -> order.id [RESTRICT]
--> user_id -> user.id [NO ACTION]
+-> order_id order.id [RESTRICT]
+-> user_id user.id [NO ACTION]
 
-@ idx_order (order_id)
-@ idx_user (user_id)
-@ idx_trade (trade_no)
+@ order_id
+@ user_id
+@ trade_no
 
 ; ──────────────────────────────────────────────────────────────
 ; Content Domain (CMS)
@@ -326,8 +326,8 @@ views     N =0
 is_published b =0
 published_on t
 
-@! uk_slug (slug)
-@ idx_category (category)
+@! slug
+@ category
 @ idx_published (is_published, published_on)
 @f ft_content (title, content)
 
@@ -359,10 +359,10 @@ is_read   b =0
 link      s512
 extra     j
 
--> user_id -> user.id [CASCADE]
+-> user_id user.id [CASCADE]
 
 @ idx_user_read (user_id, is_read)
-@ idx_type (type)
+@ type
 
 ; ──────────────────────────────────────────────────────────────
 ; System / Config Domain
@@ -375,8 +375,8 @@ value     S
 category  s32 =''    -- 'basic', 'payment', 'shipping'
 updated_on t++
 
-@! uk_key (key)
-@ idx_category (category)
+@! key
+@ category
 
 ; ── Operation Log ──
 % log_base
@@ -393,8 +393,8 @@ created_at t+
 
 #log_base op_log  // 操作日志
 
-@ idx_operator (operator_id)
-@ idx_action (action)
+@ operator_id
+@ action
 @ idx_target (target, target_id)
 
 ; ──────────────────────────────────────────────────────────────
@@ -407,7 +407,7 @@ created_at t+
 user_id n!
 role_id n!
 
-@ idx_role (role_id)
+@ role_id
 
 ; ── Product Tag (many-to-many) ──
 # product_tag  // 商品标签关联
@@ -415,10 +415,10 @@ role_id n!
 product_id n!
 tag_id     n!
 
--> product_id -> product.id [CASCADE]
--> tag_id -> tag.id [NO ACTION]
+-> product_id product.id [CASCADE]
+-> tag_id tag.id [NO ACTION]
 
-@ idx_tag (tag_id)
+@ tag_id
 
 ; ── Tag ──
 #base tag  // 标签
@@ -427,4 +427,4 @@ name     s32 *
 color    s7 =''     -- hex color: '#FF5722'
 usage_count n =0
 
-@! uk_name (name)
+@! name

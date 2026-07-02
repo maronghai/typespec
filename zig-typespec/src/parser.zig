@@ -524,9 +524,11 @@ pub const Parser = struct {
         var ref_field: []const u8 = "";
         var actions = try std.ArrayList(FkAction).initCapacity(self.alloc, 8);
 
-        // Expected: ["->", field, "->", "table.field", ...]
+        // Expected: ["->", field, "->", "table.field", ...]  (full form)
+        //     or:  ["->", field, "table.field", ...]          (shorthand)
         // If syntax doesn't match (e.g., composite FK), return empty FK
         if (line.tokens.len >= 4 and std.mem.eql(u8, line.tokens[2], "->")) {
+            // Full form: -> field -> table.field [action]
             field = try self.alloc.dupe(u8, line.tokens[1]);
             const ref = line.tokens[3];
             if (std.mem.indexOfScalar(u8, ref, '.')) |dot| {
@@ -539,6 +541,40 @@ pub const Parser = struct {
                 const tok = line.tokens[i];
                 if (std.mem.eql(u8, tok, "[")) {
                     // Collect tokens until ] (space-separated)
+                    var action_str = try std.ArrayList(u8).initCapacity(self.alloc, 32);
+                    var needs_space = false;
+                    i += 1;
+                    while (i < line.tokens.len and !std.mem.eql(u8, line.tokens[i], "]")) : (i += 1) {
+                        if (needs_space) try action_str.append(self.alloc, ' ');
+                        try action_str.appendSlice(self.alloc, line.tokens[i]);
+                        needs_space = true;
+                    }
+                    const inner = try action_str.toOwnedSlice(self.alloc);
+                    var action_it = std.mem.splitScalar(u8, inner, ',');
+                    while (action_it.next()) |a| {
+                        const trimmed = std.mem.trim(u8, a, " ");
+                        if (trimmed.len == 0) continue;
+                        if (std.mem.startsWith(u8, trimmed, "UPDATE ")) {
+                            try actions.append(self.alloc, .{ .on_update = try self.alloc.dupe(u8, trimmed[7..]) });
+                        } else {
+                            try actions.append(self.alloc, .{ .on_delete = try self.alloc.dupe(u8, trimmed) });
+                        }
+                    }
+                }
+            }
+        } else if (line.tokens.len >= 3 and std.mem.indexOfScalar(u8, line.tokens[2], '.') != null) {
+            // Shorthand: -> field table.field [action]  (second arrow omitted)
+            field = try self.alloc.dupe(u8, line.tokens[1]);
+            const ref = line.tokens[2];
+            if (std.mem.indexOfScalar(u8, ref, '.')) |dot| {
+                ref_table = try self.alloc.dupe(u8, ref[0..dot]);
+                ref_field = try self.alloc.dupe(u8, ref[dot + 1 ..]);
+            }
+
+            var i: usize = 3;
+            while (i < line.tokens.len) : (i += 1) {
+                const tok = line.tokens[i];
+                if (std.mem.eql(u8, tok, "[")) {
                     var action_str = try std.ArrayList(u8).initCapacity(self.alloc, 32);
                     var needs_space = false;
                     i += 1;
@@ -590,8 +626,28 @@ pub const Parser = struct {
         }
 
         if (idx < tokens.len) {
-            name = try self.alloc.dupe(u8, tokens[idx]);
-            idx += 1;
+            // Peek ahead: if next token is NOT "(" or end, this is shorthand form
+            // e.g., "@ name" where "name" is a field, not an index name
+            const is_shorthand = (idx + 1 >= tokens.len) or
+                !std.mem.eql(u8, tokens[idx + 1], "(");
+
+            if (is_shorthand) {
+                // Shorthand: @ field → auto-generate index name with prefix
+                const field = try self.alloc.dupe(u8, tokens[idx]);
+                try fields.append(self.alloc, field);
+                idx += 1;
+                // Auto-generate name: idx_ / uk_ / ft_ + field
+                const prefix = switch (kind) {
+                    .regular => "idx_",
+                    .unique => "uk_",
+                    .fulltext => "ft_",
+                };
+                name = try std.fmt.allocPrint(self.alloc, "{s}{s}", .{ prefix, field });
+            } else {
+                // Full form: @ idx_name (field1, field2)
+                name = try self.alloc.dupe(u8, tokens[idx]);
+                idx += 1;
+            }
         }
 
         while (idx < tokens.len) : (idx += 1) {

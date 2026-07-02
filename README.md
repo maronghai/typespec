@@ -25,12 +25,12 @@ balance   m =0
 
 | Feature | TypeSpec | Raw SQL |
 |---------|---------|---------|
-| `id n++` | `int AUTO_INCREMENT PRIMARY KEY` | 49 chars |
-| `balance m =0` | `decimal(16, 2) DEFAULT 0` | 30 chars |
-| `create_at t+` | `datetime DEFAULT CURRENT_TIMESTAMP` | 39 chars |
-| `email s128 *` | `varchar(128) NOT NULL` | 24 chars |
-| `@ name` | `INDEX idx_name (name)` | 29 chars (shorthand saves 70%) |
-| `-> uid user.id` | `FOREIGN KEY (uid) REFERENCES user(id)` | 42 chars (shorthand saves 37%) |
+| `id n++` | `int AUTO_INCREMENT PRIMARY KEY` | 30 chars |
+| `balance m =0` | `decimal(16, 2) DEFAULT 0` | 24 chars |
+| `create_at t+` | `datetime DEFAULT CURRENT_TIMESTAMP` | 34 chars |
+| `email s128 *` | `varchar(128) NOT NULL` | 21 chars |
+| `@ name` | `INDEX idx_name (name)` | 21 chars (shorthand saves 67%) |
+| `-> uid user.id` | `FOREIGN KEY (uid) REFERENCES user(id)` | 37 chars (shorthand saves 35%) |
 | Template inheritance | Define once, apply everywhere | Copy-paste |
 | Suffix inference | `_id`→int, `_at`→datetime | Explicit type every time |
 
@@ -339,10 +339,13 @@ A full e-commerce schema with 21 tables: see [examples/complex-ecommerce.tps](ex
 The complete grammar is defined in [grammar.ebnf](grammar.ebnf). Key productions:
 
 ```
-spec        = { schema_decl | template_def | table_decl }
-table_decl  = "#", [template_ref], WS, table_name, [comment], newline, field_list
-field_decl  = field_name, [type_symbol], [modifier_list], [check], [comment]
-template_def = "%", [name], ["extends", parent], newline, field_list
+spec          = { blank_line | schema_decl | template_def | table_decl }
+table_decl    = "#", [template_ref], WS, table_name, [table_comment], newline, field_list
+field_list    = { field_decl | foreign_key_decl | index_decl | template_slot }
+field_decl    = field_name, [WS, type_symbol], [WS, modifier_list], [WS, check_clause], newline
+template_def  = "%", [name], ["extends", parent], newline, field_list
+foreign_key_decl = "->", field_name, ["->"], ref_table, ".", ref_field, [action_list], newline
+index_decl    = "@", ["!" | "f"], index_name, ["(", fields, ")"], newline
 ```
 
 See [schema.md §13](schema.md#13-ebnf-grammar) for grammar notes and [type.md §3](type.md#3-type-symbol-grammar) for type symbol definitions.

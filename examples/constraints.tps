@@ -14,7 +14,7 @@ status      1 =0 [0,1,2]
 balance     m =0 [>=0]
 score       M =0 [0,100]
 
-@! uk_email (email)
+@! email
 
 ; ── User Role (composite primary key) ──
 # user_role
@@ -33,4 +33,4 @@ quantity    n =1 [>=1]
 discount    M =0 [>=0, <=1]
 type        s32 ['standard','express','bulk']
 
--> user_id -> user.id [CASCADE]
+-> user_id user.id [CASCADE]

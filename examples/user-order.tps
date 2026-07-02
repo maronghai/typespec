@@ -24,8 +24,8 @@ is_admin  b =0
 balance   m =0
 settings  j
 
-@! uk_email (email)
-@ idx_name (name)
+@! email
+@ name
 
 ; ── Product Table ──
 #base product  // 商品表
@@ -36,8 +36,8 @@ price       m *
 stock       n =0
 category_id         ; suffix _id → int
 
-@ idx_category (category_id)
-@ idx_price (price)
+@ category_id
+@ price
 
 ; ── Order Table ──
 #base order  // 订单表
@@ -49,8 +49,8 @@ discount    M =0
 note        s512
 paid_on     d
 
--> user_id -> user.id [CASCADE]
+-> user_id user.id [CASCADE]
 
-@! uk_order_no (order_no)
-@ idx_user (user_id)
-@ idx_paid (paid_on)
+@! order_no
+@ user_id
+@ paid_on
