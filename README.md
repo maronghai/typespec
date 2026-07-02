@@ -74,25 +74,25 @@ update_at t++
 
 #base user  // 用户表
 
-name      s32 *
-email     s128 *
-password  s256 *
-avatar    S
-is_admin  b =0
-balance   m =0
-settings  j
+name      s32 *     // 用户名
+email     s128 *    // 唯一邮箱
+password  s256 *    // bcrypt hash
+avatar    S         // 头像 URL
+is_admin  b =0      // 管理员标记
+balance   m =0      // 余额（分）
+settings  j         // JSON 偏好
 
 @u email           ; shorthand → UNIQUE INDEX uk_email (email)
 @ name             ; shorthand → INDEX idx_name (name)
 
 #base order  // 订单表
 
-order_no    s64 *
-user_id             ; suffix _id → int
-amount      m *
-discount    M =0
-note        s512
-paid_on     d
+order_no    s64 *     // 唯一订单号
+user_id               // 下单用户（suffix _id → int）
+amount      m *       // 总额（分）
+discount    M =0      // 折扣（分）
+note        s512      // 买家留言
+paid_on     d         // 支付日期
 
 -> user_id user.id [CASCADE]   ; single-arrow shorthand
 
@@ -118,13 +118,13 @@ CREATE DATABASE `myapp`;
 
 CREATE TABLE `user` (
   `id`         int AUTO_INCREMENT PRIMARY KEY,
-  `name`       varchar(32) NOT NULL,
-  `email`      varchar(128) NOT NULL,
-  `password`   varchar(256) NOT NULL,
-  `avatar`     text,
-  `is_admin`   boolean DEFAULT 0,
-  `balance`    decimal(16, 2) DEFAULT 0,
-  `settings`   json,
+  `name`       varchar(32) NOT NULL COMMENT '用户名',
+  `email`      varchar(128) NOT NULL COMMENT '唯一邮箱',
+  `password`   varchar(256) NOT NULL COMMENT 'bcrypt hash',
+  `avatar`     text COMMENT '头像 URL',
+  `is_admin`   boolean DEFAULT 0 COMMENT '管理员标记',
+  `balance`    decimal(16, 2) DEFAULT 0 COMMENT '余额（分）',
+  `settings`   json COMMENT 'JSON 偏好',
   `version`    bigint,
   `status`     int(1) DEFAULT 0,
   `create_at`  datetime DEFAULT CURRENT_TIMESTAMP,
@@ -138,12 +138,12 @@ CREATE TABLE `user` (
 
 CREATE TABLE `order` (
   `id`         int AUTO_INCREMENT PRIMARY KEY,
-  `order_no`   varchar(64) NOT NULL,
-  `user_id`    int,
-  `amount`     decimal(16, 2) NOT NULL,
-  `discount`   decimal(20, 6) DEFAULT 0,
-  `note`       varchar(512),
-  `paid_on`    date,
+  `order_no`   varchar(64) NOT NULL COMMENT '唯一订单号',
+  `user_id`    int COMMENT '下单用户',
+  `amount`     decimal(16, 2) NOT NULL COMMENT '总额（分）',
+  `discount`   decimal(20, 6) DEFAULT 0 COMMENT '折扣（分）',
+  `note`       varchar(512) COMMENT '买家留言',
+  `paid_on`    date COMMENT '支付日期',
   `version`    bigint,
   `status`     int(1) DEFAULT 0,
   `create_at`  datetime DEFAULT CURRENT_TIMESTAMP,
