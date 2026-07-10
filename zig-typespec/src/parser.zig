@@ -499,6 +499,312 @@ pub const Parser = struct {
         };
     }
 
+    // ─── Fused type+modifier parsing ─────────────────────────
+
+    const FusedTypeResult = struct {
+        type_info: ?TypeInfo = null,
+        modifier: ?Modifier = null,
+        default_val: ?DefaultVal = null,
+    };
+
+    /// Parse fused tokens like `n++`, `s128*`, `nu`, `*=0`, `t+`.
+    /// Returns null if the token is not a fused type+modifier form.
+    fn parseFusedTypeModifier(_: *Parser, tok: []const u8, line_no: usize) ?FusedTypeResult {
+        if (tok.len < 2) return null;
+
+        // *=value (NOT NULL + DEFAULT)
+        if (tok[0] == '*' and tok[1] == '=') {
+            return .{
+                .modifier = .{ .kind = .not_null, .line_no = line_no },
+                .default_val = .{ .value = tok[2..], .line_no = line_no },
+            };
+        }
+
+        // Check all suffix patterns: ++, +, !, *, u
+        const last = tok[tok.len - 1];
+        if (last == '+' and tok.len >= 3 and tok[tok.len - 2] == '+') {
+            const prefix = tok[0 .. tok.len - 2];
+            if (tryParseType(prefix)) |ti| {
+                return .{ .type_info = ti, .modifier = .{ .kind = .auto_inc_pk, .line_no = line_no } };
+            }
+        }
+        if (last == '+' and tok.len >= 2 and tok[tok.len - 2] != '+') {
+            const prefix = tok[0 .. tok.len - 1];
+            if (tryParseType(prefix)) |ti| {
+                return .{ .type_info = ti, .modifier = .{ .kind = .auto_inc, .line_no = line_no } };
+            }
+        }
+        if (last == '!' and tok.len >= 2) {
+            const prefix = tok[0 .. tok.len - 1];
+            if (tryParseType(prefix)) |ti| {
+                return .{ .type_info = ti, .modifier = .{ .kind = .primary_key, .line_no = line_no } };
+            }
+        }
+        if (last == '*' and tok.len >= 2) {
+            const prefix = tok[0 .. tok.len - 1];
+            if (tryParseType(prefix)) |ti| {
+                return .{ .type_info = ti, .modifier = .{ .kind = .not_null, .line_no = line_no } };
+            }
+        }
+        if (last == 'u' and tok[tok.len - 2] != '+') {
+            const prefix = tok[0 .. tok.len - 1];
+            if (tryParseType(prefix)) |ti| {
+                const is_numeric = switch (ti) {
+                    .simple => |s| (std.mem.eql(u8, s, "n") or std.mem.eql(u8, s, "N")),
+                    .int_explicit => true,
+                    else => false,
+                };
+                if (is_numeric) {
+                    return .{ .type_info = ti, .modifier = .{ .kind = .unsigned, .line_no = line_no } };
+                }
+            }
+        }
+
+        return null;
+    }
+
+    // ─── Enum type parsing ──────────────────────────────────
+
+    /// Parse `e(M,F,X)` or `e('a','b')` enum types.
+    /// `tok` must be `"e"` and `idx` must point to it.
+    fn parseEnumType(self: *Parser, tokens: []const []const u8, idx: usize, raw: []const u8, line_no: usize) !struct { type_info: TypeInfo, end_idx: usize } {
+        const paren_col = diag.tokenColumn(tokens[idx + 1], raw);
+        var i = idx + 2; // skip e and (
+        var enum_vals = try std.ArrayList([]const u8).initCapacity(self.alloc, 8);
+        while (i < tokens.len) : (i += 1) {
+            if (std.mem.eql(u8, tokens[i], ")")) break;
+            const val_tok = tokens[i];
+            if (std.mem.eql(u8, val_tok, ",")) continue;
+            // Handle comma-separated values in single token
+            if (std.mem.indexOfScalar(u8, val_tok, ',')) |_| {
+                var rest = val_tok;
+                while (rest.len > 0) {
+                    if (std.mem.indexOfScalar(u8, rest, ',')) |cp| {
+                        if (cp > 0) {
+                            var val = rest[0..cp];
+                            if (val.len >= 2 and val[0] == '\'' and val[val.len - 1] == '\'') {
+                                val = val[1 .. val.len - 1];
+                            }
+                            try enum_vals.append(self.alloc, try self.alloc.dupe(u8, val));
+                        }
+                        rest = rest[cp + 1 ..];
+                    } else {
+                        if (rest.len > 0) {
+                            var val = rest;
+                            if (val.len >= 2 and val[0] == '\'' and val[val.len - 1] == '\'') {
+                                val = val[1 .. val.len - 1];
+                            }
+                            try enum_vals.append(self.alloc, try self.alloc.dupe(u8, val));
+                        }
+                        break;
+                    }
+                }
+            } else {
+                var val = val_tok;
+                if (val.len >= 2 and val[0] == '\'' and val[val.len - 1] == '\'') {
+                    val = val[1 .. val.len - 1];
+                }
+                try enum_vals.append(self.alloc, try self.alloc.dupe(u8, val));
+            }
+        }
+        if (i >= tokens.len) {
+            diag.printDiagnostic(.{
+                .severity = .@"error",
+                .line_no = line_no,
+                .col = paren_col,
+                .message = "expected ')' to close enum type",
+                .expected = "')'",
+                .actual = "end of line",
+                .source_line = raw,
+            });
+        }
+        return .{
+            .type_info = .{ .enum_type = try enum_vals.toOwnedSlice(self.alloc) },
+            .end_idx = i + 1, // +1 to skip past ')'
+        };
+    }
+
+    // ─── Inline FK parsing ──────────────────────────────────
+
+    /// Detect inline FK: `> table.field` or `table.field`.
+    /// Returns the FK and the index after all consumed tokens.
+    fn parseInlineFK(self: *Parser, tokens: []const []const u8, idx: usize, field_name: []const u8, raw: []const u8, trimmed: []const u8, line_no: usize) !struct { fk: FkDecl, end_idx: usize } {
+        var fk_tokens = try std.ArrayList([]const u8).initCapacity(self.alloc, 8);
+        try fk_tokens.append(self.alloc, field_name);
+        var j: usize = idx;
+        if (std.mem.eql(u8, tokens[idx], ">")) {
+            j = idx + 1;
+            if (j < tokens.len) {
+                const after_gt = tokens[j];
+                if (std.mem.indexOfScalar(u8, after_gt, '.') == null) {
+                    j += 1; // skip type token
+                }
+            }
+        }
+        while (j < tokens.len) : (j += 1) {
+            const rt = tokens[j];
+            if (rt.len >= 1 and rt[0] == ':') break;
+            if (rt.len >= 2 and rt[0] == '-' and rt[1] == '-') break;
+            if (rt.len > 0 and rt[0] == ';') break;
+            try fk_tokens.append(self.alloc, rt);
+        }
+        const fk_slice = try fk_tokens.toOwnedSlice(self.alloc);
+        const fk_line = tk.Line{
+            .line_type = .FK,
+            .tokens = fk_slice,
+            .raw = raw,
+            .trimmed = trimmed,
+            .line_no = line_no,
+        };
+        const fk = try self.parseFK(fk_line);
+        // Skip FK action tokens that were already collected
+        while (j < tokens.len) {
+            const at = tokens[j];
+            if (at.len == 2 and at[0] == '-' and (at[1] == 'C' or at[1] == 'N')) {
+                j += 1;
+                if (j < tokens.len and tokens[j].len == 1 and
+                    (tokens[j][0] == 'C' or tokens[j][0] == 'N'))
+                {
+                    j += 1;
+                }
+            } else if (at.len == 1 and (at[0] == 'C' or at[0] == 'N')) {
+                j += 1;
+            } else if (at.len == 1 and at[0] == '-' and j + 1 < tokens.len) {
+                const nxt = tokens[j + 1];
+                if (nxt.len == 1 and (nxt[0] == 'C' or nxt[0] == 'N')) {
+                    j += 2;
+                } else break;
+            } else break;
+        }
+        return .{ .fk = fk, .end_idx = j };
+    }
+
+    // ─── Standalone modifier parsing ────────────────────────
+
+    const ModifierResult = struct {
+        modifier: Modifier,
+        end_idx: usize,
+    };
+
+    /// Parse standalone modifiers: `++`, `+`, `*`, `!`, `@`, `@u`.
+    fn parseStandaloneModifier(_: *Parser, tokens: []const []const u8, idx: usize, raw: []const u8, line_no: usize) ?ModifierResult {
+        const tok = tokens[idx];
+        if (std.mem.eql(u8, tok, "++")) {
+            return .{ .modifier = .{ .kind = .auto_inc_pk, .line_no = line_no }, .end_idx = idx + 1 };
+        }
+        if (std.mem.eql(u8, tok, "+")) {
+            return .{ .modifier = .{ .kind = .auto_inc, .line_no = line_no }, .end_idx = idx + 1 };
+        }
+        if (std.mem.eql(u8, tok, "*")) {
+            return .{ .modifier = .{ .kind = .not_null, .line_no = line_no }, .end_idx = idx + 1 };
+        }
+        if (std.mem.eql(u8, tok, "!")) {
+            return .{ .modifier = .{ .kind = .primary_key, .line_no = line_no }, .end_idx = idx + 1 };
+        }
+        // @u inline unique (tokenizer may split @ and u)
+        if (std.mem.eql(u8, tok, "@") and idx + 1 < tokens.len and std.mem.eql(u8, tokens[idx + 1], "u")) {
+            return .{ .modifier = .{ .kind = .inline_unique, .line_no = line_no }, .end_idx = idx + 2 };
+        }
+        if (std.mem.eql(u8, tok, "@u")) {
+            return .{ .modifier = .{ .kind = .inline_unique, .line_no = line_no }, .end_idx = idx + 1 };
+        }
+        // @ followed by f (inline fulltext — not supported)
+        if (std.mem.eql(u8, tok, "@") and idx + 1 < tokens.len and std.mem.eql(u8, tokens[idx + 1], "f")) {
+            diag.printDiagnostic(.{
+                .severity = .warning,
+                .line_no = line_no,
+                .col = diag.tokenColumn(tokens[idx], raw),
+                .message = "inline @f not supported on field",
+                .expected = "standalone '@f' declaration instead",
+                .actual = tok,
+                .source_line = raw,
+            });
+            return .{ .modifier = .{ .kind = .inline_index, .line_no = line_no }, .end_idx = idx + 2 };
+        }
+        // @ alone or @ followed by non-u/f = inline regular index
+        if (std.mem.eql(u8, tok, "@")) {
+            return .{ .modifier = .{ .kind = .inline_index, .line_no = line_no }, .end_idx = idx + 1 };
+        }
+        return null;
+    }
+
+    // ─── CHECK constraint parsing ───────────────────────────
+
+    const CheckResult = struct {
+        check: CheckConstraint,
+        end_idx: usize,
+    };
+
+    /// Parse CHECK constraint: `[...]`, `(..)`, or `{..}`.
+    fn parseCheckConstraint(self: *Parser, tokens: []const []const u8, idx: usize, raw: []const u8, line_no: usize) !?CheckResult {
+        const tok = tokens[idx];
+        if (tok[0] == '[') {
+            return try self.parseCheckBody(tokens, idx, raw, line_no, '[', ']');
+        }
+        if (tok[0] == '(') {
+            return try self.parseCheckBody(tokens, idx, raw, line_no, '(', ')');
+        }
+        if (tok[0] == '{') {
+            return try self.parseCheckBody(tokens, idx, raw, line_no, '{', '}');
+        }
+        return null;
+    }
+
+    fn parseCheckBody(self: *Parser, tokens: []const []const u8, idx: usize, raw: []const u8, line_no: usize, open_bracket: u8, close_bracket: u8) !CheckResult {
+        const bracket_col = diag.tokenColumn(tokens[idx], raw);
+        var check_str = try std.ArrayList(u8).initCapacity(self.alloc, 32);
+        var needs_comma = false;
+        var i = idx + 1;
+        while (i < tokens.len) : (i += 1) {
+            const t = tokens[i];
+            if ((close_bracket == ']' and std.mem.eql(u8, t, "]")) or
+                (close_bracket == ')' and std.mem.eql(u8, t, ")")) or
+                (close_bracket == '}' and std.mem.eql(u8, t, "}")))
+            {
+                break;
+            }
+            // Also stop at mismatched closers (e.g., ] when expecting ))
+            if (close_bracket != ']' and std.mem.eql(u8, t, "]")) break;
+            if (close_bracket != ')' and std.mem.eql(u8, t, ")")) break;
+            if (std.mem.eql(u8, t, ",")) {
+                needs_comma = true;
+                continue;
+            }
+            if (needs_comma) try check_str.append(self.alloc, ',');
+            try check_str.appendSlice(self.alloc, t);
+            needs_comma = true;
+        }
+        if (i >= tokens.len) {
+            const expected: []const u8 = switch (close_bracket) {
+                ']' => "']'",
+                ')' => "')' or ']'",
+                else => "'}'",
+            };
+            diag.printDiagnostic(.{
+                .severity = .@"error",
+                .line_no = line_no,
+                .col = bracket_col,
+                .message = "unclosed bracket",
+                .expected = expected,
+                .actual = "end of line",
+                .source_line = raw,
+            });
+        }
+        // Determine actual close bracket for classification
+        const actual_close: u8 = if (i < tokens.len) blk: {
+            const t = tokens[i];
+            if (t.len == 1) break :blk t[0];
+            break :blk close_bracket;
+        } else close_bracket;
+        const check_expr = try check_str.toOwnedSlice(self.alloc);
+        return .{
+            .check = .{ .kind = classifyCheck(check_expr, open_bracket, actual_close), .expr = check_expr, .line_no = line_no },
+            .end_idx = i + 1, // +1 to skip past closing bracket
+        };
+    }
+
+    // ─── Field parsing (orchestrator) ───────────────────────
+
     fn parseField(self: *Parser, line: tk.Line) !Field {
         if (line.tokens.len == 0) return error.EmptyField;
 
@@ -511,92 +817,36 @@ pub const Parser = struct {
         var comment: ?[]const u8 = null;
 
         var i: usize = 1;
-        while (i < line.tokens.len) : (i += 1) {
-            var tok = line.tokens[i];
+        while (i < line.tokens.len) {
+            const tok = line.tokens[i];
 
-            // Handle ++ suffix on type tokens (e.g., "n++" -> type "n" + modifier "++")
-            if (tok.len >= 3 and tok[tok.len - 1] == '+' and tok[tok.len - 2] == '+') {
-                const prefix = tok[0 .. tok.len - 2];
-                if (tryParseType(prefix)) |ti| {
+            // 1. Fused type+modifier: n++, s128*, *=0, nu, t+
+            if (self.parseFusedTypeModifier(tok, line.line_no)) |result| {
+                if (result.type_info) |ti| {
+                    // Only set type and add modifier if type wasn't already set
                     if (type_info == .none) {
                         type_info = ti;
-                        try modifiers.append(self.alloc, .{ .kind = .auto_inc_pk, .line_no = line.line_no });
-                        continue;
+                        if (result.modifier) |mod| try modifiers.append(self.alloc, mod);
                     }
+                } else {
+                    // No type (e.g. *=0) — always apply modifier + default
+                    if (result.modifier) |mod| try modifiers.append(self.alloc, mod);
+                    if (result.default_val) |dv| default_val = dv;
                 }
-                // Not a type with ++, treat as two ++ modifiers
-                try modifiers.append(self.alloc, .{ .kind = .auto_inc_pk, .line_no = line.line_no });
+                i += 1;
                 continue;
             }
 
-            // Handle + suffix on type tokens (e.g., "t+" -> type "t" + modifier "+")
-            if (tok.len >= 2 and tok[tok.len - 1] == '+' and tok[tok.len - 2] != '+') {
-                const prefix = tok[0 .. tok.len - 1];
-                if (tryParseType(prefix)) |ti| {
-                    if (type_info == .none) {
-                        type_info = ti;
-                        try modifiers.append(self.alloc, .{ .kind = .auto_inc, .line_no = line.line_no });
-                        continue;
-                    }
-                }
-            }
-
-            // Handle ! suffix on type tokens (e.g., "n!" -> type "n" + modifier "!")
-            if (tok.len >= 2 and tok[tok.len - 1] == '!') {
-                const prefix = tok[0 .. tok.len - 1];
-                if (tryParseType(prefix)) |ti| {
-                    if (type_info == .none) {
-                        type_info = ti;
-                        try modifiers.append(self.alloc, .{ .kind = .primary_key, .line_no = line.line_no });
-                        continue;
-                    }
-                }
-            }
-
-            // Handle *=value fused modifier (NOT NULL + DEFAULT)
-            if (tok.len >= 2 and tok[0] == '*' and tok[1] == '=') {
-                try modifiers.append(self.alloc, .{ .kind = .not_null, .line_no = line.line_no });
-                default_val = .{ .value = tok[2..], .line_no = line.line_no };
-                continue;
-            }
-
-            // Handle * suffix on type tokens (e.g., "n*" -> type "n" + modifier "*")
-            if (tok.len >= 2 and tok[tok.len - 1] == '*') {
-                const prefix = tok[0 .. tok.len - 1];
-                if (tryParseType(prefix)) |ti| {
-                    if (type_info == .none) {
-                        type_info = ti;
-                        try modifiers.append(self.alloc, .{ .kind = .not_null, .line_no = line.line_no });
-                        continue;
-                    }
-                }
-            }
-
-            // Handle u suffix on numeric types (e.g., "nu" -> type "n" + modifier "unsigned")
-            if (tok.len >= 2 and tok[tok.len - 1] == 'u' and tok[tok.len - 2] != '+') {
-                const prefix = tok[0 .. tok.len - 1];
-                if (tryParseType(prefix)) |ti| {
-                    const is_numeric = switch (ti) {
-                        .simple => |s| (std.mem.eql(u8, s, "n") or std.mem.eql(u8, s, "N")),
-                        .int_explicit => true,
-                        else => false,
-                    };
-                    if (is_numeric and type_info == .none) {
-                        type_info = ti;
-                        try modifiers.append(self.alloc, .{ .kind = .unsigned, .line_no = line.line_no });
-                        continue;
-                    }
-                }
-            }
-
+            // 2. Plain type: n, s, 16,2, s128
             if (type_info == .none) {
                 if (tryParseType(tok)) |ti| {
                     type_info = ti;
+                    i += 1;
                     continue;
                 }
             }
 
-            // Handle standalone u modifier (unsigned on any preceding numeric type)
+            // 2b. Standalone u modifier (unsigned on any preceding numeric type)
             if (std.mem.eql(u8, tok, "u") and type_info != .none) {
                 const is_numeric = switch (type_info) {
                     .simple => |s| (std.mem.eql(u8, s, "n") or std.mem.eql(u8, s, "N")),
@@ -605,313 +855,61 @@ pub const Parser = struct {
                 };
                 if (is_numeric) {
                     try modifiers.append(self.alloc, .{ .kind = .unsigned, .line_no = line.line_no });
-                    continue;
-                }
-            }
-
-            // Handle enum type: e(M,F,X) or e('admin','user')
-            if (type_info == .none and std.mem.eql(u8, tok, "e") and i + 1 < line.tokens.len and std.mem.eql(u8, line.tokens[i + 1], "(")) {
-                const paren_col = diag.tokenColumn(line.tokens[i + 1], line.raw);
-                i += 2; // skip e and (
-                var enum_vals = try std.ArrayList([]const u8).initCapacity(self.alloc, 8);
-                while (i < line.tokens.len) : (i += 1) {
-                    if (std.mem.eql(u8, line.tokens[i], ")")) break;
-                    const val_tok = line.tokens[i];
-                    if (std.mem.eql(u8, val_tok, ",")) continue;
-                    // Handle comma-separated values in single token (e.g., "M,F,X" or "'admin','user'")
-                    if (std.mem.indexOfScalar(u8, val_tok, ',')) |_| {
-                        var rest = val_tok;
-                        while (rest.len > 0) {
-                            if (std.mem.indexOfScalar(u8, rest, ',')) |cp| {
-                                if (cp > 0) {
-                                    var val = rest[0..cp];
-                                    // Strip surrounding quotes if present
-                                    if (val.len >= 2 and val[0] == '\'' and val[val.len - 1] == '\'') {
-                                        val = val[1 .. val.len - 1];
-                                    }
-                                    try enum_vals.append(self.alloc, try self.alloc.dupe(u8, val));
-                                }
-                                rest = rest[cp + 1 ..];
-                            } else {
-                                if (rest.len > 0) {
-                                    var val = rest;
-                                    // Strip surrounding quotes if present
-                                    if (val.len >= 2 and val[0] == '\'' and val[val.len - 1] == '\'') {
-                                        val = val[1 .. val.len - 1];
-                                    }
-                                    try enum_vals.append(self.alloc, try self.alloc.dupe(u8, val));
-                                }
-                                break;
-                            }
-                        }
-                    } else {
-                        var val = val_tok;
-                        // Strip surrounding quotes if present
-                        if (val.len >= 2 and val[0] == '\'' and val[val.len - 1] == '\'') {
-                            val = val[1 .. val.len - 1];
-                        }
-                        try enum_vals.append(self.alloc, try self.alloc.dupe(u8, val));
-                    }
-                }
-                if (i >= line.tokens.len) {
-                    diag.printDiagnostic(.{
-                        .severity = .@"error",
-                        .line_no = line.line_no,
-                        .col = paren_col,
-                        .message = "expected ')' to close enum type",
-                        .expected = "')'",
-                        .actual = "end of line",
-                        .source_line = line.raw,
-                    });
-                }
-                type_info = .{ .enum_type = try enum_vals.toOwnedSlice(self.alloc) };
-                continue;
-            }
-
-            if (tok.len >= 1 and tok[0] == ':') {
-                comment = tok;
-                break;
-            }
-
-            if (tok.len >= 2 and tok[0] == '-' and tok[1] == '-') {
-                comment = tok;
-                break;
-            }
-
-            if (tok[0] == ';') break;
-
-            if (std.mem.eql(u8, tok, "++")) {
-                try modifiers.append(self.alloc, .{ .kind = .auto_inc_pk, .line_no = line.line_no });
-                continue;
-            }
-
-            if (std.mem.eql(u8, tok, "+")) {
-                try modifiers.append(self.alloc, .{ .kind = .auto_inc, .line_no = line.line_no });
-                continue;
-            }
-
-            if (std.mem.eql(u8, tok, "*")) {
-                try modifiers.append(self.alloc, .{ .kind = .not_null, .line_no = line.line_no });
-                continue;
-            }
-
-            if (std.mem.eql(u8, tok, "!")) {
-                try modifiers.append(self.alloc, .{ .kind = .primary_key, .line_no = line.line_no });
-                continue;
-            }
-
-            // Handle @u inline unique (tokenizer may split @ and u)
-            if (std.mem.eql(u8, tok, "@") and i + 1 < line.tokens.len and std.mem.eql(u8, line.tokens[i + 1], "u")) {
-                try modifiers.append(self.alloc, .{ .kind = .inline_unique, .line_no = line.line_no });
-                i += 1; // skip the 'u' token
-                continue;
-            }
-            if (std.mem.eql(u8, tok, "@u")) {
-                try modifiers.append(self.alloc, .{ .kind = .inline_unique, .line_no = line.line_no });
-                continue;
-            }
-            // Handle @ as inline regular index (tokenizer may split @ and f/u separately)
-            if (std.mem.eql(u8, tok, "@") and i + 1 < line.tokens.len) {
-                const next = line.tokens[i + 1];
-                if (std.mem.eql(u8, next, "f")) {
-                    // @f = inline fulltext index (not supported — warn user)
-                    diag.printDiagnostic(.{
-                        .severity = .warning,
-                        .line_no = line.line_no,
-                        .col = diag.tokenColumn(line.tokens[i], line.raw),
-                        .message = "inline @f not supported on field",
-                        .expected = "standalone '@f' declaration instead",
-                        .actual = tok,
-                        .source_line = line.raw,
-                    });
                     i += 1;
                     continue;
                 }
-                // @ alone or @ followed by non-u/f = inline regular index
-                if (!std.mem.eql(u8, next, "u")) {
-                    try modifiers.append(self.alloc, .{ .kind = .inline_index, .line_no = line.line_no });
-                    continue;
-                }
             }
-            if (std.mem.eql(u8, tok, "@")) {
-                // Standalone @ without following token = inline regular index
-                try modifiers.append(self.alloc, .{ .kind = .inline_index, .line_no = line.line_no });
+
+            // 3. Enum type: e(M,F,X) or e('admin','user')
+            if (type_info == .none and std.mem.eql(u8, tok, "e") and i + 1 < line.tokens.len and std.mem.eql(u8, line.tokens[i + 1], "(")) {
+                const result = try self.parseEnumType(line.tokens, i, line.raw, line.line_no);
+                type_info = result.type_info;
+                i = result.end_idx;
                 continue;
             }
 
-            // Inline FK detection: > table.field or table.field
+            // 4. Comments: : (column), -- (SQL), ; (spec)
+            if (tok.len >= 1 and tok[0] == ':') { comment = tok; break; }
+            if (tok.len >= 2 and tok[0] == '-' and tok[1] == '-') { comment = tok; break; }
+            if (tok[0] == ';') break;
+
+            // 5. Standalone modifiers: ++, +, *, !, @, @u
+            if (self.parseStandaloneModifier(line.tokens, i, line.raw, line.line_no)) |result| {
+                try modifiers.append(self.alloc, result.modifier);
+                i = result.end_idx;
+                continue;
+            }
+
+            // 6. Inline FK: > table.field or table.field
             if (std.mem.eql(u8, tok, ">") or
                 (std.mem.indexOfScalar(u8, tok, '.') != null and tok[0] != '[' and tok[0] != '=' and tok[0] != '/' and tok[0] != '-' and tok[0] != ';'))
             {
-                // Rebuild remaining tokens as a standalone FK line for parseFK.
-                // Constraint: tokens must end before any comment (;, --, :)
-                // NOTE: do NOT prepend ">" here — the standard FK branches read
-                // field_name at position 0, ref at position 1+, which matches
-                // the raw inline FK tokens [field_name, >, table.field].
-                var fk_tokens = try std.ArrayList([]const u8).initCapacity(self.alloc, 8);
-                try fk_tokens.append(self.alloc, name);
-                // Determine where to start collecting: after > and optional type
-                var j: usize = i;
-                if (std.mem.eql(u8, line.tokens[i], ">")) {
-                    // Has > separator: skip it, then skip type token if present
-                    j = i + 1;
-                    if (j < line.tokens.len) {
-                        const after_gt = line.tokens[j];
-                        if (std.mem.indexOfScalar(u8, after_gt, '.') == null) {
-                            j += 1; // skip type token
-                        }
-                    }
-                } else {
-                    // No > (noarrow form): i points to the reference token
-                    // Don't skip — collect from i
-                }
-                while (j < line.tokens.len) : (j += 1) {
-                    const rt = line.tokens[j];
-                    if (rt.len >= 1 and rt[0] == ':') break;
-                    if (rt.len >= 2 and rt[0] == '-' and rt[1] == '-') break;
-                    if (rt.len > 0 and rt[0] == ';') break;
-                    try fk_tokens.append(self.alloc, rt);
-                }
-                const fk_slice = try fk_tokens.toOwnedSlice(self.alloc);
-                const fk_line = tk.Line{
-                    .line_type = .FK,
-                    .tokens = fk_slice,
-                    .raw = line.raw,
-                    .trimmed = line.trimmed,
-                    .line_no = line.line_no,
-                };
-                inline_fk = try self.parseFK(fk_line);
-                // Skip consumed tokens (reference + actions)
-                while (j < line.tokens.len) {
-                    const at = line.tokens[j];
-                    if (at.len == 2 and at[0] == '-' and (at[1] == 'C' or at[1] == 'N')) {
-                        j += 1; // skip combined token (e.g. -C)
-                        // Also skip trailing standalone C/N if present
-                        if (j < line.tokens.len and line.tokens[j].len == 1 and
-                            (line.tokens[j][0] == 'C' or line.tokens[j][0] == 'N'))
-                        {
-                            j += 1;
-                        }
-                    } else if (at.len == 1 and (at[0] == 'C' or at[0] == 'N')) {
-                        j += 1;
-                    } else if (at.len == 1 and at[0] == '-' and j + 1 < line.tokens.len) {
-                        const nxt = line.tokens[j + 1];
-                        if (nxt.len == 1 and (nxt[0] == 'C' or nxt[0] == 'N')) {
-                            j += 2;
-                        } else break;
-                    } else break;
-                }
-                i = j - 1; // -1 because for loop will i++
+                const result = try self.parseInlineFK(line.tokens, i, name, line.raw, line.trimmed, line.line_no);
+                inline_fk = result.fk;
+                i = result.end_idx;
                 break;
             }
 
+            // 7. Default value: =value
             if (tok[0] == '=' and tok.len > 1) {
                 default_val = .{ .value = tok[1..], .line_no = line.line_no };
-                continue;
-            }
-
-            if (tok[0] == '[') {
-                // Collect tokens until ] or ) for check constraint
-                const bracket_col = diag.tokenColumn(tok, line.raw);
-                var check_str = try std.ArrayList(u8).initCapacity(self.alloc, 32);
-                var needs_comma = false;
                 i += 1;
-                while (i < line.tokens.len and !std.mem.eql(u8, line.tokens[i], "]") and !std.mem.eql(u8, line.tokens[i], ")")) : (i += 1) {
-                    const inner_tok = line.tokens[i];
-                    if (std.mem.eql(u8, inner_tok, ",")) {
-                        needs_comma = true;
-                        continue;
-                    }
-                    if (needs_comma) try check_str.append(self.alloc, ',');
-                    try check_str.appendSlice(self.alloc, inner_tok);
-                    needs_comma = true;
-                }
-                if (i >= line.tokens.len) {
-                    diag.printDiagnostic(.{
-                        .severity = .@"error",
-                        .line_no = line.line_no,
-                        .col = bracket_col,
-                        .message = "unclosed bracket",
-                        .expected = "']'",
-                        .actual = "end of line",
-                        .source_line = line.raw,
-                    });
-                }
-                const close_bracket: u8 = if (i < line.tokens.len and std.mem.eql(u8, line.tokens[i], ")")) ')' else ']';
-                const check_expr = try check_str.toOwnedSlice(self.alloc);
-                check = .{ .kind = classifyCheck(check_expr, '[', close_bracket), .expr = check_expr, .line_no = line.line_no };
                 continue;
             }
 
-            if (tok[0] == '(') {
-                // Collect tokens until ) for check constraint (exclusive range)
-                const bracket_col = diag.tokenColumn(tok, line.raw);
-                var check_str = try std.ArrayList(u8).initCapacity(self.alloc, 32);
-                var needs_comma = false;
-                i += 1;
-                while (i < line.tokens.len and !std.mem.eql(u8, line.tokens[i], ")") and !std.mem.eql(u8, line.tokens[i], "]")) : (i += 1) {
-                    const inner_tok = line.tokens[i];
-                    if (std.mem.eql(u8, inner_tok, ",")) {
-                        needs_comma = true;
-                        continue;
-                    }
-                    if (needs_comma) try check_str.append(self.alloc, ',');
-                    try check_str.appendSlice(self.alloc, inner_tok);
-                    needs_comma = true;
+            // 8. CHECK constraints: [...] (...)  {..}
+            if (tok[0] == '[' or tok[0] == '(' or tok[0] == '{') {
+                if (try self.parseCheckConstraint(line.tokens, i, line.raw, line.line_no)) |result| {
+                    check = result.check;
+                    i = result.end_idx;
+                    continue;
                 }
-                if (i >= line.tokens.len) {
-                    diag.printDiagnostic(.{
-                        .severity = .@"error",
-                        .line_no = line.line_no,
-                        .col = bracket_col,
-                        .message = "unclosed bracket",
-                        .expected = "')' or ']'",
-                        .actual = "end of line",
-                        .source_line = line.raw,
-                    });
-                }
-                const close_bracket: u8 = if (i < line.tokens.len and std.mem.eql(u8, line.tokens[i], "]")) ']' else ')';
-                const check_expr = try check_str.toOwnedSlice(self.alloc);
-                check = .{ .kind = classifyCheck(check_expr, '(', close_bracket), .expr = check_expr, .line_no = line.line_no };
-                continue;
             }
 
-            if (tok[0] == '{') {
-                // Collect tokens until } for check constraint (IN list / comparison)
-                const bracket_col = diag.tokenColumn(tok, line.raw);
-                var check_str = try std.ArrayList(u8).initCapacity(self.alloc, 32);
-                var needs_comma = false;
-                i += 1;
-                while (i < line.tokens.len and !std.mem.eql(u8, line.tokens[i], "}")) : (i += 1) {
-                    const inner_tok = line.tokens[i];
-                    if (std.mem.eql(u8, inner_tok, ",")) {
-                        needs_comma = true;
-                        continue;
-                    }
-                    if (needs_comma) try check_str.append(self.alloc, ',');
-                    try check_str.appendSlice(self.alloc, inner_tok);
-                    needs_comma = true;
-                }
-                if (i >= line.tokens.len) {
-                    diag.printDiagnostic(.{
-                        .severity = .@"error",
-                        .line_no = line.line_no,
-                        .col = bracket_col,
-                        .message = "unclosed bracket",
-                        .expected = "'}'",
-                        .actual = "end of line",
-                        .source_line = line.raw,
-                    });
-                }
-                const check_expr = try check_str.toOwnedSlice(self.alloc);
-                check = .{ .kind = classifyCheck(check_expr, '{', '}'), .expr = check_expr, .line_no = line.line_no };
-                continue;
-            }
+            // 9. Skip stray closing brackets
+            if (std.mem.eql(u8, tok, "]") or std.mem.eql(u8, tok, "}")) { i += 1; continue; }
 
-            // Skip standalone ] or } bracket
-            if (std.mem.eql(u8, tok, "]") or std.mem.eql(u8, tok, "}")) continue;
-
-            // Warn on unrecognized tokens — expected vs actual context
+            // 10. Unrecognized token warning
             diag.printDiagnostic(.{
                 .severity = .warning,
                 .line_no = line.line_no,
@@ -921,12 +919,13 @@ pub const Parser = struct {
                 .actual = tok,
                 .source_line = line.raw,
             });
+            i += 1;
         }
 
         // Validate ++ and + modifiers against type
         for (modifiers.items) |mod| {
             if (mod.kind == .auto_inc_pk or mod.kind == .auto_inc) {
-                if (type_info == .none) continue; // suffix-inferred, OK
+                if (type_info == .none) continue;
                 const is_valid = switch (type_info) {
                     .simple => |s| (s.len == 1 and (s[0] == 'n' or s[0] == 'N' or s[0] == 't' or s[0] == 'd')),
                     .int_explicit => true,
