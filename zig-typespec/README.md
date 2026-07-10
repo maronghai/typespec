@@ -293,7 +293,7 @@ Parser       AST construction (tokens → AST via ast.zig types)
 Semantic     Template resolution, inheritance merging, suffix inference, autofk
   │
   ▼
-Codegen      MySQL/PostgreSQL DDL generation (CREATE TABLE, INDEX, FK, CHECK)
+Codegen      MySQL/PostgreSQL DDL generation (via type_map.zig for type resolution)
   │
   ▼
 .sql output
@@ -316,6 +316,7 @@ SchemaDiff   Structured diff result
   ├──▶ Diff Printer    Human-readable diff output (`typespec diff`)
   │
   └──▶ Migration Gen   ALTER TABLE / ADD / DROP / MODIFY / RENAME DDL (`typespec migrate`)
+                         Uses type_map.zig for column type resolution
 ```
 
 ## Reverse Engineering Pipeline
@@ -330,8 +331,8 @@ SQL Parser   Parse CREATE DATABASE/TABLE, columns, indexes, FKs, CHECK constrain
 IR           Structured representation (SqlSchema → SqlTable → SqlColumn)
   │
   ▼
-Reverse Codegen   Type mapping, modifier reconstruction, suffix inference,
-                  CHECK/INDEX/FK conversion, template extraction (-t)
+Reverse Codegen   Type mapping (via type_map.zig), modifier reconstruction,
+                  suffix inference, CHECK/INDEX/FK conversion, template extraction (-t)
   │
   ▼
 .tps output
@@ -346,6 +347,7 @@ src/
 ├── ast.zig              AST type definitions (Field, Table, Template, TypeInfo, etc.)
 ├── parser.zig           Parser (tokens → AST, 1339 lines)
 ├── semantic.zig         Template resolution, suffix inference, autofk
+├── type_map.zig         Unified tps ↔ SQL type mapping (single source of truth)
 ├── codegen.zig          SQL DDL generation (MySQL + PostgreSQL)
 ├── diagnostic.zig       Error/warning reporting with source context + DiagnosticCollector
 ├── diff.zig             Schema diff engine (AST-level, rename detection)

@@ -312,21 +312,23 @@ Phase 1 (拆 parser) ──→ Phase 2 (统一类型映射)
 | 文件 | 变更 |
 |---|---|
 | `ast.zig` | **新建** — 174 行，纯 AST 类型定义 + fmt 辅助函数 |
+| `type_map.zig` | **新建** — 262 行，统一 tps↔SQL 类型映射（TYPE_TABLE + toSqlType + reverseLookup） |
 | `parser.zig` | 1489 → 1339 行（-150 行），AST 定义替换为 `@import("ast.zig")` + re-export |
 | `semantic.zig` | 512 → 473 行（-39 行），删除重复的 fmt 函数，改用 ast_mod |
-| `codegen.zig` | 804 → 805 行（+1 行），import 改为 ast.zig |
+| `codegen.zig` | 805 → 686 行（-119 行），类型映射改用 type_map.toSqlType()，Dialect 改为 re-export |
+| `reverse_codegen.zig` | 813 → 732 行（-81 行），simple_map 删除，reverseType 改用 type_map.reverseLookup() |
 | `diff.zig` | 594 → 594 行（0 行），import 改为 ast.zig |
-| `migrate.zig` | 186 → 506 行（+320 行），**完全重写**：SQL 文本比较 → AST diff 驱动的 ALTER TABLE 生成 |
+| `migrate.zig` | 186 → 507 行（+321 行），**完全重写**：SQL 文本比较 → AST diff 驱动的 ALTER TABLE 生成 |
 | `main.zig` | 343 → 344 行（+1 行），`compileToSql` → `compileToAst`，handleDiff/handleMigrate 使用 AST diff |
 | `diagnostic.zig` | 102 → 167 行（+65 行），新增 `DiagnosticCollector` 支持多错误收集 |
-| **总计** | 6172 → 6547 行（+375 行，净增主要来自 migrate 重写） |
+| **总计** | 6172 → 6610 行（+438 行，新增 type_map + migrate 重写，codegen/reverse_codegen 精简） |
 
 ### 各 Phase 完成情况
 
 | Phase | 目标 | 状态 |
 |---|---|---|
 | Phase 1: 拆分 parser.zig | AST 类型独立到 ast.zig | ✅ 完成 |
-| Phase 2: 统一类型映射 | type_map.zig | ⏸️ 延后 — 当前正向/逆向映射通过 180 个测试验证一致，统一表可后续添加 |
+| Phase 2: 统一类型映射 | type_map.zig | ✅ 完成 — type_map.zig 作为单一数据源，codegen/reverse_codegen/migrate 统一调用 |
 | Phase 3: migrate 接入 AST diff | ALTER TABLE 生成 | ✅ 完成 — 支持 ADD/DROP/MODIFY/RENAME COLUMN + ADD/DROP INDEX + ADD/DROP FK |
 | Phase 4: 错误恢复 | DiagnosticCollector | ✅ 完成 — Collector 就绪，parser 框架可用 |
 | Phase 5: 方言扩展框架 | DialectImpl | ⏸️ 延后 — 当前 2 方言 enum+switch 够用 |

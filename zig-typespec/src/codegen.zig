@@ -1,6 +1,7 @@
 const std = @import("std");
 const sem = @import("semantic.zig");
 const ast_mod = @import("ast.zig");
+const type_map = @import("type_map.zig");
 const Field = ast_mod.Field;
 const TypeInfo = ast_mod.TypeInfo;
 const ModifierType = ast_mod.ModifierType;
@@ -11,7 +12,7 @@ const IndexType = ast_mod.IndexType;
 const CheckConstraint = ast_mod.CheckConstraint;
 const SqlComment = ast_mod.SqlComment;
 
-pub const Dialect = enum { mysql, postgres };
+pub const Dialect = type_map.Dialect;
 
 pub const Codegen = struct {
     alloc: std.mem.Allocator,
@@ -54,120 +55,7 @@ pub const Codegen = struct {
     // ─── Type mapping ──────────────────────────────────────────
 
     fn emitType(self: Codegen, w: anytype, field: Field) !void {
-        switch (self.dialect) {
-            .mysql => try emitMysqlType(w, field),
-            .postgres => try emitPostgresType(w, field),
-        }
-    }
-
-    fn emitMysqlType(w: anytype, field: Field) !void {
-        switch (field.type_info) {
-            .none => {
-                try w.writeAll("varchar(255)");
-            },
-            .simple => {
-                const s = field.type_info.simple;
-                if (s.len == 1) {
-                    switch (s[0]) {
-                        'n' => try w.writeAll("int"),
-                        'N' => try w.writeAll("bigint"),
-                        'm' => try w.writeAll("decimal(16, 2)"),
-                        'M' => try w.writeAll("decimal(20, 6)"),
-                        'S' => try w.writeAll("text"),
-                        'b' => try w.writeAll("boolean"),
-                        'B' => try w.writeAll("blob"),
-                        'j' => try w.writeAll("json"),
-                        'd' => try w.writeAll("date"),
-                        't' => try w.writeAll("datetime"),
-                        else => try w.writeAll(s),
-                    }
-                } else {
-                    try w.writeAll(s);
-                }
-            },
-            .int_explicit => |n| {
-                try w.print("int({d})", .{n});
-            },
-            .decimal_explicit => |ds| {
-                try w.print("decimal({d}, {d})", .{ ds.precision, ds.scale });
-            },
-            .varchar_explicit => |n| {
-                if (n > 0) {
-                    try w.print("varchar({d})", .{n});
-                } else {
-                    try w.writeAll("varchar(255)");
-                }
-            },
-            .enum_type => |vals| {
-                try w.writeAll("ENUM(");
-                for (vals, 0..) |v, vi| {
-                    if (vi > 0) try w.writeAll(", ");
-                    try w.print("'{s}'", .{v});
-                }
-                try w.writeAll(")");
-            },
-        }
-    }
-
-    fn emitPostgresType(w: anytype, field: Field) !void {
-        switch (field.type_info) {
-            .none => {
-                try w.writeAll("varchar(255)");
-            },
-            .simple => {
-                const s = field.type_info.simple;
-                if (s.len == 1) {
-                    switch (s[0]) {
-                        'n' => try w.writeAll("integer"),
-                        'N' => try w.writeAll("bigint"),
-                        'm' => try w.writeAll("numeric(16, 2)"),
-                        'M' => try w.writeAll("numeric(20, 6)"),
-                        'S' => try w.writeAll("text"),
-                        'b' => try w.writeAll("boolean"),
-                        'B' => try w.writeAll("bytea"),
-                        'j' => try w.writeAll("json"),
-                        'd' => try w.writeAll("date"),
-                        't' => try w.writeAll("timestamp"),
-                        else => try w.writeAll(s),
-                    }
-                } else {
-                    // MySQL-specific types → PG equivalents
-                    if (std.mem.eql(u8, s, "mediumblob") or std.mem.eql(u8, s, "longblob") or std.mem.eql(u8, s, "tinyblob")) {
-                        try w.writeAll("bytea");
-                    } else if (std.mem.eql(u8, s, "mediumtext") or std.mem.eql(u8, s, "longtext")) {
-                        try w.writeAll("text");
-                    } else if (std.mem.eql(u8, s, "tinytext")) {
-                        try w.writeAll("varchar(255)");
-                    } else if (std.mem.eql(u8, s, "datetime")) {
-                        try w.writeAll("timestamp");
-                    } else if (std.mem.eql(u8, s, "tinyint")) {
-                        try w.writeAll("smallint");
-                    } else if (std.mem.eql(u8, s, "mediumint")) {
-                        try w.writeAll("integer");
-                    } else {
-                        try w.writeAll(s);
-                    }
-                }
-            },
-            .int_explicit => |n| {
-                _ = n;
-                try w.writeAll("integer");
-            },
-            .decimal_explicit => |ds| {
-                try w.print("numeric({d}, {d})", .{ ds.precision, ds.scale });
-            },
-            .varchar_explicit => |n| {
-                if (n > 0) {
-                    try w.print("varchar({d})", .{n});
-                } else {
-                    try w.writeAll("varchar(255)");
-                }
-            },
-            .enum_type => |vals| {
-                try w.writeAll("text");
-                _ = vals;
-            },
-        }
+        try type_map.toSqlType(w, self.dialect, field.type_info);
     }
 
     // ─── Field comment ─────────────────────────────────────────
@@ -436,19 +324,12 @@ pub const Codegen = struct {
 
     fn isNumericType(self: Codegen, ti: TypeInfo) bool {
         _ = self;
-        switch (ti) {
-            .simple => |s| return std.mem.eql(u8, s, "n") or std.mem.eql(u8, s, "N"),
-            .int_explicit, .decimal_explicit => return true,
-            else => return false,
-        }
+        return type_map.isNumericTpsType(ti);
     }
 
     fn isDatetimeType(self: Codegen, ti: TypeInfo) bool {
         _ = self;
-        switch (ti) {
-            .simple => |s| return std.mem.eql(u8, s, "t") or std.mem.eql(u8, s, "d"),
-            else => return false,
-        }
+        return type_map.isDatetimeTpsType(ti);
     }
 
     // ─── Field suffix (post-column) ────────────────────────────

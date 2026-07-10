@@ -3,6 +3,7 @@ const diff_mod = @import("diff.zig");
 const sem = @import("semantic.zig");
 const ast_mod = @import("ast.zig");
 const codegen = @import("codegen.zig");
+const type_map = @import("type_map.zig");
 const Field = ast_mod.Field;
 const TypeInfo = ast_mod.TypeInfo;
 

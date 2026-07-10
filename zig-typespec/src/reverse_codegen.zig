@@ -1,104 +1,23 @@
 const std = @import("std");
 const sp = @import("sql_parser.zig");
+const type_map = @import("type_map.zig");
 const Dialect = sp.Dialect;
 
 // ─── Type Reverse Mapping ────────────────────────────────────────
 
 fn reverseType(sql_type: []const u8, col_name: []const u8, is_auto_inc: bool, is_default_ts: bool) TypeResult {
-    const t = std.mem.trim(u8, sql_type, " \t");
-
-    if (std.mem.eql(u8, t, "boolean") or std.mem.eql(u8, t, "tinyint(1)"))
-        return .{ .tps = "b", .omit = false };
-
-    const simple_map = [_]struct { sql: []const u8, tps: []const u8 }{
-        // MySQL types
-        .{ .sql = "int", .tps = "n" },       .{ .sql = "bigint", .tps = "N" },
-        .{ .sql = "decimal(16, 2)", .tps = "m" }, .{ .sql = "decimal(16,2)", .tps = "m" },
-        .{ .sql = "decimal(20, 6)", .tps = "M" }, .{ .sql = "decimal(20,6)", .tps = "M" },
-        .{ .sql = "text", .tps = "S" },       .{ .sql = "blob", .tps = "B" },
-        .{ .sql = "json", .tps = "j" },       .{ .sql = "date", .tps = "d" },
-        .{ .sql = "datetime", .tps = "t" },   .{ .sql = "timestamp", .tps = "t" },
-        .{ .sql = "tinyint", .tps = "n" },    .{ .sql = "smallint", .tps = "n" },
-        .{ .sql = "mediumint", .tps = "n" },  .{ .sql = "bit(1)", .tps = "b" },
-        // MySQL BLOB/TEXT variants
-        .{ .sql = "tinyblob", .tps = "B" },   .{ .sql = "mediumblob", .tps = "B" },
-        .{ .sql = "longblob", .tps = "B" },   .{ .sql = "tinytext", .tps = "s" },
-        .{ .sql = "mediumtext", .tps = "S" }, .{ .sql = "longtext", .tps = "S" },
-        // PostgreSQL types
-        .{ .sql = "integer", .tps = "n" },    .{ .sql = "serial", .tps = "n" },
-        .{ .sql = "bigserial", .tps = "N" },  .{ .sql = "bytea", .tps = "B" },
-        .{ .sql = "numeric", .tps = "m" },    .{ .sql = "varchar", .tps = "s" },
-        .{ .sql = "boolean", .tps = "b" },    .{ .sql = "jsonb", .tps = "j" },
-        .{ .sql = "uuid", .tps = "uuid" },    .{ .sql = "real", .tps = "real" },
-        .{ .sql = "float4", .tps = "real" },  .{ .sql = "float8", .tps = "float8" },
-        .{ .sql = "double precision", .tps = "float8" },
-        .{ .sql = "character", .tps = "s" },
-        .{ .sql = "timestamp without time zone", .tps = "t" },
-        .{ .sql = "timestamp with time zone", .tps = "t" },
-    };
-    for (simple_map) |m| {
-        if (std.mem.eql(u8, t, m.sql))
-            return .{ .tps = m.tps, .omit = canOmitType(col_name, m.tps, is_auto_inc, is_default_ts) };
-    }
-
-    if (std.mem.startsWith(u8, t, "int(") and std.mem.endsWith(u8, t, ")"))
-        return .{ .tps = t[4 .. t.len - 1], .omit = false };
-    if (std.mem.startsWith(u8, t, "decimal(") and std.mem.endsWith(u8, t, ")"))
-        return .{ .tps = t[8 .. t.len - 1], .omit = false };
-    // PostgreSQL numeric(p,s)
-    if (std.mem.startsWith(u8, t, "numeric(") and std.mem.endsWith(u8, t, ")"))
-        return .{ .tps = t[8 .. t.len - 1], .omit = false };
-    if (std.mem.eql(u8, t, "varchar(255)"))
-        return .{ .tps = "s", .omit = canOmitType(col_name, "s", is_auto_inc, is_default_ts) };
-    // PostgreSQL character varying(n)
-    if (std.mem.startsWith(u8, t, "character varying(") and std.mem.endsWith(u8, t, ")")) {
-        const inner = std.mem.trim(u8, t[17 .. t.len - 1], " ");
-        if (std.mem.eql(u8, inner, "255"))
-            return .{ .tps = "s", .omit = canOmitType(col_name, "s", is_auto_inc, is_default_ts) };
-        const sbuf = struct {
-            var buf: [16]u8 = undefined;
-        };
-        sbuf.buf[0] = 's';
-        for (inner, 0..) |ch, i| sbuf.buf[i + 1] = ch;
-        return .{ .tps = sbuf.buf[0 .. 1 + inner.len], .omit = false };
-    }
-    if (std.mem.startsWith(u8, t, "varchar(") and std.mem.endsWith(u8, t, ")")) {
-        const inner = std.mem.trim(u8, t[8 .. t.len - 1], " ");
-        // "s" ++ inner — use thread-local buffer
-        const sbuf = struct {
-            var buf: [16]u8 = undefined;
-        };
-        sbuf.buf[0] = 's';
-        for (inner, 0..) |ch, i| sbuf.buf[i + 1] = ch;
-        return .{ .tps = sbuf.buf[0 .. 1 + inner.len], .omit = false };
-    }
-    if (std.mem.startsWith(u8, t, "ENUM(") or std.mem.startsWith(u8, t, "enum("))
-        return .{ .tps = t, .omit = false };
-
-    return .{ .tps = t, .omit = false };
+    const r = type_map.reverseLookup(sql_type, col_name, is_auto_inc, is_default_ts);
+    return .{ .tps = r.tps, .omit = r.omit };
 }
 
 const TypeResult = struct { tps: []const u8, omit: bool };
 
-fn canOmitType(cn: []const u8, tc: []const u8, ai: bool, ts: bool) bool {
-    if (ai or ts) return false;
-    if (cn.len > 3) {
-        if (std.mem.endsWith(u8, cn, "_id") and std.mem.eql(u8, tc, "n")) return true;
-        if (std.mem.endsWith(u8, cn, "_on") and std.mem.eql(u8, tc, "d")) return true;
-        if (std.mem.endsWith(u8, cn, "_at") and std.mem.eql(u8, tc, "t")) return true;
-    }
-    return std.mem.eql(u8, tc, "s");
-}
-
 fn isDatetime(sql_type: []const u8) bool {
-    const t = std.mem.trim(u8, sql_type, " \t");
-    return std.mem.eql(u8, t, "datetime") or std.mem.eql(u8, t, "timestamp") or
-        std.mem.eql(u8, t, "timestamp without time zone") or
-        std.mem.eql(u8, t, "timestamp with time zone");
+    return type_map.isDatetimeSqlType(sql_type);
 }
 
 fn isCurrentTimestamp(dv: []const u8) bool {
-    return std.mem.eql(u8, dv, "CURRENT_TIMESTAMP") or std.mem.eql(u8, dv, "now()");
+    return type_map.isCurrentTimestamp(dv);
 }
 
 // ─── Write Modifier + CHECK inline ──────────────────────────────
