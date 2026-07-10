@@ -1,0 +1,194 @@
+(* ── Top Level ── *)
+
+spec             = { blank_line | schema_decl | template_def | table_decl } ;
+blank_line       = newline ;
+
+(* ── Schema ── *)
+
+schema_decl      = "$", WS, schema_name, [ WS, charset_name ], { WS, schema_flag }, [ WS, comment_trailing ], newline ;
+schema_name      = word ;
+schema_flag      = "autofk" ;  (* auto-infer FK from _id suffix *)
+charset_name     = word ;
+
+(* ── Template ── *)
+
+template_def     = "%", [ WS, template_name ], { WS, parent_ref }, newline, field_list ;
+template_name    = word ;
+parent_ref       = ">", WS, parent_name, { WS, "+", WS, parent_name }
+                 | parent_name, { WS, "+", WS, parent_name } ;
+parent_name      = word ;
+
+(* ── Table ── *)
+
+table_decl       = "#", [ template_ref ], WS, table_name, [ WS, comment_trailing ], newline, field_list ;
+template_ref     = template_name ;
+table_name       = word ;
+
+(* ── Field List ── *)
+
+field_list       = { field_decl | blank_line | foreign_key_decl
+                   | index_decl | composite_pk_decl | template_slot } ;
+field_decl       = field_name, [ WS, type_symbol ], [ WS, modifier_list ],
+                   [ WS, inline_fk ], [ WS, check_clause ], [ WS, comment_line ], newline ;
+modifier_list    = modifier, { WS, modifier } ;
+inline_fk        = [ ">", WS ], ( ref_table, ".", [ref_field] | ref_table ) ;
+(* Shorthand: user.id — infer local field from table name *)
+(* Ultra:     user — infer local field as {table}_id and ref field as `id`. *)
+(* Trailing dot: table. — infer ref_field from local field name *)
+
+(* ── Field Name ── *)
+
+field_name       = name_char, { name_char } ;
+name_char        = letter | digit | "_" ;
+
+(* ── Type Symbol ── *)
+
+type_symbol      = numeric_type
+                 | money_type
+                 | string_type
+                 | enum_type
+                 | atomic_type ;
+
+numeric_type     = int_short | int_explicit | decimal_explicit ;
+int_short        = "n" | "N" ;                     (* MySQL: int | bigint *)
+int_explicit     = positive_int ;                  (* MySQL: int(n) *)
+decimal_explicit = positive_int, ",", positive_int ; (* MySQL: decimal(m,n) *)
+positive_int     = digit, { digit } ;
+
+money_type       = "m" | "M" ;                     (* MySQL: decimal(16,2) | decimal(20,6) *)
+
+string_type      = varchar_short | varchar_explicit | text_type ;
+varchar_short    = "s" ;                           (* MySQL: varchar *)
+varchar_explicit = "s", positive_int ;             (* MySQL: varchar(n) *)
+text_type        = "S" ;                           (* MySQL: text *)
+
+enum_type        = "e", "(", enum_val, { ",", enum_val }, ")" ;
+enum_val         = word | string_literal ;
+
+atomic_type      = "b" | "B" | "j" | "d" | "t" ;
+                   (* b → MySQL: tinyint(1) (boolean) *)
+                   (* B → MySQL: blob *)
+                   (* j → MySQL: json *)
+                   (* d → MySQL: date *)
+                   (* t → MySQL: datetime *)
+
+(* ── Modifiers ── *)
+(* `+` is syntactically unambiguous but semantically               *)
+(* context-dependent:                                             *)
+(* `+` on n/N/\d+ = AUTO_INCREMENT;                               *)
+(* `+` on t/d = DEFAULT CURRENT_TIMESTAMP;                        *)
+(* `++` on n/N/\d+ = AUTO_INCREMENT PRIMARY KEY;                  *)
+(* `++` on t/d = DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP *)
+(* `u` on n/N/\d+ = UNSIGNED;                                     *)
+(* `@u` on any field = UNIQUE INDEX (inline)                       *)
+(* `@` on any field = INDEX (inline)                               *)
+(* `@f` is NOT a valid inline modifier — use standalone @f form.  *)
+(* `+`/`++` on other types (s, m, b, etc.) is undefined           *)
+(* and should be reported as an error by the compiler.            *)
+(* `=` always requires a value; see §4 and §13                    *)
+(* Modifier Resolution for details.                               *)
+
+modifier         = fused_not_null_default | default_val | auto_inc_pk | auto_inc
+                 | primary_key | not_null | unsigned | inline_unique | inline_index ;
+
+fused_not_null_default = "*", "=", default_value ;
+                       (* e.g. *=0 → NOT NULL + DEFAULT 0 *)
+auto_inc_pk      = "++" ;
+auto_inc         = "+" ;
+primary_key      = "!" ;
+not_null         = "*" ;
+unsigned         = "u" ;
+inline_unique    = "@", "u" ;
+inline_index     = "@" ;  (* inline regular INDEX on this field *)
+default_val      = "=", default_value ;  (* no space: =0, not = 0 *)
+default_value    = default_word | string_literal | number_literal ;
+default_word     = letter, { letter | digit | "_" } ;
+
+(* ── CHECK Constraint ── *)
+(* Disambiguation rules:                                              *)
+(*   [a,b]           where a,b are bare numbers → BETWEEN a AND b     *)
+(*   [a,b)           where a,b are bare numbers → >= a AND < b       *)
+(*   (a,b]           where a,b are bare numbers → > a AND <= b       *)
+(*   (a,b)           where a,b are bare numbers → > a AND < b        *)
+(*   {a,b,c,...}     values → IN (a, b, c, …)                       *)
+(*   {>0} / {>=1}    single comparison → direct compare               *)
+(*   {>=0, <=100}    compound comparisons → AND-joined                 *)
+(*   [] does NOT support comparison operators — use {} for those     *)
+
+check_clause     = "[", check_body, "]" | "{", check_body, "}" | "(", check_body, ")" | "(", check_body, "]" ;
+check_body       = in_list | between_range | comparison_list | compound_comparison ;
+in_list          = check_val, { ",", check_val } ;                   (* ≥2 values *)
+between_range    = number_literal, ",", number_literal ;             (* exactly 2 bare numbers *)
+check_val        = number_literal | string_literal | comparison_op, number_literal ;
+comparison_list  = comparison_op, number_literal ;                   (* e.g. >0, >=1 *)
+compound_comparison = comparison_op, number_literal, ",", WS, comparison_op, number_literal ;
+comparison_op    = ">=" | "<=" | ">" | "<" | "=" ;
+
+(* ── Foreign Key ── *)
+(* Standard:   > field_name table.field                              *)
+(* Trailing dot: > field_name table.                                  *)
+(*   Trailing dot infers ref_field from local field name. *)
+(* Shorthand-no-dot: > field_name ref_table                          *)
+(*   Ref field defaults to `id`.                                     *)
+(* Ultra:       > table.field                                        *)
+(*   Infers local field as {table}_id when no local field specified.  *)
+(* Ultra-no-dot: > table                                             *)
+(*   Infers local field as {table}_id and ref field as `id`.          *)
+
+foreign_key_decl = ">", WS, field_name
+                 , WS, ( ref_table, ".", [ref_field] | ref_table )
+                 , { WS, fk_action }, newline ;
+fk_action        = ( "-", "C" | "-", "N" | "C" | "N" ) ;
+ref_table        = word ;
+ref_field        = word ;
+
+(* ── Composite Primary Key ── *)
+
+composite_pk_decl = "!", WS, field_name, { WS, field_name }, newline ;
+
+(* ── Template Slot ── *)
+
+template_slot    = "..." ;
+
+(* ── Index ── *)
+(* Full:    @ idx_name (field1, field2)                              *)
+(* Shorthand: @ field1 [field2 ...]  → auto-generate name            *)
+(*            @u field1 [field2 ...] → UNIQUE, auto-generate name    *)
+(*            @f field               → FULLTEXT INDEX                 *)
+(* Suffix:  field- → DESC (ASC is default, no suffix needed)         *)
+
+index_decl       = "@", [ "u" | "f" ], ( index_with_name | index_shorthand ), newline ;
+index_with_name  = WS, index_name, [ WS, "(", WS, field_list_comma, WS, ")" ] ;
+index_shorthand  = WS, field, { WS, field } ;
+field_list_comma = field, { WS, ",", WS, field } ;
+field            = IDENT, [ "-" ] ;
+(* When parentheses follow @ directly (no name), the compiler         *)
+(* auto-generates the index name from field names: idx_f1_f2.         *)
+(* appropriate prefix (idx_ / uk_ / ft_).                            *)
+index_name       = word ;
+field_list_comma = field, { ",", WS, field } ;
+
+(* ── Comments ── *)
+(* Three comment styles:                                          *)
+(*   `//` → COMMENT clause in DDL (column or table)              *)
+(*   `--` → SQL comment passed through to output                 *)
+(*   `;`  → spec comment, stripped from output                   *)
+(* `comment_line` allows any one of these on a field line.       *)
+(* `comment_trailing` is for schema/table header lines.          *)
+
+comment_line     = comment | sql_comment | spec_comment ;
+comment_trailing = sql_comment | comment ;
+comment          = ":", { char } ;
+sql_comment      = "--", { char } ;
+spec_comment     = ";", { char } ;
+
+(* ── Lexical ── *)
+
+newline          = ? platform line terminator ? ;
+WS               = { " " | "\t" } ;
+letter           = "a".."z" | "A".."Z" ;
+digit            = "0".."9" ;
+word             = ( letter | "_" ), { letter | digit | "_" } ;
+char             = ? any character except newline ? ;
+string_literal   = "'", { char | "''" }, "'" ;
+number_literal   = [ "-" ], digit, { digit }, [ ".", { digit } ] ;

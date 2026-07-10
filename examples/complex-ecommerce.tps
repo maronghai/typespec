@@ -1,0 +1,380 @@
+; ══════════════════════════════════════════════════════════════
+; Complex E-Commerce + SaaS Platform Schema
+; ══════════════════════════════════════════════════════════════
+; Features demonstrated:
+;   - 3-level template inheritance (base → audit → soft_delete)
+;   - Default template for implicit tables
+;   - All type symbols: n, N, m, M, s, S, b, B, j, d, t
+;   - Suffix inference: _id, _on, _at
+;   - FK ultra-shorthand: > table.field (infers {table}_id)
+;   - Type+modifier fusion: n!, n*, n=0
+;   - CHECK constraints: range, IN, comparison
+;   - Composite primary keys
+;   - Composite unique indexes
+;   - Fulltext index
+;   - Three comment styles: ;, --, :
+;   - Field modifiers: ++, +, *, =, !
+;   - Template inheritance shorthand: % name > parent
+; ══════════════════════════════════════════════════════════════
+
+$ ecommerce
+
+; ──────────────────────────────────────────────────────────────
+; Template Definitions
+; ──────────────────────────────────────────────────────────────
+
+; ── Base: universal audit fields ──
+% base
+id n++
+...
+version   N
+status    1 =0
+create_at +
+update_at ++
+
+; ── Audit: inherits base, adds soft-delete tracking ──
+% audit > base
+...
+deleted_at
+deleted_by n           ; explicit type (not inferred)
+
+; ── Soft Delete: inherits audit, adds restore capability ──
+% soft_delete > audit
+...
+restore_token s64
+restore_expires_on
+
+; ── Default template (unnamed) for ad-hoc tables ──
+%
+id n++
+...
+created_at +
+
+; ──────────────────────────────────────────────────────────────
+; User Domain
+; ──────────────────────────────────────────────────────────────
+
+#soft_delete user  : 用户表
+
+name        s32 * @
+email       s128 * @u
+password    s256 *
+phone       s20 @
+avatar      S
+bio         s512
+is_verified b =0
+is_admin    b =0
+role        1 =0 [0,1,2,3]
+balance     m =0
+settings    j
+
+; ── User Address ──
+#soft_delete user_address  : 用户地址
+
+user_id     @         ; suffix _id → int
+label     s16 =''     -- e.g. 'home', 'office'
+province  s32
+city      s32
+district  s32
+address   s256 *
+zip       s10
+phone     s20
+is_default b =0
+
+> user.id
+
+@ idx_default (user_id, is_default)
+
+; ── User OAuth ──
+#audit user_oauth  : 第三方登录
+
+user_id     @         ; > user.id
+provider  s32 *    -- 'github', 'google', 'wechat'
+open_id   s128 *
+access_token  S
+refresh_token S
+expires_on
+
+> user.id
+
+@u uk_provider_open (provider, open_id)
+
+; ──────────────────────────────────────────────────────────────
+; Product Domain
+; ──────────────────────────────────────────────────────────────
+
+; ── Category (self-referencing tree) ──
+#base category  : 商品分类
+
+name      s64 *
+parent_id @         ; self-ref, nullable root
+sort_order n =0 @
+icon      s128
+is_active b =1
+
+> category.id
+
+; ── Brand ──
+#soft_delete brand  : 品牌
+
+name      s64 * @u
+logo      s256
+description S
+website   s256
+is_active b =1
+
+; ── Product ──
+#soft_delete product  : 商品表
+
+name      s128 *
+subtitle  s256
+brand_id @        -- > brand.id
+category_id @     -- > category.id
+price     m * {>0} @
+market_price m =0
+cost_price  m =0
+stock     n =0 {>=0}
+sales     N =0 @
+weight    M =0
+rating    4,2 =0        ; explicit decimal: decimal(4,2)
+raw_data  B             ; binary attachment (blob)
+is_on_sale b =1
+sort_order n =0
+main_image s256
+images    j
+attributes j
+
+> brand.id
+> category.id
+
+@ idx_sale_status (is_on_sale, sort_order)
+
+; ── Product SKU ──
+#audit product_sku  : 商品 SKU
+
+product_id         ; > product.id
+sku_code   s64 * @u
+spec_name  s128 *    -- e.g. "红色 / XL"
+price      m * {>0}
+stock      n =0 {>=0}
+image      s256
+sort_order n =0
+
+> product.id
+
+; ── Product Review ──
+#soft_delete product_review  : 商品评价
+
+product_id         ; > product.id
+user_id            -- > user.id
+order_id           -- > order.id
+rating     1 * [1,2,3,4,5] @
+title      s128
+content    S
+images     j
+is_anonymous b =0
+reply      S
+replied_on
+
+> product.id
+> user.id
+
+; ──────────────────────────────────────────────────────────────
+; Order Domain
+; ──────────────────────────────────────────────────────────────
+
+; ── Coupon Template ──
+% coupon_base > base
+...
+type        1 =0 [0,1,2]     -- 0=fixed, 1=percent, 2=free_shipping
+min_amount  m =0
+discount    m =0
+max_discount m =0
+start_on
+end_on
+
+; ── Coupon ──
+#coupon_base coupon  : 优惠券
+
+name      s64 *
+code      s64 * @u
+total     n =0
+used      n =0
+per_user  n =1
+is_active b =1
+
+; ── Order ──
+#soft_delete order  : 订单表
+
+order_no   s64 * @u
+user_id @         -- > user.id
+coupon_id         -- > coupon.id (nullable)
+status     1 =0 [0,1,2,3,4,5] @  -- 0=pending, 1=paid, 2=shipped, 3=completed, 4=cancelled, 5=refunded
+total      m * {>0}
+discount   m =0
+shipping   m =0
+actual     m * {>0}
+payment_method s32
+payment_no s128
+note       s512
+paid_on @
+shipped_on t
+completed_on t
+
+> user.id
+> coupon.id
+
+; ── Order Item ──
+#audit order_item  : 订单商品
+
+order_id @         -- > order.id
+product_id         -- > product.id
+sku_id             -- > product_sku.id
+product_name s128 *   -- snapshot
+sku_name     s128 *   -- snapshot
+price        m *
+quantity     n * {>=1}
+subtotal     m *
+image        s256
+
+> order.id
+> product.id
+> product_sku.id
+
+; ── Shipping ──
+#audit shipping  : 物流信息
+
+order_id @         -- > order.id
+carrier     s32 *    -- 'SF', 'ZTO', 'YTO'
+tracking_no s64 *
+status      1 =0 [0,1,2,3]
+shipped_on  t
+delivered_on t
+
+> order.id
+
+@u uk_tracking (carrier, tracking_no)
+
+; ──────────────────────────────────────────────────────────────
+; Payment Domain
+; ──────────────────────────────────────────────────────────────
+
+#audit payment  : 支付记录
+
+order_id @         -- > order.id
+user_id @          -- > user.id
+method     s32 *    -- 'alipay', 'wechat', 'card'
+amount     m * {>0}
+trade_no   s128 @
+status     1 =0 [0,1,2,3]  -- 0=pending, 1=success, 2=failed, 3=refunded
+paid_on    t
+extra      j
+
+> order.id
+> user.id
+
+; ──────────────────────────────────────────────────────────────
+; Content Domain (CMS)
+; ──────────────────────────────────────────────────────────────
+
+#base article  : 文章/帮助中心
+
+title     s256 *
+slug      s128 * @u
+content   S *         -- long-form HTML
+summary   s512
+cover     s256
+category  s32 ='' @  -- 'help', 'faq', 'changelog'
+tags      j
+views     N =0
+is_published b =0
+published_on t
+
+@ idx_published (is_published, published_on)
+@f ft_content (title, content)
+
+; ── Banner / Ad ──
+#base banner  : 轮播图
+
+title     s64 *
+image     s256 *
+link      s512
+position  s32 =''    -- 'home', 'list', 'detail'
+sort_order n =0
+is_active b =1
+start_on
+end_on
+
+@ idx_position (position, is_active)
+
+; ──────────────────────────────────────────────────────────────
+; Notification Domain
+; ──────────────────────────────────────────────────────────────
+
+#audit notification  : 站内消息
+
+user_id            -- > user.id
+type      s32 * @   -- 'order', 'system', 'promo'
+title     s128 *
+content   S
+is_read   b =0
+link      s512
+extra     j
+
+> user.id
+
+@ idx_user_read (user_id, is_read)
+
+; ──────────────────────────────────────────────────────────────
+; System / Config Domain
+; ──────────────────────────────────────────────────────────────
+
+# setting  : 系统配置
+
+key       s128 * @u
+value     S
+category  s32 ='' @  -- 'basic', 'payment', 'shipping'
+updated_on t++
+
+; ── Operation Log ──
+% log_base
+id N++
+...
+operator_id   @
+operator_name s32
+action   s32 * @
+target   s32
+target_id N
+detail   j
+ip       s64
+created_at +
+
+#log_base op_log  : 操作日志
+
+@ idx_target (target, target_id)
+
+; ──────────────────────────────────────────────────────────────
+; Composite Primary Key Example
+; ──────────────────────────────────────────────────────────────
+
+; ── User Role (many-to-many) ──
+# user_role  : 用户角色关联
+
+user_id !
+role_id ! @
+
+; ── Product Tag (many-to-many) ──
+# product_tag  : 商品标签关联
+
+product_id !
+tag_id     ! @
+
+> product.id
+> tag.id
+
+; ── Tag ──
+#base tag  : 标签
+
+name     s32 * @u
+color    s7 =''     -- hex color: '#FF5722'
+usage_count n =0

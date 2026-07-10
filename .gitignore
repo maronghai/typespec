@@ -1,0 +1,54 @@
+# Zig 构建产物
+.zig-cache/
+.zigmod/
+zig-out/
+
+# 编译中间产物
+*.dll
+*.dylib
+*.exe
+*.exp
+*.lib
+*.o
+*.obj
+*.pdb
+*.so
+*.d
+
+# 模型与数据文件
+*.bin
+*.ckpt
+*.gguf
+*.pth
+*.safetensors
+models/
+
+# IDE/编辑器配置
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+*.swo
+*.swp
+*~
+.mimocode/
+
+# CodeArts 平台配置
+.arts/
+.codeartsdoer/
+
+# OS 临时文件
+.$RECYCLE.BIN/
+.AppleDouble
+.DS_Store
+._*
+.directory
+Desktop.ini
+ehthumbs.db
+Thumbs.db
+
+node_modules/
+dist/
+package-lock.json
+bun.lock
+nul
