@@ -8,7 +8,7 @@ CREATE TABLE "idx_test" (
   "email" varchar(128),
   "content" text,
   UNIQUE ("email"),
-  ("name"),
+  ,
   -- WARNING: FULLTEXT INDEX not supported inline in PostgreSQL, skipping
   
 );

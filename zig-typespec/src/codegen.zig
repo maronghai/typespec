@@ -130,7 +130,22 @@ pub const Codegen = struct {
                         else => try w.writeAll(s),
                     }
                 } else {
-                    try w.writeAll(s);
+                    // MySQL-specific types → PG equivalents
+                    if (std.mem.eql(u8, s, "mediumblob") or std.mem.eql(u8, s, "longblob") or std.mem.eql(u8, s, "tinyblob")) {
+                        try w.writeAll("bytea");
+                    } else if (std.mem.eql(u8, s, "mediumtext") or std.mem.eql(u8, s, "longtext")) {
+                        try w.writeAll("text");
+                    } else if (std.mem.eql(u8, s, "tinytext")) {
+                        try w.writeAll("varchar(255)");
+                    } else if (std.mem.eql(u8, s, "datetime")) {
+                        try w.writeAll("timestamp");
+                    } else if (std.mem.eql(u8, s, "tinyint")) {
+                        try w.writeAll("smallint");
+                    } else if (std.mem.eql(u8, s, "mediumint")) {
+                        try w.writeAll("integer");
+                    } else {
+                        try w.writeAll(s);
+                    }
                 }
             },
             .int_explicit => |n| {
@@ -227,14 +242,12 @@ pub const Codegen = struct {
                     }
                     if (dominated) break;
                 }
-                if (!dominated) {
+                if (!dominated and self.dialect == .mysql) {
                     if (needs_comma.*) try w.writeAll(",\n");
                     needs_comma.* = true;
-                    switch (self.dialect) {
-                        .mysql => try w.print("  INDEX `idx_{s}` (`{s}`)", .{ field.name, field.name }),
-                        .postgres => try w.print("  ({s})", .{field.name}),
-                    }
+                    try w.print("  INDEX `idx_{s}` (`{s}`)", .{ field.name, field.name });
                 }
+                // PG: inline INDEX not supported — skip silently (use CREATE INDEX separately)
             }
         }
     }
@@ -279,7 +292,11 @@ pub const Codegen = struct {
         needs_comma.* = true;
         try w.writeAll("  ");
         switch (idx.kind) {
-            .regular => {},
+            .regular => {
+                // PG: regular INDEX not supported inline in CREATE TABLE — skip
+                // (use CREATE INDEX separately)
+                return;
+            },
             .unique => try w.writeAll("UNIQUE "),
             .fulltext => {
                 // PG has no inline FULLTEXT; emit as comment

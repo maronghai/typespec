@@ -1,5 +1,6 @@
 const std = @import("std");
 const sp = @import("sql_parser.zig");
+const Dialect = sp.Dialect;
 
 // ─── Type Reverse Mapping ────────────────────────────────────────
 
@@ -19,10 +20,21 @@ fn reverseType(sql_type: []const u8, col_name: []const u8, is_auto_inc: bool, is
         .{ .sql = "datetime", .tps = "t" },   .{ .sql = "timestamp", .tps = "t" },
         .{ .sql = "tinyint", .tps = "n" },    .{ .sql = "smallint", .tps = "n" },
         .{ .sql = "mediumint", .tps = "n" },  .{ .sql = "bit(1)", .tps = "b" },
+        // MySQL BLOB/TEXT variants
+        .{ .sql = "tinyblob", .tps = "B" },   .{ .sql = "mediumblob", .tps = "B" },
+        .{ .sql = "longblob", .tps = "B" },   .{ .sql = "tinytext", .tps = "s" },
+        .{ .sql = "mediumtext", .tps = "S" }, .{ .sql = "longtext", .tps = "S" },
         // PostgreSQL types
         .{ .sql = "integer", .tps = "n" },    .{ .sql = "serial", .tps = "n" },
         .{ .sql = "bigserial", .tps = "N" },  .{ .sql = "bytea", .tps = "B" },
         .{ .sql = "numeric", .tps = "m" },    .{ .sql = "varchar", .tps = "s" },
+        .{ .sql = "boolean", .tps = "b" },    .{ .sql = "jsonb", .tps = "j" },
+        .{ .sql = "uuid", .tps = "uuid" },    .{ .sql = "real", .tps = "real" },
+        .{ .sql = "float4", .tps = "real" },  .{ .sql = "float8", .tps = "float8" },
+        .{ .sql = "double precision", .tps = "float8" },
+        .{ .sql = "character", .tps = "s" },
+        .{ .sql = "timestamp without time zone", .tps = "t" },
+        .{ .sql = "timestamp with time zone", .tps = "t" },
     };
     for (simple_map) |m| {
         if (std.mem.eql(u8, t, m.sql))
@@ -80,7 +92,13 @@ fn canOmitType(cn: []const u8, tc: []const u8, ai: bool, ts: bool) bool {
 
 fn isDatetime(sql_type: []const u8) bool {
     const t = std.mem.trim(u8, sql_type, " \t");
-    return std.mem.eql(u8, t, "datetime") or std.mem.eql(u8, t, "timestamp");
+    return std.mem.eql(u8, t, "datetime") or std.mem.eql(u8, t, "timestamp") or
+        std.mem.eql(u8, t, "timestamp without time zone") or
+        std.mem.eql(u8, t, "timestamp with time zone");
+}
+
+fn isCurrentTimestamp(dv: []const u8) bool {
+    return std.mem.eql(u8, dv, "CURRENT_TIMESTAMP") or std.mem.eql(u8, dv, "now()");
 }
 
 // ─── Write Modifier + CHECK inline ──────────────────────────────
@@ -88,7 +106,7 @@ fn isDatetime(sql_type: []const u8) bool {
 fn writeColumnSuffix(w: anytype, col: sp.SqlColumn, indexes: []const sp.SqlIndex, check_expr: ?[]const u8) !void {
     // ---- type ----
     const is_ai = col.auto_increment;
-    const is_ts = if (col.default_val) |dv| std.mem.eql(u8, dv, "CURRENT_TIMESTAMP") else false;
+    const is_ts = if (col.default_val) |dv| isCurrentTimestamp(dv) else false;
     const tr = reverseType(col.type_sql, col.name, is_ai, is_ts);
     if (!tr.omit) {
         try w.writeAll(" ");
@@ -116,7 +134,7 @@ fn writeColumnSuffix(w: anytype, col: sp.SqlColumn, indexes: []const sp.SqlIndex
     } else if (isDatetime(col.type_sql)) {
         // datetime without auto_increment — check DEFAULT for +/++
         if (col.default_val) |dv| {
-            if (std.mem.eql(u8, dv, "CURRENT_TIMESTAMP")) {
+            if (isCurrentTimestamp(dv)) {
                 if (col.on_update_current_timestamp) {
                     try w.writeAll(" ++");
                 } else {
@@ -155,8 +173,8 @@ fn writeColumnSuffix(w: anytype, col: sp.SqlColumn, indexes: []const sp.SqlIndex
 
     // 5. DEFAULT value
     if (col.default_val) |dv| {
-        // datetime + CURRENT_TIMESTAMP is already handled above (via + or ++)
-        if (isDatetime(col.type_sql) and std.mem.eql(u8, dv, "CURRENT_TIMESTAMP")) {
+        // datetime + CURRENT_TIMESTAMP/now() is already handled above (via + or ++)
+        if (isDatetime(col.type_sql) and isCurrentTimestamp(dv)) {
             // already emitted + or ++ above — skip
         } else if (std.mem.eql(u8, dv, "")) {
             // Empty string default (DEFAULT '') — skip, equivalent to no default
@@ -166,6 +184,8 @@ fn writeColumnSuffix(w: anytype, col: sp.SqlColumn, indexes: []const sp.SqlIndex
             // MySQL binary literal b'0' / b'1' → strip to plain 0/1 for bit(1) / boolean
             try w.writeAll(" =");
             try w.writeAll(dv[2 .. dv.len - 1]);
+        } else if (std.mem.eql(u8, dv, "gen_random_uuid()")) {
+            // PG: uuid auto-gen default — skip (implicit for uuid type)
         } else {
             try w.writeAll(" =");
             try w.writeAll(dv);
@@ -573,9 +593,10 @@ const BestResult = struct {
 
 pub const ReverseCodegen = struct {
     alloc: std.mem.Allocator,
+    dialect: Dialect,
 
-    pub fn init(alloc: std.mem.Allocator) ReverseCodegen {
-        return .{ .alloc = alloc };
+    pub fn init(alloc: std.mem.Allocator, dialect: Dialect) ReverseCodegen {
+        return .{ .alloc = alloc, .dialect = dialect };
     }
 
     pub fn generate(self: *ReverseCodegen, schema: sp.SqlSchema) ![]const u8 {
@@ -594,7 +615,10 @@ pub const ReverseCodegen = struct {
         if (schema.name) |name| {
             try w.print("$ {s}", .{name});
             if (schema.charset) |cs| {
-                if (!std.mem.eql(u8, cs, "utf8mb4")) {
+                // MySQL: omit utf8mb4 (default); PG: omit UTF8/utf8 (default)
+                if (std.mem.eql(u8, cs, "utf8mb4") or std.mem.eql(u8, cs, "UTF8") or std.mem.eql(u8, cs, "utf8")) {
+                    // default charset — omit
+                } else {
                     try w.print(" {s}", .{cs});
                 }
             }

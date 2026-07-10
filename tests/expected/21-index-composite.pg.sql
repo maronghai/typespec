@@ -7,6 +7,6 @@ CREATE TABLE "multi" (
   "name" varchar(32),
   "email" varchar(128),
   "status" integer,
-  ("name", "email"),
+  ,
   UNIQUE ("email", "status")
 );

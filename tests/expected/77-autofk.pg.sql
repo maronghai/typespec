@@ -13,6 +13,6 @@ CREATE TABLE "order" (
   "order_no" varchar(64) NOT NULL,
   "user_id" integer,
   "amount" numeric(16, 2) NOT NULL,
-  ("user_id"),
+  ,
   FOREIGN KEY ("user_id") REFERENCES "user"("id")
 );

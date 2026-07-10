@@ -261,8 +261,8 @@ fn compileToSql(io: std.Io, alloc: std.mem.Allocator, path: []const u8, dialect:
 }
 
 fn handleReverse(io: std.Io, alloc: std.mem.Allocator, file_data: []const u8, input_name: []const u8, output_path: ?[]const u8, with_templates: bool, dialect: codegen.Dialect) !void {
-    _ = dialect; // TODO: PG reverse parsing support
-    var sp_parser = sql_parser.SqlParser.init(alloc, file_data);
+    const sql_dialect: sql_parser.Dialect = if (dialect == .postgres) .postgres else .mysql;
+    var sp_parser = sql_parser.SqlParser.init(alloc, file_data, sql_dialect);
     const result = sp_parser.parse() catch |err| {
         const lc = sp_parser.lineColAt(sp_parser.pos);
         const src_line = sp_parser.getSourceLine(lc.line);
@@ -320,7 +320,7 @@ fn handleReverse(io: std.Io, alloc: std.mem.Allocator, file_data: []const u8, in
         std.debug.print("warning: no tables found in SQL input\n", .{});
     }
 
-    var rcg = reverse_codegen.ReverseCodegen.init(alloc);
+    var rcg = reverse_codegen.ReverseCodegen.init(alloc, sql_dialect);
     const tps = if (with_templates)
         try rcg.generateWithTemplates(schema)
     else

@@ -1,5 +1,9 @@
 const std = @import("std");
 
+// ─── SQL Dialect ────────────────────────────────────────────────
+
+pub const Dialect = enum { mysql, postgres };
+
 // ─── SQL IR Types ────────────────────────────────────────────────
 
 pub const SqlColumn = struct {
@@ -54,7 +58,7 @@ pub const SqlTable = struct {
     engine: ?[]const u8,
     charset: ?[]const u8,
     comment: ?[]const u8,
-    columns: []const SqlColumn,
+    columns: []SqlColumn,
     indexes: []const SqlIndex,
     foreign_keys: []const SqlForeignKey,
     checks: []const SqlCheck,
@@ -86,13 +90,15 @@ pub const SqlParser = struct {
     src: []const u8,
     pos: usize,
     diagnostics: std.ArrayList(SqlDiagnostic),
+    dialect: Dialect,
 
-    pub fn init(alloc: std.mem.Allocator, src: []const u8) SqlParser {
+    pub fn init(alloc: std.mem.Allocator, src: []const u8, dialect: Dialect) SqlParser {
         return .{
             .alloc = alloc,
             .src = src,
             .pos = 0,
             .diagnostics = std.ArrayList(SqlDiagnostic).initCapacity(alloc, 8) catch unreachable,
+            .dialect = dialect,
         };
     }
 
@@ -192,12 +198,87 @@ pub const SqlParser = struct {
                 } else if (self.matchKeyword("TABLE")) {
                     const table = try self.parseCreateTable();
                     try tables.append(self.alloc, table);
+                } else if (self.matchKeyword("INDEX") or self.matchKeyword("UNIQUE")) {
+                    // PG: CREATE [UNIQUE] INDEX idx_name ON table (cols)
+                    // Parse and skip for now (we don't add standalone indexes to table IR)
+                    self.skipToSemicolon();
+                } else if (self.matchKeyword("EXTENSION") or self.matchKeyword("SCHEMA") or self.matchKeyword("TYPE") or self.matchKeyword("FUNCTION") or self.matchKeyword("TRIGGER") or self.matchKeyword("VIEW") or self.matchKeyword("SEQUENCE")) {
+                    // PG: CREATE EXTENSION/SCHEMA/TYPE/FUNCTION/TRIGGER/VIEW/SEQUENCE — skip
+                    self.skipToSemicolon();
                 } else {
-                    self.reportError("expected DATABASE or TABLE after CREATE, skipping statement", .{});
+                    self.reportError("expected DATABASE, TABLE, or INDEX after CREATE, skipping statement", .{});
+                    self.skipToSemicolon();
+                }
+            } else if (self.matchKeyword("ALTER")) {
+                // ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY ...
+                self.skipSpacesAndNewlines();
+                if (self.matchKeyword("TABLE")) {
+                    self.skipSpaces();
+                    _ = try self.parseIdentifier(); // table name
+                    self.skipSpaces();
+                    // Skip the rest of the ALTER statement for now
+                    self.skipToSemicolon();
+                } else {
+                    self.skipToSemicolon();
+                }
+            } else if (self.matchKeyword("COMMENT")) {
+                // PG: COMMENT ON TABLE/COLUMN ... IS 'text'
+                self.skipSpacesAndNewlines();
+                if (self.matchKeyword("ON")) {
+                    self.skipSpacesAndNewlines();
+                    if (self.matchKeyword("TABLE")) {
+                        self.skipSpaces();
+                        const tbl_name = try self.parseIdentifier();
+                        self.skipSpaces();
+                        if (self.matchKeyword("IS")) {
+                            self.skipSpaces();
+                            const cmt = try self.parseStringLiteral();
+                            // Find matching table and set comment
+                            for (tables.items) |*tbl| {
+                                if (std.mem.eql(u8, tbl.name, tbl_name)) {
+                                    tbl.comment = cmt;
+                                    break;
+                                }
+                            }
+                        }
+                    } else if (self.matchKeyword("COLUMN")) {
+                        self.skipSpaces();
+                        // PG: COLUMN table.column or schema.table.column
+                        const full_ident = try self.parseIdentifier();
+                        var tbl_name = full_ident;
+                        var col_name: []const u8 = "";
+                        // Split at first dot: schema.table.col → tbl=schema.table, col=col
+                        if (std.mem.lastIndexOfScalar(u8, full_ident, '.')) |dot_pos| {
+                            tbl_name = full_ident[0..dot_pos];
+                            col_name = full_ident[dot_pos + 1 ..];
+                        }
+                        self.skipSpaces();
+                        if (self.matchKeyword("IS")) {
+                            self.skipSpaces();
+                            const cmt = try self.parseStringLiteral();
+                            // Find matching table and column
+                            for (tables.items) |*tbl| {
+                                if (std.mem.eql(u8, tbl.name, tbl_name)) {
+                                    for (tbl.columns) |*col| {
+                                        if (col_name.len > 0 and std.mem.eql(u8, col.name, col_name)) {
+                                            col.comment = cmt;
+                                            break;
+                                        }
+                                    }
+                                    break;
+                                }
+                            }
+                        } else {
+                            self.skipToSemicolon();
+                        }
+                    } else {
+                        self.skipToSemicolon();
+                    }
+                } else {
                     self.skipToSemicolon();
                 }
             } else {
-                // Not a CREATE statement — silently skip (DML, transactions, etc.)
+                // Not a CREATE or COMMENT statement — silently skip (DML, transactions, etc.)
                 self.skipToSemicolon();
             }
         }
@@ -244,6 +325,22 @@ pub const SqlParser = struct {
             } else if (self.matchKeyword("CHARSET")) {
                 self.skipSpaces();
                 charset = try self.parseUnquotedWord();
+            } else if (self.matchKeyword("ENCODING")) {
+                // PG: ENCODING 'UTF8'
+                self.skipSpaces();
+                if (self.peek() == '\'') {
+                    charset = try self.parseStringLiteral();
+                } else {
+                    charset = try self.parseUnquotedWord();
+                }
+            } else if (self.matchKeyword("LC_COLLATE") or self.matchKeyword("LC_CTYPE") or self.matchKeyword("TEMPLATE") or self.matchKeyword("CONNECTION") or self.matchKeyword("IS_TEMPLATE")) {
+                // PG-specific database options — skip value
+                self.skipSpaces();
+                if (self.peek() == '\'') {
+                    _ = self.parseStringLiteral() catch {};
+                } else {
+                    self.skipWord();
+                }
             } else {
                 self.advance();
             }
@@ -289,7 +386,27 @@ pub const SqlParser = struct {
             }
 
             // Try to determine what this item is
-            if (self.lookaheadIs("FOREIGN")) {
+            if (self.lookaheadIs("CONSTRAINT")) {
+                // Skip CONSTRAINT name prefix, then handle the actual constraint
+                self.skipSpacesAndNewlines();
+                self.advance(); // skip "CONSTRAINT" keyword
+                self.skipSpaces();
+                _ = try self.parseIdentifier(); // skip constraint name
+                self.skipSpaces();
+                if (self.lookaheadIs("PRIMARY")) {
+                    const idx = try self.parsePrimaryKey();
+                    try indexes.append(self.alloc, idx);
+                } else if (self.lookaheadIs("UNIQUE")) {
+                    const idx = try self.parseUniqueIndex();
+                    try indexes.append(self.alloc, idx);
+                } else if (self.lookaheadIs("CHECK")) {
+                    const ck = try self.parseCheck();
+                    try checks.append(self.alloc, ck);
+                } else if (self.lookaheadIs("FOREIGN")) {
+                    const fk = try self.parseForeignKey();
+                    try foreign_keys.append(self.alloc, fk);
+                }
+            } else if (self.lookaheadIs("FOREIGN")) {
                 const fk = try self.parseForeignKey();
                 try foreign_keys.append(self.alloc, fk);
             } else if (self.lookaheadIs("PRIMARY")) {
@@ -299,11 +416,23 @@ pub const SqlParser = struct {
                 const idx = try self.parseUniqueIndex();
                 try indexes.append(self.alloc, idx);
             } else if (self.lookaheadIs("FULLTEXT")) {
-                const idx = try self.parseFulltextIndex();
-                try indexes.append(self.alloc, idx);
+                if (self.dialect == .postgres) {
+                    // PG doesn't support FULLTEXT — skip with warning
+                    self.reportWarning("FULLTEXT index not supported in PostgreSQL, skipping", .{});
+                    self.skipToSemicolon();
+                } else {
+                    const idx = try self.parseFulltextIndex();
+                    try indexes.append(self.alloc, idx);
+                }
             } else if (self.lookaheadIs("INDEX") or self.lookaheadIs("KEY")) {
-                const idx = try self.parseIndex();
-                try indexes.append(self.alloc, idx);
+                if (self.dialect == .postgres) {
+                    // PG doesn't support inline INDEX/KEY — skip with warning
+                    self.reportWarning("inline INDEX/KEY not supported in PostgreSQL, skipping", .{});
+                    self.skipToSemicolon();
+                } else {
+                    const idx = try self.parseIndex();
+                    try indexes.append(self.alloc, idx);
+                }
             } else if (self.lookaheadIs("CHECK")) {
                 const ck = try self.parseCheck();
                 try checks.append(self.alloc, ck);
@@ -412,12 +541,25 @@ pub const SqlParser = struct {
         self.skipSpaces();
 
         // Parse type — may span multiple words: "decimal(16, 2)", "varchar(255)", "int unsigned"
-        const type_sql = try self.parseColumnType();
+        var type_sql = try self.parseColumnType();
+
+        // PG: serial/bigserial are auto-increment shorthand
+        var pg_serial_auto_inc = false;
+        if (self.dialect == .postgres) {
+            const trimmed = std.mem.trim(u8, type_sql, " \t");
+            if (std.mem.eql(u8, trimmed, "serial")) {
+                type_sql = "integer";
+                pg_serial_auto_inc = true;
+            } else if (std.mem.eql(u8, trimmed, "bigserial")) {
+                type_sql = "bigint";
+                pg_serial_auto_inc = true;
+            }
+        }
 
         // Parse column modifiers
         var nullable = true;
         var unsigned = false;
-        var auto_increment = false;
+        var auto_increment = pg_serial_auto_inc;
         var primary_key = false;
         var on_update = false;
         var default_val: ?[]const u8 = null;
@@ -458,14 +600,45 @@ pub const SqlParser = struct {
                 self.skipSpaces();
                 self.skipWord(); // collation name
             } else if (self.matchKeyword("UNSIGNED")) {
-                unsigned = true;
+                if (self.dialect == .mysql) unsigned = true;
+                // PG: silently ignore UNSIGNED
             } else if (self.matchKeyword("AUTO_INCREMENT")) {
                 auto_increment = true;
+            } else if (self.matchKeyword("GENERATED")) {
+                // MySQL: GENERATED ALWAYS AS (expr) STORED/VIRTUAL
+                // PG: GENERATED [ALWAYS | BY DEFAULT] AS IDENTITY
+                self.skipSpaces();
+                _ = self.matchKeyword("ALWAYS");
+                _ = self.matchKeyword("BY");
+                _ = self.matchKeyword("DEFAULT");
+                self.skipSpaces();
+                if (self.matchKeyword("AS")) {
+                    self.skipSpaces();
+                    if (self.matchKeyword("IDENTITY")) {
+                        // PG auto-increment
+                        auto_increment = true;
+                    } else if (self.peek() == '(') {
+                        // MySQL virtual column: GENERATED ALWAYS AS (expr) — skip expression
+                        self.advance(); // (
+                        var depth: usize = 1;
+                        while (self.pos < self.src.len and depth > 0) {
+                            const c = self.peek();
+                            if (c == '(') depth += 1 else if (c == ')') depth -= 1;
+                            if (depth > 0) self.advance();
+                        }
+                        if (self.peek() == ')') self.advance();
+                        self.skipSpaces();
+                        _ = self.matchKeyword("STORED");
+                        _ = self.matchKeyword("VIRTUAL");
+                    }
+                }
             } else if (self.matchKeyword("PRIMARY")) {
                 self.skipSpaces();
                 if (self.matchKeyword("KEY")) {
                     primary_key = true;
                 }
+            } else if (self.matchKeyword("UNIQUE")) {
+                // Column-level UNIQUE — skip (handled via table-level UNIQUE INDEX)
             } else if (self.matchKeyword("DEFAULT")) {
                 self.skipSpaces();
                 default_val = try self.parseDefaultValue();
@@ -605,7 +778,11 @@ pub const SqlParser = struct {
         self.skipSpaces();
         if (self.matchKeyword("INDEX") or self.matchKeyword("KEY")) {}
         self.skipSpaces();
-        const name = try self.parseIdentifier();
+        // PG: UNIQUE (col) — no name; MySQL: UNIQUE KEY name (col)
+        var name: []const u8 = "";
+        if (self.peek() != '(') {
+            name = try self.parseIdentifier();
+        }
         self.skipSpaces();
         var fl = try self.parseParenFieldList();
         return .{
@@ -682,6 +859,9 @@ pub const SqlParser = struct {
         if (self.peek() == '`') {
             return self.parseBacktickIdent();
         }
+        if (self.peek() == '"') {
+            return self.parseDoubleQuoteIdent();
+        }
         return self.parseUnquotedWord();
     }
 
@@ -700,11 +880,26 @@ pub const SqlParser = struct {
         return result;
     }
 
+    fn parseDoubleQuoteIdent(self: *SqlParser) ![]const u8 {
+        self.advance(); // skip opening "
+        const start = self.pos;
+        while (self.pos < self.src.len and self.src[self.pos] != '"') {
+            if (self.src[self.pos] == '"' and self.pos + 1 < self.src.len and self.src[self.pos + 1] == '"') {
+                self.pos += 2; // escaped double-quote ""
+            } else {
+                self.pos += 1;
+            }
+        }
+        const result = self.src[start..self.pos];
+        if (self.pos < self.src.len) self.advance(); // skip closing "
+        return result;
+    }
+
     fn parseUnquotedWord(self: *SqlParser) ![]const u8 {
         const start = self.pos;
         while (self.pos < self.src.len) {
             const c = self.src[self.pos];
-            if (c == ' ' or c == '\t' or c == '\n' or c == '\r' or c == ',' or c == ')' or c == '(' or c == ';' or c == '\'' or c == '`') break;
+            if (c == ' ' or c == '\t' or c == '\n' or c == '\r' or c == ',' or c == ')' or c == '(' or c == ';' or c == '\'' or c == '`' or c == '"') break;
             self.pos += 1;
         }
         if (self.pos == start) {
@@ -749,8 +944,35 @@ pub const SqlParser = struct {
         if (self.peek() == '\'') {
             return self.parseStringLiteral();
         }
-        // Unquoted default value: number, NULL, CURRENT_TIMESTAMP, NOW()
-        return self.parseUnquotedWord();
+        // Unquoted default value: number, NULL, CURRENT_TIMESTAMP, NOW(), gen_random_uuid(), etc.
+        const start = self.pos;
+        self.skipWord();
+        // Handle decimal numbers: 0.00, 1.5, etc.
+        if (self.peek() == '.' and self.pos + 1 < self.src.len) {
+            const next = self.src[self.pos + 1];
+            if (next >= '0' and next <= '9') {
+                self.advance(); // skip .
+                while (self.pos < self.src.len) {
+                    const c = self.src[self.pos];
+                    if (c >= '0' and c <= '9') {
+                        self.pos += 1;
+                    } else break;
+                }
+            }
+        }
+        // Handle function calls: now(), gen_random_uuid(), etc.
+        self.skipSpaces();
+        if (self.peek() == '(') {
+            self.advance(); // (
+            var depth: usize = 1;
+            while (self.pos < self.src.len and depth > 0) {
+                const c = self.peek();
+                if (c == '(') depth += 1 else if (c == ')') depth -= 1;
+                if (depth > 0) self.advance();
+            }
+            if (self.peek() == ')') self.advance();
+        }
+        return self.src[start..self.pos];
     }
 
     pub const FieldList = struct {

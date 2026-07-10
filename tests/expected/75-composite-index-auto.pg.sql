@@ -8,6 +8,6 @@ CREATE TABLE "user" (
   "email" varchar(128),
   "status" integer DEFAULT 0,
   "create_at" timestamp DEFAULT CURRENT_TIMESTAMP,
-  ("name", "email"),
+  ,
   UNIQUE ("email", "status")
 );

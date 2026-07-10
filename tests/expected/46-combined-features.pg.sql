@@ -17,7 +17,7 @@ CREATE TABLE "user" (
   "create_at" timestamp DEFAULT CURRENT_TIMESTAMP,
   "update_at" timestamp DEFAULT CURRENT_TIMESTAMP,
   UNIQUE ("email"),
-  ("name")
+  
 );
 COMMENT ON TABLE "user" IS '用户表';
 COMMENT ON COLUMN "user"."name" IS '用户登录名';
@@ -40,8 +40,8 @@ CREATE TABLE "product" (
   "delete_at" timestamp,
   "create_at" timestamp DEFAULT CURRENT_TIMESTAMP,
   "update_at" timestamp DEFAULT CURRENT_TIMESTAMP,
-  ("category_id"),
-  ("price")
+  ,
+  
 );
 COMMENT ON TABLE "product" IS '商品表';
 COMMENT ON COLUMN "product"."name" IS '商品名称';
@@ -64,8 +64,8 @@ CREATE TABLE "order" (
   "create_at" timestamp DEFAULT CURRENT_TIMESTAMP,
   "update_at" timestamp DEFAULT CURRENT_TIMESTAMP,
   UNIQUE ("order_no"),
-  ("user_id"),
-  ("paid_on"),
+  ,
+  ,
   FOREIGN KEY ("user_id") REFERENCES "user"("id")
 );
 COMMENT ON TABLE "order" IS '订单表';
