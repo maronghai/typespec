@@ -7,5 +7,5 @@ CREATE TABLE `constrained` (
   `age` int CHECK (age BETWEEN 0 AND 150),
   `amount` decimal(16, 2) CHECK (amount > 0),
   `ratio` decimal(20, 6) CHECK (ratio >= 0 AND ratio <= 100),
-  `type` varchar(16) CHECK (type IN ('a','b','c'))
+  `type` varchar(16) CHECK (type IN ('a', 'b', 'c'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

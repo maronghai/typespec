@@ -1,9 +1,11 @@
 const std = @import("std");
 const tokenizer = @import("tokenizer.zig");
 const parser = @import("parser.zig");
+const ast_mod = @import("ast.zig");
 const semantic = @import("semantic.zig");
 const codegen = @import("codegen.zig");
 const diag = @import("diagnostic.zig");
+const diff = @import("diff.zig");
 const migrate = @import("migrate.zig");
 const sql_parser = @import("sql_parser.zig");
 const reverse_codegen = @import("reverse_codegen.zig");
@@ -209,33 +211,8 @@ fn handleCompile(io: std.Io, alloc: std.mem.Allocator, file_data: []const u8, in
     }
 }
 
-fn handleDiff(io: std.Io, alloc: std.mem.Allocator, old_path: []const u8, new_path: []const u8, dialect: codegen.Dialect) !void {
-    const old_sql = try compileToSql(io, alloc, old_path, dialect);
-    const new_sql = try compileToSql(io, alloc, new_path, dialect);
-    try migrate.printDiff(old_sql, new_sql, alloc);
-}
-
-fn handleMigrate(io: std.Io, alloc: std.mem.Allocator, old_path: []const u8, new_path: []const u8, output_path: ?[]const u8, dialect: codegen.Dialect) !void {
-    const old_sql = try compileToSql(io, alloc, old_path, dialect);
-    const new_sql = try compileToSql(io, alloc, new_path, dialect);
-    const migration_sql = try migrate.generateMigration(alloc, old_sql, new_sql);
-
-    if (output_path) |opath| {
-        try std.Io.Dir.cwd().writeFile(io, .{
-            .sub_path = opath,
-            .data = migration_sql,
-        });
-        std.debug.print("Written to {s}\n", .{opath});
-    } else {
-        var buf: [8192]u8 = undefined;
-        const stdout_file = std.Io.File.stdout();
-        var w = stdout_file.writer(io, &buf);
-        try w.interface.writeAll(migration_sql);
-        try w.flush();
-    }
-}
-
-fn compileToSql(io: std.Io, alloc: std.mem.Allocator, path: []const u8, dialect: codegen.Dialect) ![]const u8 {
+/// Compile a .tps file to ResolvedAst (shared by diff and migrate)
+fn compileToAst(io: std.Io, alloc: std.mem.Allocator, path: []const u8) !semantic.ResolvedAst {
     const file_data = try std.Io.Dir.cwd().readFileAlloc(io, path, alloc, .unlimited);
     defer alloc.free(file_data);
 
@@ -254,10 +231,35 @@ fn compileToSql(io: std.Io, alloc: std.mem.Allocator, path: []const u8, dialect:
     const tree = try p.parse(tokenized);
 
     var sa = semantic.SemanticAnalyzer.init(alloc);
-    const resolved = try sa.analyze(tree);
+    return try sa.analyze(tree);
+}
 
-    var cg = codegen.Codegen.init(alloc, dialect);
-    return try cg.generate(resolved);
+fn handleDiff(io: std.Io, alloc: std.mem.Allocator, old_path: []const u8, new_path: []const u8, _: codegen.Dialect) !void {
+    const old_ast = try compileToAst(io, alloc, old_path);
+    const new_ast = try compileToAst(io, alloc, new_path);
+    const schema_diff = try diff.diff(old_ast, new_ast, alloc);
+    diff.printDiff(schema_diff);
+}
+
+fn handleMigrate(io: std.Io, alloc: std.mem.Allocator, old_path: []const u8, new_path: []const u8, output_path: ?[]const u8, dialect: codegen.Dialect) !void {
+    const old_ast = try compileToAst(io, alloc, old_path);
+    const new_ast = try compileToAst(io, alloc, new_path);
+    const schema_diff = try diff.diff(old_ast, new_ast, alloc);
+    const migration_sql = try migrate.generateFromDiff(alloc, schema_diff, old_ast, new_ast, dialect);
+
+    if (output_path) |opath| {
+        try std.Io.Dir.cwd().writeFile(io, .{
+            .sub_path = opath,
+            .data = migration_sql,
+        });
+        std.debug.print("Written to {s}\n", .{opath});
+    } else {
+        var buf: [8192]u8 = undefined;
+        const stdout_file = std.Io.File.stdout();
+        var w = stdout_file.writer(io, &buf);
+        try w.interface.writeAll(migration_sql);
+        try w.flush();
+    }
 }
 
 fn handleReverse(io: std.Io, alloc: std.mem.Allocator, file_data: []const u8, input_name: []const u8, output_path: ?[]const u8, with_templates: bool, dialect: codegen.Dialect) !void {

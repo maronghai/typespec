@@ -199,7 +199,7 @@ error: expected ')', got ' '
 
 ### Diff
 
-Compiles both files and compares the generated SQL at the table level.
+Compares two schemas at the **AST level** (not SQL text). Detects field additions, removals, modifications, renames, index changes, and FK changes.
 
 ```bash
 typespec diff schema_v1.tps schema_v2.tps
@@ -209,7 +209,11 @@ typespec diff schema_v1.tps schema_v2.tps
 
 ```
 -- CREATE TABLE `new_table`       ← table exists in v2 but not v1
--- ALTER TABLE `user`             ← table exists in both but SQL differs
+-- ALTER TABLE `user`             ← table exists in both, field/index/FK diffs shown
+  + new_field (add)
+  - old_field (drop)
+  ~ changed_field (modify)
+  ~ old_name → new_name (rename)
 -- DROP TABLE `old_table`         ← table exists in v1 but not v2
 ```
 
@@ -217,7 +221,7 @@ No flags beyond the two input files.
 
 ### Migrate
 
-Generates a transaction-wrapped migration script from the diff.
+Generates a transaction-wrapped migration script from the **AST-level diff**. Produces proper `ALTER TABLE` statements instead of dropping and recreating entire tables.
 
 ```bash
 # Print to stdout
@@ -241,22 +245,38 @@ CREATE TABLE `new_table` (
 
 DROP TABLE IF EXISTS `old_table`;
 
--- ALTER TABLE `user` (drop and recreate)
-DROP TABLE IF EXISTS `user`;
-CREATE TABLE `user` (
-  ...
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+ALTER TABLE `user`
+ADD COLUMN `email` varchar(64);
+
+ALTER TABLE `user`
+MODIFY COLUMN `name` varchar(64) NOT NULL;
+
+ALTER TABLE `user`
+DROP COLUMN `old_col`;
+
+ALTER TABLE `user`
+CHANGE COLUMN `old_name` `new_name` varchar(32);
 
 COMMIT;
 ```
 
 **Migration strategy:**
 
-- New tables → `CREATE TABLE`
-- Dropped tables → `DROP TABLE IF EXISTS`
-- Modified tables → `DROP` + `CREATE` (idempotent, safe to re-run)
+| Change | MySQL Output | PostgreSQL Output |
+|--------|-------------|-------------------|
+| New table | `CREATE TABLE` | `CREATE TABLE` |
+| Dropped table | `DROP TABLE IF EXISTS` | `DROP TABLE IF EXISTS` |
+| Added column | `ALTER TABLE ... ADD COLUMN` | `ALTER TABLE ... ADD COLUMN` |
+| Dropped column | `ALTER TABLE ... DROP COLUMN` | `ALTER TABLE ... DROP COLUMN` |
+| Modified column | `ALTER TABLE ... MODIFY COLUMN` | `ALTER TABLE ... MODIFY COLUMN` |
+| Renamed column | `ALTER TABLE ... CHANGE COLUMN` | `ALTER TABLE ... RENAME COLUMN TO` |
+| Added index | `ALTER TABLE ... ADD INDEX` | `ALTER TABLE ... ADD UNIQUE` |
+| Dropped index | `ALTER TABLE ... DROP INDEX` | `DROP INDEX` |
+| Added FK | `ALTER TABLE ... ADD FOREIGN KEY` | `ALTER TABLE ... ADD FOREIGN KEY` |
+| Dropped FK | `ALTER TABLE ... DROP FOREIGN KEY` | `ALTER TABLE ... DROP FOREIGN KEY` |
+| No changes | Empty transaction | Empty transaction |
 
-All operations are wrapped in a single transaction.
+All operations are wrapped in a single `BEGIN`/`COMMIT` transaction.
 
 ## Compilation Pipeline
 
@@ -267,16 +287,35 @@ All operations are wrapped in a single transaction.
 Tokenizer    Line classification + token splitting
   │
   ▼
-Parser       AST construction (schema, templates, tables, fields, FKs, indexes)
+Parser       AST construction (tokens → AST via ast.zig types)
   │
   ▼
 Semantic     Template resolution, inheritance merging, suffix inference, autofk
   │
   ▼
-Codegen      MySQL DDL generation (CREATE TABLE, INDEX, FOREIGN KEY, CHECK)
+Codegen      MySQL/PostgreSQL DDL generation (CREATE TABLE, INDEX, FK, CHECK)
   │
   ▼
 .sql output
+```
+
+## Diff/Migrate Pipeline
+
+```
+old.tps + new.tps
+  │ (both compiled through the forward pipeline above)
+  ▼
+ResolvedAst × 2
+  │
+  ▼
+Diff Engine  AST-level comparison (field add/drop/modify/rename, index, FK)
+  │
+  ▼
+SchemaDiff   Structured diff result
+  │
+  ├──▶ Diff Printer    Human-readable diff output (`typespec diff`)
+  │
+  └──▶ Migration Gen   ALTER TABLE / ADD / DROP / MODIFY / RENAME DDL (`typespec migrate`)
 ```
 
 ## Reverse Engineering Pipeline
@@ -304,13 +343,14 @@ Reverse Codegen   Type mapping, modifier reconstruction, suffix inference,
 src/
 ├── main.zig             Entry point, CLI parsing, pipeline orchestration
 ├── tokenizer.zig        Line classification (Schema/Table/Field/FK/Index/Slot/Comment)
-├── parser.zig           AST types + parsing (1473 lines, the largest file)
+├── ast.zig              AST type definitions (Field, Table, Template, TypeInfo, etc.)
+├── parser.zig           Parser (tokens → AST, 1339 lines)
 ├── semantic.zig         Template resolution, suffix inference, autofk
-├── codegen.zig          SQL DDL generation
-├── diagnostic.zig       Error/warning reporting with source context
-├── diff.zig             Schema diff engine (AST-level)
-├── migrate.zig          SQL-level diff + migration SQL generator
-├── sql_parser.zig       MySQL DDL parser (CREATE DATABASE/TABLE → IR)
+├── codegen.zig          SQL DDL generation (MySQL + PostgreSQL)
+├── diagnostic.zig       Error/warning reporting with source context + DiagnosticCollector
+├── diff.zig             Schema diff engine (AST-level, rename detection)
+├── migrate.zig          AST-diff-driven migration SQL generator (ALTER TABLE)
+├── sql_parser.zig       MySQL/PG DDL parser (CREATE DATABASE/TABLE → IR)
 └── reverse_codegen.zig  IR → .tps reverse codegen + template extraction
 ```
 

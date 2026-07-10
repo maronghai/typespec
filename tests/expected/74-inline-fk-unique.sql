@@ -5,7 +5,7 @@ CREATE DATABASE `demo` CHARACTER SET utf8mb4;
 CREATE TABLE `user` (
   `id` int AUTO_INCREMENT PRIMARY KEY,
   `email` varchar(128) NOT NULL,
-  UNIQUE INDEX `uk_email` (`email`),
   `name` varchar(32) NOT NULL,
+  UNIQUE INDEX `uk_email` (`email`),
   FOREIGN KEY (`email`) REFERENCES `auth`(`email`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

@@ -11,4 +11,5 @@ CREATE TABLE `post` (
   FOREIGN KEY (`user_id`) REFERENCES `user`(`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+
 COMMIT;

@@ -5,8 +5,8 @@ CREATE DATABASE `demo` CHARACTER SET utf8mb4;
 CREATE TABLE `user` (
   `id` int AUTO_INCREMENT PRIMARY KEY,
   `name` varchar(32),
-  INDEX `idx_name` (`name`),
   `email` varchar(128) NOT NULL,
-  UNIQUE INDEX `uk_email` (`email`),
-  `phone` varchar(16)
+  `phone` varchar(16),
+  INDEX `idx_name` (`name`),
+  UNIQUE INDEX `uk_email` (`email`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

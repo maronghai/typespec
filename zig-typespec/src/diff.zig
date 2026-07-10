@@ -1,6 +1,6 @@
 const std = @import("std");
 const sem = @import("semantic.zig");
-const ast_mod = @import("parser.zig");
+const ast_mod = @import("ast.zig");
 const Field = ast_mod.Field;
 const TypeInfo = ast_mod.TypeInfo;
 const Modifier = ast_mod.Modifier;

@@ -3,13 +3,6 @@
 
 BEGIN;
 
--- ALTER TABLE `user` (drop and recreate)
-DROP TABLE IF EXISTS `user`;
-
-CREATE TABLE `user` (
-  `id` int AUTO_INCREMENT PRIMARY KEY,
-  `name` varchar(32) NOT NULL,
-  `email` varchar(64)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
+ALTER TABLE `user`
+ADD COLUMN `email` varchar(64);
 COMMIT;

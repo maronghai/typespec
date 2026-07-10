@@ -100,3 +100,68 @@ fn digitCount(n: usize) usize {
     }
     return count;
 }
+
+// ─── Diagnostic Collector (Phase 4: Error Recovery) ──────────
+
+/// Collects diagnostics during compilation, allowing continued parsing after errors.
+pub const DiagnosticCollector = struct {
+    diagnostics: std.ArrayList(Diagnostic),
+    alloc: std.mem.Allocator,
+
+    pub fn init(alloc: std.mem.Allocator) DiagnosticCollector {
+        return .{
+            .diagnostics = std.ArrayList(Diagnostic).init(alloc),
+            .alloc = alloc,
+        };
+    }
+
+    /// Record a diagnostic (warning, error, or note).
+    pub fn push(self: *DiagnosticCollector, d: Diagnostic) void {
+        self.diagnostics.append(d) catch {};
+    }
+
+    /// Record a diagnostic using the existing printDiagnostic + store pattern.
+    pub fn record(self: *DiagnosticCollector, d: Diagnostic) void {
+        printDiagnostic(d);
+        self.push(d);
+    }
+
+    /// Returns true if any error-severity diagnostics have been recorded.
+    pub fn hasErrors(self: *const DiagnosticCollector) bool {
+        for (self.diagnostics.items) |d| {
+            if (d.severity == .@"error") return true;
+        }
+        return false;
+    }
+
+    /// Returns the count of error-severity diagnostics.
+    pub fn errorCount(self: *const DiagnosticCollector) usize {
+        var count: usize = 0;
+        for (self.diagnostics.items) |d| {
+            if (d.severity == .@"error") count += 1;
+        }
+        return count;
+    }
+
+    /// Print all collected diagnostics.
+    pub fn printAll(self: *const DiagnosticCollector) void {
+        for (self.diagnostics.items) |d| {
+            printDiagnostic(d);
+        }
+    }
+
+    /// Print a summary line after all diagnostics.
+    pub fn printSummary(self: *const DiagnosticCollector) void {
+        const errs = self.errorCount();
+        const warns: usize = blk: {
+            var w: usize = 0;
+            for (self.diagnostics.items) |d| {
+                if (d.severity == .warning) w += 1;
+            }
+            break :blk w;
+        };
+        if (errs > 0 or warns > 0) {
+            std.debug.print("\n{d} error(s), {d} warning(s)\n", .{ errs, warns });
+        }
+    }
+};

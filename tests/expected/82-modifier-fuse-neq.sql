@@ -7,7 +7,7 @@ CREATE TABLE `user` (
   `name` varchar(32) NOT NULL DEFAULT 0,
   `email` varchar(128),
   `is_active` boolean NOT NULL DEFAULT 1,
-  `status` int(1) NOT NULL DEFAULT 0 CHECK (status IN (0,1,2)),
+  `status` int(1) NOT NULL DEFAULT 0 CHECK (status IN (0, 1, 2)),
   `balance` decimal(16, 2) NOT NULL DEFAULT 0.00,
   `role` varchar(32) DEFAULT 'admin'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

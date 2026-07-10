@@ -29,6 +29,7 @@ balance   m =0
 - [Schema Syntax](#schema-syntax)
 - [Template System](#template-system)
 - [Examples](#examples)
+- [Migration](#migration)
 - [Grammar](#grammar)
 - [Design Principles](#design-principles)
 - [FAQ](#faq)
@@ -52,6 +53,7 @@ balance   m =0
 | `! a b` | `PRIMARY KEY (a,b)` | Composite primary key |
 | `% user base + soft` | merge fields from multiple parents | Template mixins |
 | Suffix inference | `_id`→int, `_at`→datetime | Explicit type every time |
+| `migrate` | `ALTER TABLE ... ADD/MODIFY/DROP/RENAME COLUMN` | AST-level diff, not text diff |
 
 **Average compression: 3-5x per field** — common declarations shrink dramatically.
 
@@ -416,6 +418,38 @@ See [schema.md §10](schema.md#10-grammar--diagnostics) for grammar notes and [t
 7. **Template-driven** — define once, apply everywhere with precise slot control
 8. **DB-agnostic core** — symbols map to SQL standards; the compiler handles dialects
 9. **FK actions as postfix** — `-C`/`-N`/`C`/`N` appended to FK reference, no extra syntax
+10. **AST-level diff** — migration uses semantic comparison, not SQL text diff; detects renames, not just adds/drops
+
+## Migration
+
+Generate ALTER TABLE migration scripts from schema diffs:
+
+```bash
+# Print to stdout
+typespec migrate old.tps new.tps
+
+# Write to file
+typespec migrate old.tps new.tps -o migration.sql
+
+# PostgreSQL migration
+typespec migrate old.tps new.tps -d pg -o migration_pg.sql
+```
+
+**What it generates:**
+
+| Change | Output |
+|--------|--------|
+| New table | `CREATE TABLE` |
+| Dropped table | `DROP TABLE IF EXISTS` |
+| Added column | `ALTER TABLE ... ADD COLUMN` |
+| Dropped column | `ALTER TABLE ... DROP COLUMN` |
+| Modified column | `ALTER TABLE ... MODIFY COLUMN` |
+| Renamed column | `CHANGE COLUMN` (MySQL) / `RENAME COLUMN TO` (PG) |
+| Added/dropped index | `ADD INDEX` / `DROP INDEX` |
+| Added/dropped FK | `ADD FOREIGN KEY` / `DROP FOREIGN KEY` |
+| No changes | Empty `BEGIN`/`COMMIT` |
+
+All operations are wrapped in a transaction. The diff engine works at the AST level — it detects field renames, type changes, and structural differences rather than comparing raw SQL text.
 
 ## FAQ
 
@@ -438,6 +472,7 @@ Yes. Use `-d pg` or `-d postgres` to generate PostgreSQL DDL:
 typespec schema.tps -d pg          # PostgreSQL output
 typespec schema.tps -d mysql       # MySQL output (default)
 typespec reverse -d pg schema.sql  # Reverse-engineer PG DDL
+typespec migrate old.tps new.tps   # Generate ALTER TABLE migration
 ```
 
 Type differences between dialects:

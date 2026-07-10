@@ -1,6 +1,6 @@
 const std = @import("std");
-const ast_mod = @import("parser.zig");
-const Parser = ast_mod.Parser;
+const ast_mod = @import("ast.zig");
+const Parser = @import("parser.zig").Parser;
 const Ast = ast_mod.Ast;
 const Template = ast_mod.Template;
 const Table = ast_mod.Table;
@@ -379,44 +379,6 @@ pub const SemanticAnalyzer = struct {
 
 // ─── Diagnostic ──────────────────────────────────────────────
 
-fn fmtTypeInfo(ti: TypeInfo) void {
-    switch (ti) {
-        .none => std.debug.print("--", .{}),
-        .simple => |s| std.debug.print("{s}", .{s}),
-        .int_explicit => |n| std.debug.print("int({d})", .{n}),
-        .decimal_explicit => |ds| std.debug.print("decimal({d},{d})", .{ ds.precision, ds.scale }),
-        .varchar_explicit => |n| {
-            if (n > 0) {
-                std.debug.print("varchar({d})", .{n});
-            } else {
-                std.debug.print("varchar(255)", .{});
-            }
-        },
-        .enum_type => |vals| {
-            std.debug.print("ENUM(", .{});
-            for (vals, 0..) |v, vi| {
-                if (vi > 0) std.debug.print(",", .{});
-                std.debug.print("{s}", .{v});
-            }
-            std.debug.print(")", .{});
-        },
-    }
-}
-
-fn fmtModifiers(mods: []const Modifier) void {
-    for (mods) |mod| {
-        switch (mod.kind) {
-            .auto_inc_pk => std.debug.print(" ++", .{}),
-            .auto_inc => std.debug.print(" +", .{}),
-            .primary_key => std.debug.print(" PK", .{}),
-            .not_null => std.debug.print(" NOT NULL", .{}),
-            .unsigned => std.debug.print(" UNSIGNED", .{}),
-            .inline_unique => std.debug.print(" UNIQUE", .{}),
-            .inline_index => std.debug.print(" INDEX", .{}),
-        }
-    }
-}
-
 pub fn diagnosticTrace(resolved: ResolvedAst) void {
     std.debug.print("=== [Stage 3: Semantic] ===\n\n", .{});
 
@@ -456,8 +418,8 @@ pub fn diagnosticTrace(resolved: ResolvedAst) void {
             for (table.fields) |field| {
                 if (std.mem.eql(u8, field.name, "...")) continue;
                 std.debug.print("    {s: <24} ", .{field.name});
-                fmtTypeInfo(field.type_info);
-                fmtModifiers(field.modifiers);
+                ast_mod.fmtTypeInfo(field.type_info);
+                ast_mod.fmtModifiers(field.modifiers);
                 if (field.default_val) |dv| std.debug.print(" DEFAULT {s}", .{dv.value});
                 if (field.check) |ck| std.debug.print(" CHECK({s})", .{ck.expr});
                 if (field.fk) |fk| {
