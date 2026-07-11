@@ -4,13 +4,7 @@ const ast_mod = @import("ast.zig");
 const type_map = @import("type_map.zig");
 const dialect_mod = @import("dialect.zig");
 const typed_ast_mod = @import("typed_ast.zig");
-const Field = ast_mod.Field;
-const TypeInfo = ast_mod.TypeInfo;
-const FkDecl = ast_mod.FkDecl;
-const FkAction = ast_mod.FkAction;
-const IndexDecl = ast_mod.IndexDecl;
 const CheckConstraint = ast_mod.CheckConstraint;
-const SqlComment = ast_mod.SqlComment;
 const Writer = std.Io.Writer;
 
 pub const Dialect = type_map.Dialect;
@@ -38,193 +32,7 @@ pub const Codegen = struct {
         try self.backend.emitCreateDatabase(w, name, charset);
     }
 
-    fn emitType(self: Codegen, w: *Writer, field: Field) !void {
-        try type_map.toSqlType(w, self.dialect, field.type_info);
-    }
-
-    fn emitFieldComment(self: Codegen, w: *Writer, comment: ?[]const u8) !void {
-        try self.backend.emitFieldComment(w, comment);
-    }
-
-    fn emitInlineIndexes(self: Codegen, w: *Writer, table: sem.ResolvedTable, needs_comma: *bool) !void {
-        try self.backend.emitInlineIndexes(w, table, needs_comma);
-    }
-
-    fn emitIndexes(self: Codegen, w: *Writer, indexes: []const IndexDecl, needs_comma: *bool) !void {
-        for (indexes) |idx| {
-            try self.backend.emitIndex(w, idx, needs_comma);
-        }
-    }
-
-    // ─── Foreign keys (dialect-independent) ────────────────────
-
-    fn emitFkInline(self: Codegen, w: *Writer, field: Field, needs_comma: *bool) !void {
-        if (field.fk) |fk| {
-            if (needs_comma.*) try w.writeAll(",\n");
-            needs_comma.* = true;
-            try w.writeAll("  FOREIGN KEY (");
-            for (fk.fields, 0..) |f, fi| {
-                if (fi > 0) try w.writeAll(", ");
-                try self.quoteIdent(w, f);
-            }
-            try w.writeAll(") REFERENCES ");
-            try self.quoteIdent(w, fk.ref_table);
-            try w.writeAll("(");
-            for (fk.ref_fields, 0..) |f, fi| {
-                if (fi > 0) try w.writeAll(", ");
-                try self.quoteIdent(w, f);
-            }
-            try w.writeAll(")");
-            try self.emitFkActions(w, fk.actions);
-        }
-    }
-
-    fn emitFkStandalone(self: Codegen, w: *Writer, fk: FkDecl, needs_comma: *bool) !void {
-        if (needs_comma.*) try w.writeAll(",\n");
-        needs_comma.* = true;
-        try w.writeAll("  FOREIGN KEY (");
-        for (fk.fields, 0..) |f, fi| {
-            if (fi > 0) try w.writeAll(", ");
-            try self.quoteIdent(w, f);
-        }
-        try w.writeAll(") REFERENCES ");
-        try self.quoteIdent(w, fk.ref_table);
-        try w.writeAll("(");
-        for (fk.ref_fields, 0..) |f, fi| {
-            if (fi > 0) try w.writeAll(", ");
-            try self.quoteIdent(w, f);
-        }
-        try w.writeAll(")");
-        try self.emitFkActions(w, fk.actions);
-    }
-
-    fn emitFkActions(_: Codegen, w: *Writer, actions: []const FkAction) !void {
-        for (actions) |action| {
-            try w.writeAll(" ");
-            switch (action.trigger) {
-                .on_delete => try w.writeAll("ON DELETE"),
-                .on_update => try w.writeAll("ON UPDATE"),
-            }
-            try w.writeAll(" ");
-            switch (action.action) {
-                .cascade => try w.writeAll("CASCADE"),
-                .set_null => try w.writeAll("SET NULL"),
-            }
-        }
-    }
-
-    // ─── Field modifiers ───────────────────────────────────────
-
-    fn emitFieldModifiers(self: Codegen, w: *Writer, field: Field, has_auto_inc: *bool, has_pk: *bool, has_not_null: *bool) !void {
-        for (field.modifiers) |mod| {
-            switch (mod.kind) {
-                .auto_inc_pk => {
-                    if (type_map.isNumericTpsType(field.type_info)) {
-                        has_auto_inc.* = true;
-                        has_pk.* = true;
-                    } else if (type_map.isDatetimeTpsType(field.type_info)) {
-                        try self.backend.emitTimestampModifier(w, true);
-                    }
-                },
-                .auto_inc => {
-                    if (type_map.isNumericTpsType(field.type_info)) {
-                        has_auto_inc.* = true;
-                    } else if (type_map.isDatetimeTpsType(field.type_info)) {
-                        try self.backend.emitTimestampModifier(w, false);
-                    }
-                },
-                .primary_key => has_pk.* = true,
-                .not_null => has_not_null.* = true,
-                .unsigned => try self.backend.emitUnsigned(w),
-                .inline_unique => {},
-                .inline_index => {},
-            }
-        }
-    }
-
-    // ─── Field suffix (post-column) ────────────────────────────
-
-    fn emitFieldSuffix(self: Codegen, w: *Writer, field: Field, has_auto_inc: bool, has_pk: bool) !void {
-        const is_datetime = type_map.isDatetimeTpsType(field.type_info);
-        try self.backend.emitFieldSuffix(w, field, has_auto_inc, has_pk, is_datetime);
-    }
-
-    // ─── ENUM CHECK constraint for PostgreSQL/SQLite ───────────
-
-    fn emitEnumCheck(self: Codegen, w: *Writer, field: Field) !void {
-        if (self.dialect != .postgres and self.dialect != .sqlite) return;
-        if (field.type_info != .enum_type) return;
-        const vals = field.type_info.enum_type;
-        if (vals.len == 0) return;
-        try w.writeAll(" CHECK (");
-        try w.print("\"{s}\" IN (", .{field.name});
-        for (vals, 0..) |v, vi| {
-            if (vi > 0) try w.writeAll(", ");
-            try w.print("'{s}'", .{v});
-        }
-        try w.writeAll("))");
-    }
-
-    // ─── Table footer + post-table emissions ───────────────────
-
-    fn emitTableFooter(self: Codegen, w: *Writer, table: sem.ResolvedTable, schema_charset: ?[]const u8) !void {
-        try self.backend.emitFooter(w, table, schema_charset);
-    }
-
-    fn emitPostComments(self: Codegen, w: *Writer, table: sem.ResolvedTable) !void {
-        try self.backend.emitComments(w, table);
-    }
-
-    fn emitStandaloneIndexes(self: Codegen, w: *Writer, table: sem.ResolvedTable) !void {
-        try self.backend.emitStandaloneIndexes(w, table);
-    }
-
-    // ─── Public API ────────────────────────────────────────────
-
-    pub fn generate(self: *Codegen, resolved: sem.ResolvedAst) ![]const u8 {
-        var aw = std.Io.Writer.Allocating.init(self.alloc);
-        const w = &aw.writer;
-
-        try w.writeAll("-- Generated by zig-typespec\n\n");
-
-        if (resolved.schema_name) |name| {
-            try self.emitCreateDatabase(w, name, resolved.schema_charset);
-        }
-
-        var ti: usize = 0;
-        var ci: usize = 0;
-        while (ti < resolved.tables.len or ci < resolved.sql_comments.len) {
-            const table_line = if (ti < resolved.tables.len) resolved.tables[ti].line_no else std.math.maxInt(usize);
-            const comment_line = if (ci < resolved.sql_comments.len) resolved.sql_comments[ci].line_no else std.math.maxInt(usize);
-
-            if (comment_line < table_line) {
-                try w.writeAll(resolved.sql_comments[ci].text);
-                try w.writeAll("\n");
-                ci += 1;
-            } else if (ti < resolved.tables.len) {
-                try self.generateTable(w, resolved.tables[ti], resolved.schema_charset);
-                ti += 1;
-                if (ti < resolved.tables.len or ci < resolved.sql_comments.len) {
-                    try w.writeAll("\n");
-                }
-            }
-        }
-
-        try w.flush();
-        var out = aw.toArrayList();
-        return try out.toOwnedSlice(self.alloc);
-    }
-
-    pub fn generateSingleTable(self: *Codegen, table: sem.ResolvedTable, schema_charset: ?[]const u8) ![]const u8 {
-        var aw = std.Io.Writer.Allocating.init(self.alloc);
-        const w = &aw.writer;
-        try self.generateTable(w, table, schema_charset);
-        try w.flush();
-        var out = aw.toArrayList();
-        return try out.toOwnedSlice(self.alloc);
-    }
-
-    // ─── TypedAst API ──────────────────────────────────────────
+    // ─── TypedAst API (sole codegen path) ───────────────────────
 
     pub fn generateFromTypedAst(self: *Codegen, typed: typed_ast_mod.TypedAst) ![]const u8 {
         var aw = std.Io.Writer.Allocating.init(self.alloc);
@@ -236,15 +44,35 @@ pub const Codegen = struct {
             try self.backend.emitCreateDatabase(w, name, typed.schema_charset);
         }
 
+        // Interleave tables and sql_comments by line number
         var ti: usize = 0;
-        while (ti < typed.tables.len) {
-            try self.generateTypedTable(w, typed.tables[ti]);
-            ti += 1;
-            if (ti < typed.tables.len) {
+        var ci: usize = 0;
+        while (ti < typed.tables.len or ci < typed.sql_comments.len) {
+            const table_line = if (ti < typed.tables.len) typed.tables[ti].line_no else std.math.maxInt(usize);
+            const comment_line = if (ci < typed.sql_comments.len) typed.sql_comments[ci].line_no else std.math.maxInt(usize);
+
+            if (comment_line < table_line) {
+                try w.writeAll(typed.sql_comments[ci].text);
                 try w.writeAll("\n");
+                ci += 1;
+            } else if (ti < typed.tables.len) {
+                try self.generateTypedTable(w, typed.tables[ti]);
+                ti += 1;
+                if (ti < typed.tables.len or ci < typed.sql_comments.len) {
+                    try w.writeAll("\n");
+                }
             }
         }
 
+        try w.flush();
+        var out = aw.toArrayList();
+        return try out.toOwnedSlice(self.alloc);
+    }
+
+    pub fn generateSingleTypedTable(self: *Codegen, table: typed_ast_mod.TypedTable) ![]const u8 {
+        var aw = std.Io.Writer.Allocating.init(self.alloc);
+        const w = &aw.writer;
+        try self.generateTypedTable(w, table);
         try w.flush();
         var out = aw.toArrayList();
         return try out.toOwnedSlice(self.alloc);
@@ -266,14 +94,33 @@ pub const Codegen = struct {
             try w.print(" {s}", .{col.sql_type});
 
             if (col.unsigned) try self.backend.emitUnsigned(w);
-            if (col.auto_increment and self.dialect == .mysql) try w.writeAll(" AUTO_INCREMENT");
-            if (col.auto_increment and self.dialect == .postgres and !col.is_datetime) try w.writeAll(" GENERATED ALWAYS AS IDENTITY");
+
+            // NOT NULL (before other modifiers per MySQL convention)
+            if (!col.nullable) try w.writeAll(" NOT NULL");
+
+            // Auto-increment (numeric only, not datetime)
+            if (col.auto_increment) {
+                if (self.dialect == .mysql) {
+                    try w.writeAll(" AUTO_INCREMENT");
+                } else if (self.dialect == .postgres) {
+                    try w.writeAll(" GENERATED ALWAYS AS IDENTITY");
+                }
+            }
+
+            // Timestamp default (datetime +/++)
+            if (col.has_timestamp_default) {
+                try self.backend.emitTimestampModifier(w, col.on_update_current_timestamp);
+            }
+
+            // PRIMARY KEY
             if (col.primary_key and !(col.auto_increment and self.dialect == .sqlite)) {
                 try w.writeAll(" PRIMARY KEY");
             }
             if (col.auto_increment and col.primary_key and self.dialect == .sqlite) {
                 try w.writeAll(" PRIMARY KEY AUTOINCREMENT");
             }
+
+            // DEFAULT
             if (col.default) |dv| try emitDefault(w, dv);
             if (col.check) |ck| {
                 try w.writeAll(" CHECK (");
@@ -382,12 +229,28 @@ pub const Codegen = struct {
                     const tr = std.mem.trim(u8, ct, " ");
                     if (tr.len > 0) try w.print("COMMENT ON TABLE \"{s}\" IS '{s}';\n", .{ table.name, tr });
                 }
+                for (table.columns) |col| {
+                    if (col.comment) |c| {
+                        if (c.len >= 1 and c[0] == ':') {
+                            const ct = std.mem.trim(u8, c[1..], " ");
+                            if (ct.len > 0) try w.print("COMMENT ON COLUMN \"{s}\".\"{s}\" IS '{s}';\n", .{ table.name, col.name, ct });
+                        }
+                    }
+                }
             },
             .sqlite => {
                 if (table.comment) |c| {
                     const ct = if (c.len >= 1 and c[0] == ':') c[1..] else c;
                     const tr = std.mem.trim(u8, ct, " ");
                     if (tr.len > 0) try w.print("-- {s}\n", .{tr});
+                }
+                for (table.columns) |col| {
+                    if (col.comment) |c| {
+                        if (c.len >= 1 and c[0] == ':') {
+                            const ct = std.mem.trim(u8, c[1..], " ");
+                            if (ct.len > 0) try w.print("-- {s}.{s}: {s}\n", .{ table.name, col.name, ct });
+                        }
+                    }
                 }
             },
         }
@@ -407,67 +270,6 @@ pub const Codegen = struct {
                 try w.writeAll(");\n");
             }
         }
-    }
-
-    pub fn generateTable(self: *Codegen, w: *Writer, table: sem.ResolvedTable, schema_charset: ?[]const u8) !void {
-        try w.writeAll("CREATE TABLE ");
-        try self.quoteIdent(w, table.name);
-        try w.writeAll(" (\n");
-
-        var needs_comma = false;
-
-        // Pass 1: emit all columns
-        for (table.fields) |field| {
-            if (std.mem.eql(u8, field.name, "...")) continue;
-            if (needs_comma) try w.writeAll(",\n");
-            needs_comma = true;
-            try w.writeAll("  ");
-            try self.quoteIdent(w, field.name);
-            try w.writeAll(" ");
-            try self.emitType(w, field);
-
-            var has_auto_inc = false;
-            var has_pk = false;
-            var has_not_null = false;
-
-            try self.emitFieldModifiers(w, field, &has_auto_inc, &has_pk, &has_not_null);
-
-            if (has_not_null) try w.writeAll(" NOT NULL");
-            if (field.default_val) |dv| try emitDefault(w, dv.value);
-            try self.emitFieldSuffix(w, field, has_auto_inc, has_pk);
-            try self.emitFieldComment(w, field.comment);
-
-            if ((self.dialect == .postgres or self.dialect == .sqlite) and field.type_info == .enum_type) {
-                try self.emitEnumCheck(w, field);
-            }
-        }
-
-        // Pass 1b: inline indexes
-        try self.emitInlineIndexes(w, table, &needs_comma);
-
-        // Standalone indexes
-        try self.emitIndexes(w, table.indexes, &needs_comma);
-
-        // Pass 2: inline FKs
-        for (table.fields) |field| {
-            try self.emitFkInline(w, field, &needs_comma);
-        }
-
-        // Standalone FKs
-        for (table.fks) |fk| {
-            try self.emitFkStandalone(w, fk, &needs_comma);
-        }
-
-        if (needs_comma) try w.writeAll("\n");
-
-        // Table footer
-        try self.emitTableFooter(w, table, schema_charset);
-
-        // Post-table comments (PG: COMMENT ON, SQLite: -- comments)
-        try self.emitPostComments(w, table);
-
-        // Post-table CREATE INDEX (PG/SQLite)
-        try self.emitStandaloneIndexes(w, table);
     }
 
     fn emitDefault(w: *Writer, value: []const u8) !void {

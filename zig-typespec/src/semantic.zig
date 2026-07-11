@@ -1,6 +1,5 @@
 const std = @import("std");
 const ast_mod = @import("ast.zig");
-const Parser = @import("parser.zig").Parser;
 const Ast = ast_mod.Ast;
 const Template = ast_mod.Template;
 const Table = ast_mod.Table;

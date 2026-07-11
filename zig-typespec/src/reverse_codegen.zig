@@ -128,27 +128,27 @@ fn writeColumnSuffix(w: anytype, col: sp.SqlColumn, indexes: []const sp.SqlIndex
 
 // ─── CHECK Reverse ───────────────────────────────────────────────
 
-fn reverseCheck(sql_expr: []const u8, col_name: []const u8) ?[]const u8 {
+fn reverseCheck(alloc: std.mem.Allocator, sql_expr: []const u8, col_name: []const u8) ?[]const u8 {
     const e = std.mem.trim(u8, sql_expr, " \t");
-    if (parseBetween(e, col_name)) |r| return r;
-    if (parseUpperExcl(e, col_name)) |r| return r;
-    if (parseLowerExcl(e, col_name)) |r| return r;
-    if (parseBothExcl(e, col_name)) |r| return r;
-    if (parseInList(e, col_name)) |r| return r;
-    if (parseCompoundCmp(e, col_name)) |r| return r;
-    if (parseSingleCmp(e, col_name)) |r| return r;
+    if (parseBetween(alloc, e, col_name)) |r| return r;
+    if (parseUpperExcl(alloc, e, col_name)) |r| return r;
+    if (parseLowerExcl(alloc, e, col_name)) |r| return r;
+    if (parseBothExcl(alloc, e, col_name)) |r| return r;
+    if (parseInList(alloc, e, col_name)) |r| return r;
+    if (parseCompoundCmp(alloc, e, col_name)) |r| return r;
+    if (parseSingleCmp(alloc, e, col_name)) |r| return r;
     return null;
 }
 
-fn parseBetween(e: []const u8, cn: []const u8) ?[]const u8 {
+fn parseBetween(alloc: std.mem.Allocator, e: []const u8, cn: []const u8) ?[]const u8 {
     const bp = std.mem.indexOf(u8, e, " BETWEEN ") orelse return null;
     if (!fieldMatches(e[0..bp], cn)) return null;
     const rest = e[bp + 9 ..];
     const ap = std.mem.indexOf(u8, rest, " AND ") orelse return null;
-    return fmtCheck("[{s},{s}]", .{ std.mem.trim(u8, rest[0..ap], " "), std.mem.trim(u8, rest[ap + 5 ..], " ") });
+    return fmtCheck(alloc, "[{s},{s}]", .{ std.mem.trim(u8, rest[0..ap], " "), std.mem.trim(u8, rest[ap + 5 ..], " ") });
 }
 
-fn parseUpperExcl(e: []const u8, cn: []const u8) ?[]const u8 {
+fn parseUpperExcl(alloc: std.mem.Allocator, e: []const u8, cn: []const u8) ?[]const u8 {
     const ap = std.mem.indexOf(u8, e, " AND ") orelse return null;
     const l = std.mem.trim(u8, e[0..ap], " \t`");
     const r = std.mem.trim(u8, e[ap + 5 ..], " \t`");
@@ -157,10 +157,10 @@ fn parseUpperExcl(e: []const u8, cn: []const u8) ?[]const u8 {
     if (!fieldMatches(l[0..lp], cn) or !fieldMatches(r[0..rp], cn)) return null;
     const high = r[rp + 3 ..];
     if (high.len > 0 and high[0] == '=') return null;
-    return fmtCheck("[{s},{s})", .{ l[lp + 4 ..], high });
+    return fmtCheck(alloc, "[{s},{s})", .{ l[lp + 4 ..], high });
 }
 
-fn parseLowerExcl(e: []const u8, cn: []const u8) ?[]const u8 {
+fn parseLowerExcl(alloc: std.mem.Allocator, e: []const u8, cn: []const u8) ?[]const u8 {
     const ap = std.mem.indexOf(u8, e, " AND ") orelse return null;
     const l = std.mem.trim(u8, e[0..ap], " \t`");
     const r = std.mem.trim(u8, e[ap + 5 ..], " \t`");
@@ -169,10 +169,10 @@ fn parseLowerExcl(e: []const u8, cn: []const u8) ?[]const u8 {
     if (!fieldMatches(l[0..lp], cn) or !fieldMatches(r[0..rp], cn)) return null;
     const low = l[lp + 3 ..];
     if (low.len > 0 and low[0] == '=') return null;
-    return fmtCheck("({s},{s}]", .{ low, r[rp + 4 ..] });
+    return fmtCheck(alloc, "({s},{s}]", .{ low, r[rp + 4 ..] });
 }
 
-fn parseBothExcl(e: []const u8, cn: []const u8) ?[]const u8 {
+fn parseBothExcl(alloc: std.mem.Allocator, e: []const u8, cn: []const u8) ?[]const u8 {
     const ap = std.mem.indexOf(u8, e, " AND ") orelse return null;
     const l = std.mem.trim(u8, e[0..ap], " \t`");
     const r = std.mem.trim(u8, e[ap + 5 ..], " \t`");
@@ -182,10 +182,10 @@ fn parseBothExcl(e: []const u8, cn: []const u8) ?[]const u8 {
     const low = l[lp + 3 ..];
     const high = r[rp + 3 ..];
     if ((low.len > 0 and low[0] == '=') or (high.len > 0 and high[0] == '=')) return null;
-    return fmtCheck("({s},{s})", .{ low, high });
+    return fmtCheck(alloc, "({s},{s})", .{ low, high });
 }
 
-fn parseInList(e: []const u8, cn: []const u8) ?[]const u8 {
+fn parseInList(alloc: std.mem.Allocator, e: []const u8, cn: []const u8) ?[]const u8 {
     const ip = std.mem.indexOf(u8, e, " IN ") orelse return null;
     if (!fieldMatches(e[0..ip], cn)) return null;
     const rest = e[ip + 4 ..];
@@ -240,31 +240,31 @@ fn parseInList(e: []const u8, cn: []const u8) ?[]const u8 {
         buf[pos] = '}';
         pos += 1;
     }
-    return std.heap.page_allocator.dupe(u8, buf[0..pos]) catch null;
+    return alloc.dupe(u8, buf[0..pos]) catch null;
 }
 
-fn parseCompoundCmp(e: []const u8, cn: []const u8) ?[]const u8 {
+fn parseCompoundCmp(alloc: std.mem.Allocator, e: []const u8, cn: []const u8) ?[]const u8 {
     const ap = std.mem.indexOf(u8, e, " AND ") orelse return null;
     const l = std.mem.trim(u8, e[0..ap], " \t`");
     const r = std.mem.trim(u8, e[ap + 5 ..], " \t`");
-    const lo = oneCmp(l, cn) orelse return null;
-    const ro = oneCmp(r, cn) orelse return null;
-    return fmtCheck("{{{s},{s}}}", .{ lo, ro });
+    const lo = oneCmp(alloc, l, cn) orelse return null;
+    const ro = oneCmp(alloc, r, cn) orelse return null;
+    return fmtCheck(alloc, "{{{s},{s}}}", .{ lo, ro });
 }
 
-fn parseSingleCmp(e: []const u8, cn: []const u8) ?[]const u8 {
+fn parseSingleCmp(alloc: std.mem.Allocator, e: []const u8, cn: []const u8) ?[]const u8 {
     if (std.mem.indexOf(u8, e, " AND ") != null) return null;
-    const cmp = oneCmp(e, cn) orelse return null;
-    return fmtCheck("{{{s}}}", .{cmp});
+    const cmp = oneCmp(alloc, e, cn) orelse return null;
+    return fmtCheck(alloc, "{{{s}}}", .{cmp});
 }
 
-fn oneCmp(e: []const u8, cn: []const u8) ?[]const u8 {
+fn oneCmp(alloc: std.mem.Allocator, e: []const u8, cn: []const u8) ?[]const u8 {
     const ops = [_][]const u8{ ">=", "<=", ">", "<", "=" };
     for (ops) |op| {
         const pp = std.mem.indexOf(u8, e, op) orelse continue;
         if (!fieldMatches(e[0..pp], cn)) continue;
         const v = std.mem.trim(u8, e[pp + op.len ..], " ");
-        return fmtCheck("{s}{s}", .{ op, v });
+        return fmtCheck(alloc, "{s}{s}", .{ op, v });
     }
     return null;
 }
@@ -273,19 +273,19 @@ fn fieldMatches(raw: []const u8, expected: []const u8) bool {
     return std.mem.eql(u8, std.mem.trim(u8, raw, " \t`"), expected);
 }
 
-fn fmtCheck(comptime fmt: []const u8, args: anytype) ?[]const u8 {
-    return std.fmt.allocPrint(std.heap.page_allocator, fmt, args) catch null;
+fn fmtCheck(alloc: std.mem.Allocator, comptime fmt: []const u8, args: anytype) ?[]const u8 {
+    return std.fmt.allocPrint(alloc, fmt, args) catch null;
 }
 
 // ─── FK Reverse ──────────────────────────────────────────────────
 
 const FkForm = enum { ultra, shorthand, full };
 
-fn classifyFk(fk: sp.SqlForeignKey) struct { form: FkForm, text: ?[]const u8 } {
+fn classifyFk(alloc: std.mem.Allocator, fk: sp.SqlForeignKey) struct { form: FkForm, text: ?[]const u8 } {
     const single = fk.fields.len == 1 and fk.ref_fields.len == 1;
     const ref_is_id = fk.ref_fields.len == 1 and std.mem.eql(u8, fk.ref_fields[0], "id");
 
-    if (single and ref_is_id) return .{ .form = .shorthand, .text = fmtCheck("> {s} {s}.id", .{ fk.fields[0], fk.ref_table }) };
+    if (single and ref_is_id) return .{ .form = .shorthand, .text = fmtCheck(alloc, "> {s} {s}.id", .{ fk.fields[0], fk.ref_table }) };
 
     // Full form
     var buf: [256]u8 = undefined;
@@ -326,7 +326,7 @@ fn classifyFk(fk: sp.SqlForeignKey) struct { form: FkForm, text: ?[]const u8 } {
         }
     }
 
-    return .{ .form = .full, .text = std.heap.page_allocator.dupe(u8, buf[0..pos]) catch null };
+    return .{ .form = .full, .text = alloc.dupe(u8, buf[0..pos]) catch null };
 }
 
 // ─── Template Extraction ─────────────────────────────────────────
@@ -352,7 +352,7 @@ fn findTemplates(alloc: std.mem.Allocator, schema: sp.SqlSchema) ![]TemplateCand
     // Find templates greedily, each must introduce at least one new field
     var template_idx: usize = 0;
     while (template_idx < 5) {
-        const result = findBestWithNewFields(covered_fields.items, schema, max_cols) orelse break;
+        const result = findBestWithNewFields(alloc, covered_fields.items, schema, max_cols) orelse break;
         template_idx += 1;
         const name = if (template_idx == 1) "base" else try std.fmt.allocPrint(alloc, "base{d}", .{template_idx});
         // Track newly covered fields
@@ -429,7 +429,7 @@ fn findTemplates(alloc: std.mem.Allocator, schema: sp.SqlSchema) ![]TemplateCand
     return try result.toOwnedSlice(alloc);
 }
 
-fn findBestWithNewFields(covered: []const []const u8, schema: sp.SqlSchema, max_cols: usize) ?BestResult {
+fn findBestWithNewFields(alloc: std.mem.Allocator, covered: []const []const u8, schema: sp.SqlSchema, max_cols: usize) ?BestResult {
     var best: ?BestResult = null;
     var best_match_count: usize = 0;
 
@@ -458,7 +458,7 @@ fn findBestWithNewFields(covered: []const []const u8, schema: sp.SqlSchema, max_
                 if (new_count < 2) continue;
 
                 // Find matching tables
-                var matching = std.ArrayList(usize).initCapacity(std.heap.page_allocator, 8) catch continue;
+                var matching = std.ArrayList(usize).initCapacity(alloc, 8) catch continue;
                 for (schema.tables, 0..) |other, oi| {
                     if (other.columns.len < L) continue;
                     var found = false;
@@ -476,7 +476,7 @@ fn findBestWithNewFields(covered: []const []const u8, schema: sp.SqlSchema, max_
                             break;
                         }
                     }
-                    if (found) matching.append(std.heap.page_allocator, oi) catch {};
+                    if (found) matching.append(alloc, oi) catch {};
                 }
 
                 if (matching.items.len >= 2) {
@@ -493,7 +493,7 @@ fn findBestWithNewFields(covered: []const []const u8, schema: sp.SqlSchema, max_
                         best_match_count = matching.items.len;
                         best = .{
                             .fields = candidate_slice,
-                            .table_indices = matching.toOwnedSlice(std.heap.page_allocator) catch return null,
+                            .table_indices = matching.toOwnedSlice(alloc) catch return null,
                         };
                     }
                 }
@@ -619,7 +619,7 @@ pub const ReverseCodegen = struct {
             defer check_map.deinit();
             for (table.checks) |ck| {
                 if (ck.field_name.len > 0) {
-                    if (reverseCheck(ck.expr, ck.field_name)) |tps_expr| {
+                    if (reverseCheck(self.alloc, ck.expr, ck.field_name)) |tps_expr| {
                         try check_map.put(ck.field_name, tps_expr);
                     }
                 }
@@ -662,7 +662,7 @@ pub const ReverseCodegen = struct {
                     }
                     if (in_template) continue;
                     try w.writeAll(col.name);
-                    const ck = if (col.check_expr) |ce| reverseCheck(ce, col.name) else check_map.get(col.name);
+                    const ck = if (col.check_expr) |ce| reverseCheck(self.alloc, ce, col.name) else check_map.get(col.name);
                     try writeColumnSuffix(w, col, table.indexes, ck);
                     try w.writeAll("\n");
                 }
@@ -670,7 +670,7 @@ pub const ReverseCodegen = struct {
                 // No template — output all columns
                 for (table.columns) |col| {
                     try w.writeAll(col.name);
-                    const ck = if (col.check_expr) |ce| reverseCheck(ce, col.name) else check_map.get(col.name);
+                    const ck = if (col.check_expr) |ce| reverseCheck(self.alloc, ce, col.name) else check_map.get(col.name);
                     try writeColumnSuffix(w, col, table.indexes, ck);
                     try w.writeAll("\n");
                 }
@@ -706,7 +706,7 @@ pub const ReverseCodegen = struct {
 
             // Foreign keys
             for (table.foreign_keys) |fk| {
-                const cls = classifyFk(fk);
+                const cls = classifyFk(self.alloc, fk);
                 if (cls.form == .ultra) continue;
                 try w.writeAll("\n");
                 if (cls.text) |txt| try w.writeAll(txt);

@@ -3,6 +3,7 @@ const diff_mod = @import("diff.zig");
 const sem = @import("semantic.zig");
 const ast_mod = @import("ast.zig");
 const codegen = @import("codegen.zig");
+const typed_ast = @import("typed_ast.zig");
 const type_map = @import("type_map.zig");
 const Field = ast_mod.Field;
 const TypeInfo = ast_mod.TypeInfo;
@@ -40,15 +41,28 @@ pub fn generateFromDiff(
                 // New table — emit CREATE TABLE using the new AST table
                 has_operations = true;
                 if (findResolvedTable(new_ast, td.name)) |table| {
+                    var tr = typed_ast.TypeResolver.init(alloc);
+                    var single_tables = try std.ArrayList(sem.ResolvedTable).initCapacity(alloc, 1);
+                    try single_tables.append(alloc, table);
+                    const single_resolved = sem.ResolvedAst{
+                        .schema_name = new_ast.schema_name,
+                        .schema_charset = new_ast.schema_charset,
+                        .tables = try single_tables.toOwnedSlice(alloc),
+                        .sql_comments = &.{},
+                    };
+                    const single_typed = try tr.resolve(single_resolved, dialect);
                     var cg = codegen.Codegen.init(alloc, dialect);
-                    const sql = try cg.generateSingleTable(table, new_ast.schema_charset);
-                    try w.writeAll(sql);
+                    if (single_typed.tables.len > 0) {
+                        const sql = try cg.generateSingleTypedTable(single_typed.tables[0]);
+                        try w.writeAll(sql);
+                    }
                     try w.writeAll("\n\n");
                 }
             },
             .alter => {
                 // Modified table — emit ALTER statements for each diff
                 var table_has_ops = false;
+                var sub_needs_comma = false;
 
                 // Field diffs
                 for (td.field_diffs) |fd| {
@@ -59,9 +73,10 @@ pub fn generateFromDiff(
                                 table_has_ops = true;
                             }
                             if (fd.new_field) |nf| {
+                                if (sub_needs_comma) try w.writeAll(",\n");
+                                sub_needs_comma = true;
                                 try w.writeAll("ADD COLUMN ");
                                 try emitColumnDef(alloc, w, dialect, nf);
-                                try w.writeAll(",\n");
                             }
                         },
                         .drop => {
@@ -70,11 +85,14 @@ pub fn generateFromDiff(
                                 table_has_ops = true;
                             }
                             if (dialect == .sqlite) {
+                                if (sub_needs_comma) try w.writeAll(",\n");
+                                sub_needs_comma = true;
                                 try w.writeAll("-- WARNING: DROP COLUMN not supported in SQLite < 3.35; requires table recreation\n");
                             } else {
+                                if (sub_needs_comma) try w.writeAll(",\n");
+                                sub_needs_comma = true;
                                 try w.writeAll("DROP COLUMN ");
                                 try quoteIdent(w, dialect, fd.name);
-                                try w.writeAll(",\n");
                             }
                         },
                         .modify => {
@@ -83,11 +101,14 @@ pub fn generateFromDiff(
                                 table_has_ops = true;
                             }
                             if (dialect == .sqlite) {
+                                if (sub_needs_comma) try w.writeAll(",\n");
+                                sub_needs_comma = true;
                                 try w.writeAll("-- WARNING: MODIFY COLUMN not supported in SQLite; requires table recreation\n");
                             } else if (fd.new_field) |nf| {
+                                if (sub_needs_comma) try w.writeAll(",\n");
+                                sub_needs_comma = true;
                                 try w.writeAll("MODIFY COLUMN ");
                                 try emitColumnDef(alloc, w, dialect, nf);
-                                try w.writeAll(",\n");
                             }
                         },
                         .rename => {
@@ -98,20 +119,22 @@ pub fn generateFromDiff(
                             if (fd.rename_from) |old_name| {
                                 switch (dialect) {
                                     .mysql => {
+                                        if (sub_needs_comma) try w.writeAll(",\n");
+                                        sub_needs_comma = true;
                                         try w.writeAll("CHANGE COLUMN ");
                                         try quoteIdent(w, dialect, old_name);
                                         try w.writeAll(" ");
                                         if (fd.new_field) |nf| {
                                             try emitColumnDef(alloc, w, dialect, nf);
                                         }
-                                        try w.writeAll(",\n");
                                     },
                                     .postgres, .sqlite => {
+                                        if (sub_needs_comma) try w.writeAll(",\n");
+                                        sub_needs_comma = true;
                                         try w.writeAll("RENAME COLUMN ");
                                         try quoteIdent(w, dialect, old_name);
                                         try w.writeAll(" TO ");
                                         try quoteIdent(w, dialect, fd.name);
-                                        try w.writeAll(",\n");
                                     },
                                 }
                             }
@@ -128,8 +151,9 @@ pub fn generateFromDiff(
                                     try emitAlterTable(w, dialect, td.name);
                                     table_has_ops = true;
                                 }
+                                if (sub_needs_comma) try w.writeAll(",\n");
+                                sub_needs_comma = true;
                                 try emitAddIndex(w, dialect, td.name, idx);
-                                try w.writeAll(",\n");
                             }
                         },
                         .drop => {
@@ -138,8 +162,9 @@ pub fn generateFromDiff(
                                     try emitAlterTable(w, dialect, td.name);
                                     table_has_ops = true;
                                 }
+                                if (sub_needs_comma) try w.writeAll(",\n");
+                                sub_needs_comma = true;
                                 try emitDropIndex(w, dialect, td.name, idx);
-                                try w.writeAll(",\n");
                             }
                         },
                         .modify => {
@@ -149,16 +174,18 @@ pub fn generateFromDiff(
                                     try emitAlterTable(w, dialect, td.name);
                                     table_has_ops = true;
                                 }
+                                if (sub_needs_comma) try w.writeAll(",\n");
+                                sub_needs_comma = true;
                                 try emitDropIndex(w, dialect, td.name, old_idx);
-                                try w.writeAll(",\n");
                             }
                             if (idx_diff.new_idx) |new_idx| {
                                 if (!table_has_ops) {
                                     try emitAlterTable(w, dialect, td.name);
                                     table_has_ops = true;
                                 }
+                                if (sub_needs_comma) try w.writeAll(",\n");
+                                sub_needs_comma = true;
                                 try emitAddIndex(w, dialect, td.name, new_idx);
-                                try w.writeAll(",\n");
                             }
                         },
                     }
@@ -173,8 +200,9 @@ pub fn generateFromDiff(
                                     try emitAlterTable(w, dialect, td.name);
                                     table_has_ops = true;
                                 }
+                                if (sub_needs_comma) try w.writeAll(",\n");
+                                sub_needs_comma = true;
                                 try emitAddFk(w, dialect, td.name, fk);
-                                try w.writeAll(",\n");
                             }
                         },
                         .drop => {
@@ -183,8 +211,9 @@ pub fn generateFromDiff(
                                     try emitAlterTable(w, dialect, td.name);
                                     table_has_ops = true;
                                 }
+                                if (sub_needs_comma) try w.writeAll(",\n");
+                                sub_needs_comma = true;
                                 try emitDropFk(w, dialect, td.name, fk);
-                                try w.writeAll(",\n");
                             }
                         },
                     }
@@ -192,11 +221,7 @@ pub fn generateFromDiff(
 
                 if (table_has_ops) {
                     has_operations = true;
-                    // Remove trailing ",\n" and replace with ";\n"
-                    // We already wrote trailing comma, so just close
-                    try w.writeAll("-- end\n");
-                    // We need to rewrite — use a simpler approach: just close with semicolon
-                    // The trailing comma approach won't work cleanly, so let's use a different strategy
+                    try w.writeAll(";\n");
                 }
             },
         }
@@ -206,29 +231,7 @@ pub fn generateFromDiff(
 
     try w.flush();
     var out = aw.toArrayList();
-    const raw_result = try out.toOwnedSlice(alloc);
-
-    // Post-process: replace ",\n-- end\n" with ";\n"
-    return try fixTrailingCommas(alloc, raw_result);
-}
-
-/// Replace trailing ",\n" before COMMIT or before "-- end" markers with ";\n"
-fn fixTrailingCommas(alloc: std.mem.Allocator, sql: []const u8) ![]const u8 {
-    var result = try std.ArrayList(u8).initCapacity(alloc, sql.len);
-    var i: usize = 0;
-    while (i < sql.len) {
-        // Look for ",\n-- end\n"
-        if (i + 8 <= sql.len and std.mem.eql(u8, sql[i .. i + 8], ",\n-- end")) {
-            try result.appendSlice(alloc, ";\n");
-            i += 8;
-            // Skip the trailing \n after -- end
-            if (i < sql.len and sql[i] == '\n') i += 1;
-            continue;
-        }
-        try result.append(alloc, sql[i]);
-        i += 1;
-    }
-    return try result.toOwnedSlice(alloc);
+    return try out.toOwnedSlice(alloc);
 }
 
 fn emitAlterTable(w: anytype, dialect: codegen.Dialect, table_name: []const u8) !void {

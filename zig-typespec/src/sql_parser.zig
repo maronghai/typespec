@@ -1,8 +1,11 @@
 const std = @import("std");
-
-// ─── SQL Dialect ────────────────────────────────────────────────
-
-pub const Dialect = enum { mysql, postgres, sqlite };
+const ast_mod = @import("ast.zig");
+const type_map = @import("type_map.zig");
+pub const Dialect = type_map.Dialect;
+pub const IndexKind = ast_mod.IndexType;
+pub const FkActionType = ast_mod.FkActionType;
+pub const FkActionTrigger = ast_mod.FkActionTrigger;
+pub const FkAction = ast_mod.FkAction;
 
 // ─── SQL IR Types ────────────────────────────────────────────────
 
@@ -19,26 +22,11 @@ pub const SqlColumn = struct {
     comment: ?[]const u8,
 };
 
-pub const IndexKind = enum {
-    regular,
-    unique,
-    fulltext,
-    primary_key,
-};
-
 pub const SqlIndex = struct {
     kind: IndexKind,
     name: []const u8,
     fields: []const []const u8,
     descending: []const bool,
-};
-
-pub const FkActionType = enum { cascade, set_null };
-pub const FkActionTrigger = enum { on_delete, on_update };
-
-pub const FkAction = struct {
-    trigger: FkActionTrigger,
-    action: FkActionType,
 };
 
 pub const SqlForeignKey = struct {

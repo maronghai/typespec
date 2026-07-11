@@ -269,8 +269,11 @@ fn handleCompile(io: std.Io, alloc: std.mem.Allocator, file_data: []const u8, in
     const resolved = try sa.analyze(tree);
     if (trace) semantic.diagnosticTrace(resolved);
 
+    var tr = typed_ast.TypeResolver.init(alloc);
+    const typed = try tr.resolve(resolved, dialect);
+
     var cg = codegen.Codegen.init(alloc, dialect);
-    const sql = try cg.generate(resolved);
+    const sql = try cg.generateFromTypedAst(typed);
     if (trace) codegen.diagnosticTrace(sql);
 
     try writeOutput(io, sql, output_path);
@@ -314,11 +317,7 @@ fn handleMigrate(io: std.Io, alloc: std.mem.Allocator, old_path: []const u8, new
 }
 
 fn handleReverse(io: std.Io, alloc: std.mem.Allocator, file_data: []const u8, input_name: []const u8, output_path: ?[]const u8, with_templates: bool, dialect: codegen.Dialect) !void {
-    const sql_dialect: sql_parser.Dialect = switch (dialect) {
-        .postgres => .postgres,
-        .sqlite => .sqlite,
-        .mysql => .mysql,
-    };
+    const sql_dialect: sql_parser.Dialect = dialect;
     var sp_parser = sql_parser.SqlParser.init(alloc, file_data, sql_dialect);
     const result = sp_parser.parse() catch |err| {
         const lc = sp_parser.lineColAt(sp_parser.pos);
