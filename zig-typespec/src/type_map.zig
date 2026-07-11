@@ -265,3 +265,289 @@ pub fn isDatetimeTpsType(ti: TypeInfo) bool {
         else => return false,
     }
 }
+
+// ─── Tests ────────────────────────────────────────────────────
+
+test "forward: n maps to int in MySQL" {
+    var aw = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer aw.deinit();
+    try toSqlType(&aw.writer, .mysql, .{ .simple = "n" });
+    try aw.flush();
+    const out = aw.toArrayList();
+    const result = try out.toOwnedSlice(std.testing.allocator);
+    defer std.testing.allocator.free(result);
+    try std.testing.expectEqualStrings("int", result);
+}
+
+test "forward: n maps to integer in PostgreSQL" {
+    var aw = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer aw.deinit();
+    try toSqlType(&aw.writer, .postgres, .{ .simple = "n" });
+    try aw.flush();
+    const out = aw.toArrayList();
+    const result = try out.toOwnedSlice(std.testing.allocator);
+    defer std.testing.allocator.free(result);
+    try std.testing.expectEqualStrings("integer", result);
+}
+
+test "forward: s maps to varchar in MySQL" {
+    var aw = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer aw.deinit();
+    try toSqlType(&aw.writer, .mysql, .{ .simple = "s" });
+    try aw.flush();
+    const out = aw.toArrayList();
+    const result = try out.toOwnedSlice(std.testing.allocator);
+    defer std.testing.allocator.free(result);
+    try std.testing.expectEqualStrings("varchar(255)", result);
+}
+
+test "forward: t maps to datetime in MySQL" {
+    var aw = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer aw.deinit();
+    try toSqlType(&aw.writer, .mysql, .{ .simple = "t" });
+    try aw.flush();
+    const out = aw.toArrayList();
+    const result = try out.toOwnedSlice(std.testing.allocator);
+    defer std.testing.allocator.free(result);
+    try std.testing.expectEqualStrings("datetime", result);
+}
+
+test "forward: t maps to timestamp in PostgreSQL" {
+    var aw = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer aw.deinit();
+    try toSqlType(&aw.writer, .postgres, .{ .simple = "t" });
+    try aw.flush();
+    const out = aw.toArrayList();
+    const result = try out.toOwnedSlice(std.testing.allocator);
+    defer std.testing.allocator.free(result);
+    try std.testing.expectEqualStrings("timestamp", result);
+}
+
+test "forward: none maps to varchar(255)" {
+    var aw = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer aw.deinit();
+    try toSqlType(&aw.writer, .mysql, .none);
+    try aw.flush();
+    const out = aw.toArrayList();
+    const result = try out.toOwnedSlice(std.testing.allocator);
+    defer std.testing.allocator.free(result);
+    try std.testing.expectEqualStrings("varchar(255)", result);
+}
+
+test "forward: int_explicit(11) maps to int(11) in MySQL" {
+    var aw = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer aw.deinit();
+    try toSqlType(&aw.writer, .mysql, .{ .int_explicit = 11 });
+    try aw.flush();
+    const out = aw.toArrayList();
+    const result = try out.toOwnedSlice(std.testing.allocator);
+    defer std.testing.allocator.free(result);
+    try std.testing.expectEqualStrings("int(11)", result);
+}
+
+test "forward: int_explicit(11) maps to integer in PG" {
+    var aw = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer aw.deinit();
+    try toSqlType(&aw.writer, .postgres, .{ .int_explicit = 11 });
+    try aw.flush();
+    const out = aw.toArrayList();
+    const result = try out.toOwnedSlice(std.testing.allocator);
+    defer std.testing.allocator.free(result);
+    try std.testing.expectEqualStrings("integer", result);
+}
+
+test "forward: decimal_explicit maps correctly per dialect" {
+    {
+        var aw = std.Io.Writer.Allocating.init(std.testing.allocator);
+        defer aw.deinit();
+        try toSqlType(&aw.writer, .mysql, .{ .decimal_explicit = .{ .precision = 10, .scale = 2 } });
+        try aw.flush();
+        const out = aw.toArrayList();
+        const result = try out.toOwnedSlice(std.testing.allocator);
+        defer std.testing.allocator.free(result);
+        try std.testing.expectEqualStrings("decimal(10, 2)", result);
+    }
+    {
+        var aw = std.Io.Writer.Allocating.init(std.testing.allocator);
+        defer aw.deinit();
+        try toSqlType(&aw.writer, .postgres, .{ .decimal_explicit = .{ .precision = 10, .scale = 2 } });
+        try aw.flush();
+        const out = aw.toArrayList();
+        const result = try out.toOwnedSlice(std.testing.allocator);
+        defer std.testing.allocator.free(result);
+        try std.testing.expectEqualStrings("numeric(10, 2)", result);
+    }
+}
+
+test "forward: varchar_explicit(128) maps to varchar(128)" {
+    var aw = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer aw.deinit();
+    try toSqlType(&aw.writer, .mysql, .{ .varchar_explicit = 128 });
+    try aw.flush();
+    const out = aw.toArrayList();
+    const result = try out.toOwnedSlice(std.testing.allocator);
+    defer std.testing.allocator.free(result);
+    try std.testing.expectEqualStrings("varchar(128)", result);
+}
+
+test "forward: varchar_explicit(0) maps to varchar(255)" {
+    var aw = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer aw.deinit();
+    try toSqlType(&aw.writer, .mysql, .{ .varchar_explicit = 0 });
+    try aw.flush();
+    const out = aw.toArrayList();
+    const result = try out.toOwnedSlice(std.testing.allocator);
+    defer std.testing.allocator.free(result);
+    try std.testing.expectEqualStrings("varchar(255)", result);
+}
+
+test "forward: varchar_explicit maps to TEXT in SQLite" {
+    var aw = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer aw.deinit();
+    try toSqlType(&aw.writer, .sqlite, .{ .varchar_explicit = 128 });
+    try aw.flush();
+    const out = aw.toArrayList();
+    const result = try out.toOwnedSlice(std.testing.allocator);
+    defer std.testing.allocator.free(result);
+    try std.testing.expectEqualStrings("TEXT", result);
+}
+
+test "forward: enum_type maps to ENUM in MySQL" {
+    var aw = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer aw.deinit();
+    const vals = [_][]const u8{ "M", "F", "X" };
+    try toSqlType(&aw.writer, .mysql, .{ .enum_type = &vals });
+    try aw.flush();
+    const out = aw.toArrayList();
+    const result = try out.toOwnedSlice(std.testing.allocator);
+    defer std.testing.allocator.free(result);
+    try std.testing.expectEqualStrings("ENUM('M', 'F', 'X')", result);
+}
+
+test "forward: enum_type maps to TEXT in PostgreSQL" {
+    var aw = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer aw.deinit();
+    const vals = [_][]const u8{ "M", "F" };
+    try toSqlType(&aw.writer, .postgres, .{ .enum_type = &vals });
+    try aw.flush();
+    const out = aw.toArrayList();
+    const result = try out.toOwnedSlice(std.testing.allocator);
+    defer std.testing.allocator.free(result);
+    try std.testing.expectEqualStrings("TEXT", result);
+}
+
+test "reverse: int maps to n" {
+    const r = reverseLookup("int", "col", false, false);
+    try std.testing.expectEqualStrings("int", r.tps);
+    // "int" is a multi-char entry, should match
+}
+
+test "reverse: varchar(255) maps to s" {
+    const r = reverseLookup("varchar(255)", "col", false, false);
+    try std.testing.expectEqualStrings("s", r.tps);
+}
+
+test "reverse: varchar(128) maps to s128" {
+    const r = reverseLookup("varchar(128)", "col", false, false);
+    try std.testing.expectEqualStrings("s128", r.tps);
+}
+
+test "reverse: decimal(16, 2) maps to 16,2" {
+    const r = reverseLookup("decimal(16, 2)", "col", false, false);
+    try std.testing.expectEqualStrings("16,2", r.tps);
+}
+
+test "reverse: numeric(16, 2) maps to 16,2" {
+    const r = reverseLookup("numeric(16, 2)", "col", false, false);
+    try std.testing.expectEqualStrings("16,2", r.tps);
+}
+
+test "reverse: ENUM(...) passes through" {
+    const r = reverseLookup("ENUM('M', 'F')", "col", false, false);
+    try std.testing.expectEqualStrings("ENUM('M', 'F')", r.tps);
+}
+
+test "reverse: tinyint maps to n" {
+    const r = reverseLookup("tinyint", "col", false, false);
+    try std.testing.expectEqualStrings("n", r.tps);
+}
+
+test "canOmitType: _id suffix with n omits" {
+    try std.testing.expect(canOmitType("user_id", "n", false, false));
+}
+
+test "canOmitType: _at suffix with t omits" {
+    try std.testing.expect(canOmitType("created_at", "t", false, false));
+}
+
+test "canOmitType: _on suffix with d omits" {
+    try std.testing.expect(canOmitType("deleted_on", "d", false, false));
+}
+
+test "canOmitType: s always omits" {
+    try std.testing.expect(canOmitType("name", "s", false, false));
+}
+
+test "canOmitType: auto_inc prevents omission" {
+    try std.testing.expect(!canOmitType("user_id", "n", true, false));
+}
+
+test "canOmitType: non-matching suffix does not omit" {
+    try std.testing.expect(!canOmitType("user_name", "n", false, false));
+}
+
+test "isDatetimeSqlType: datetime is datetime" {
+    try std.testing.expect(isDatetimeSqlType("datetime"));
+}
+
+test "isDatetimeSqlType: timestamp is datetime" {
+    try std.testing.expect(isDatetimeSqlType("timestamp"));
+}
+
+test "isDatetimeSqlType: int is not datetime" {
+    try std.testing.expect(!isDatetimeSqlType("int"));
+}
+
+test "isCurrentTimestamp: CURRENT_TIMESTAMP" {
+    try std.testing.expect(isCurrentTimestamp("CURRENT_TIMESTAMP"));
+}
+
+test "isCurrentTimestamp: now()" {
+    try std.testing.expect(isCurrentTimestamp("now()"));
+}
+
+test "isCurrentTimestamp: random string" {
+    try std.testing.expect(!isCurrentTimestamp("2024-01-01"));
+}
+
+test "isDatetimeTpsType: t is datetime" {
+    try std.testing.expect(isDatetimeTpsType(.{ .simple = "t" }));
+}
+
+test "isDatetimeTpsType: d is datetime" {
+    try std.testing.expect(isDatetimeTpsType(.{ .simple = "d" }));
+}
+
+test "isDatetimeTpsType: n is not datetime" {
+    try std.testing.expect(!isDatetimeTpsType(.{ .simple = "n" }));
+}
+
+test "isNumericTpsType: n is numeric" {
+    try std.testing.expect(isNumericTpsType(.{ .simple = "n" }));
+}
+
+test "isNumericTpsType: N is numeric" {
+    try std.testing.expect(isNumericTpsType(.{ .simple = "N" }));
+}
+
+test "isNumericTpsType: s is not numeric" {
+    try std.testing.expect(!isNumericTpsType(.{ .simple = "s" }));
+}
+
+test "isNumericTpsType: int_explicit is numeric" {
+    try std.testing.expect(isNumericTpsType(.{ .int_explicit = 11 }));
+}
+
+test "isNumericTpsType: decimal_explicit is numeric" {
+    try std.testing.expect(isNumericTpsType(.{ .decimal_explicit = .{ .precision = 10, .scale = 2 } }));
+}

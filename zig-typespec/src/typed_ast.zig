@@ -153,27 +153,16 @@ pub const TypeResolver = struct {
             },
             .enum_type => |vals| blk: {
                 if (dialect == .mysql) {
-                    var pos: usize = 0;
+                    var buf = try std.ArrayList(u8).initCapacity(self.alloc, 32);
+                    try buf.appendSlice(self.alloc, "ENUM(");
                     for (vals, 0..) |v, vi| {
-                        if (vi > 0) {
-                            type_buf[pos] = ',';
-                            pos += 1;
-                            type_buf[pos] = ' ';
-                            pos += 1;
-                        }
-                        type_buf[pos] = '\'';
-                        pos += 1;
-                        for (v) |ch| { type_buf[pos] = ch; pos += 1; }
-                        type_buf[pos] = '\'';
-                        pos += 1;
+                        if (vi > 0) try buf.appendSlice(self.alloc, ", ");
+                        try buf.append(self.alloc, '\'');
+                        try buf.appendSlice(self.alloc, v);
+                        try buf.append(self.alloc, '\'');
                     }
-                    const prefix = "ENUM(";
-                    const suffix = ")";
-                    var full = try std.ArrayList(u8).initCapacity(self.alloc, prefix.len + pos + suffix.len);
-                    try full.appendSlice(self.alloc, prefix);
-                    try full.appendSlice(self.alloc, type_buf[0..pos]);
-                    try full.appendSlice(self.alloc, suffix);
-                    break :blk try full.toOwnedSlice(self.alloc);
+                    try buf.append(self.alloc, ')');
+                    break :blk try buf.toOwnedSlice(self.alloc);
                 } else {
                     break :blk try self.alloc.dupe(u8, "TEXT");
                 }

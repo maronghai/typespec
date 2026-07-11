@@ -5,6 +5,7 @@ const ast_mod = @import("ast.zig");
 const codegen = @import("codegen.zig");
 const typed_ast = @import("typed_ast.zig");
 const type_map = @import("type_map.zig");
+const dialect_mod = @import("dialect.zig");
 const Field = ast_mod.Field;
 const TypeInfo = ast_mod.TypeInfo;
 
@@ -30,7 +31,7 @@ pub fn generateFromDiff(
     for (d.dropped_tables) |tname| {
         has_operations = true;
         try w.writeAll("DROP TABLE IF EXISTS ");
-        try quoteIdent(w, dialect, tname);
+        try dialect_mod.getBackend(dialect).quoteIdent(w, tname);
         try w.writeAll(";\n\n");
     }
 
@@ -76,7 +77,7 @@ pub fn generateFromDiff(
                                 if (sub_needs_comma) try w.writeAll(",\n");
                                 sub_needs_comma = true;
                                 try w.writeAll("ADD COLUMN ");
-                                try emitColumnDef(alloc, w, dialect, nf);
+                                try emitColumnDef(w, dialect, nf);
                             }
                         },
                         .drop => {
@@ -92,7 +93,7 @@ pub fn generateFromDiff(
                                 if (sub_needs_comma) try w.writeAll(",\n");
                                 sub_needs_comma = true;
                                 try w.writeAll("DROP COLUMN ");
-                                try quoteIdent(w, dialect, fd.name);
+                                try dialect_mod.getBackend(dialect).quoteIdent(w, fd.name);
                             }
                         },
                         .modify => {
@@ -108,7 +109,7 @@ pub fn generateFromDiff(
                                 if (sub_needs_comma) try w.writeAll(",\n");
                                 sub_needs_comma = true;
                                 try w.writeAll("MODIFY COLUMN ");
-                                try emitColumnDef(alloc, w, dialect, nf);
+                                try emitColumnDef(w, dialect, nf);
                             }
                         },
                         .rename => {
@@ -122,19 +123,19 @@ pub fn generateFromDiff(
                                         if (sub_needs_comma) try w.writeAll(",\n");
                                         sub_needs_comma = true;
                                         try w.writeAll("CHANGE COLUMN ");
-                                        try quoteIdent(w, dialect, old_name);
+                                        try dialect_mod.getBackend(dialect).quoteIdent(w, old_name);
                                         try w.writeAll(" ");
                                         if (fd.new_field) |nf| {
-                                            try emitColumnDef(alloc, w, dialect, nf);
+                                            try emitColumnDef(w, dialect, nf);
                                         }
                                     },
                                     .postgres, .sqlite => {
                                         if (sub_needs_comma) try w.writeAll(",\n");
                                         sub_needs_comma = true;
                                         try w.writeAll("RENAME COLUMN ");
-                                        try quoteIdent(w, dialect, old_name);
+                                        try dialect_mod.getBackend(dialect).quoteIdent(w, old_name);
                                         try w.writeAll(" TO ");
-                                        try quoteIdent(w, dialect, fd.name);
+                                        try dialect_mod.getBackend(dialect).quoteIdent(w, fd.name);
                                     },
                                 }
                             }
@@ -236,12 +237,12 @@ pub fn generateFromDiff(
 
 fn emitAlterTable(w: anytype, dialect: codegen.Dialect, table_name: []const u8) !void {
     try w.writeAll("ALTER TABLE ");
-    try quoteIdent(w, dialect, table_name);
+    try dialect_mod.getBackend(dialect).quoteIdent(w, table_name);
     try w.writeAll("\n");
 }
 
-fn emitColumnDef(alloc: std.mem.Allocator, w: anytype, dialect: codegen.Dialect, field: Field) !void {
-    try quoteIdent(w, dialect, field.name);
+fn emitColumnDef(w: anytype, dialect: codegen.Dialect, field: Field) !void {
+    try dialect_mod.getBackend(dialect).quoteIdent(w, field.name);
     try w.writeAll(" ");
     try emitTypeForColumn(w, dialect, field.type_info);
 
@@ -294,8 +295,7 @@ fn emitColumnDef(alloc: std.mem.Allocator, w: anytype, dialect: codegen.Dialect,
     // CHECK constraint
     if (field.check) |ck| {
         try w.writeAll(" CHECK (");
-        var cg = codegen.Codegen.init(alloc, dialect);
-        try cg.generateCheckExpr(w, field.name, ck);
+        try dialect_mod.emitCheckExpr(w, field.name, ck);
         try w.writeAll(")");
     }
 }
@@ -354,14 +354,14 @@ fn emitAddIndex(w: anytype, dialect: codegen.Dialect, table_name: []const u8, id
             switch (idx.kind) {
                 .unique => {
                     try w.print("CREATE UNIQUE INDEX IF NOT EXISTS \"uk_{s}\" ON ", .{idx.name});
-                    try quoteIdent(w, .sqlite, table_name);
+                    try dialect_mod.getBackend(.sqlite).quoteIdent(w, table_name);
                     try w.writeAll(" (");
                     try emitIndexFields(w, .sqlite, idx);
                     try w.writeAll(")");
                 },
                 .regular => {
                     try w.print("CREATE INDEX IF NOT EXISTS \"idx_{s}\" ON ", .{idx.name});
-                    try quoteIdent(w, .sqlite, table_name);
+                    try dialect_mod.getBackend(.sqlite).quoteIdent(w, table_name);
                     try w.writeAll(" (");
                     try emitIndexFields(w, .sqlite, idx);
                     try w.writeAll(")");
@@ -407,14 +407,14 @@ fn emitAddFk(w: anytype, dialect: codegen.Dialect, table_name: []const u8, fk: a
     try w.writeAll("ADD FOREIGN KEY (");
     for (fk.fields, 0..) |f, fi| {
         if (fi > 0) try w.writeAll(", ");
-        try quoteIdent(w, dialect, f);
+        try dialect_mod.getBackend(dialect).quoteIdent(w, f);
     }
     try w.writeAll(") REFERENCES ");
-    try quoteIdent(w, dialect, fk.ref_table);
+    try dialect_mod.getBackend(dialect).quoteIdent(w, fk.ref_table);
     try w.writeAll("(");
     for (fk.ref_fields, 0..) |f, fi| {
         if (fi > 0) try w.writeAll(", ");
-        try quoteIdent(w, dialect, f);
+        try dialect_mod.getBackend(dialect).quoteIdent(w, f);
     }
     try w.writeAll(")");
     for (fk.actions) |action| {
@@ -454,13 +454,6 @@ fn emitDropFk(w: anytype, dialect: codegen.Dialect, table_name: []const u8, fk: 
             try w.writeAll("\"");
         },
         .sqlite => unreachable, // handled above
-    }
-}
-
-fn quoteIdent(w: anytype, dialect: codegen.Dialect, name: []const u8) !void {
-    switch (dialect) {
-        .mysql => try w.print("`{s}`", .{name}),
-        .postgres, .sqlite => try w.print("\"{s}\"", .{name}),
     }
 }
 

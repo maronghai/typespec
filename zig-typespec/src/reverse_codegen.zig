@@ -191,10 +191,8 @@ fn parseInList(alloc: std.mem.Allocator, e: []const u8, cn: []const u8) ?[]const
     const rest = e[ip + 4 ..];
     if (rest.len == 0 or rest[0] != '(') return null;
     // Parse: {val1,val2,...}
-    var buf: [256]u8 = undefined;
-    var pos: usize = 0;
-    buf[pos] = '{';
-    pos += 1;
+    var buf = std.ArrayList(u8).initCapacity(alloc, 64) catch return null;
+    buf.append(alloc, '{') catch return null;
     var i: usize = 1;
     var first = true;
     while (i < rest.len and rest[i] != ')') {
@@ -204,17 +202,9 @@ fn parseInList(alloc: std.mem.Allocator, e: []const u8, cn: []const u8) ?[]const
             while (i < rest.len and rest[i] != '\'') i += 1;
             const val = rest[s..i];
             if (i < rest.len) i += 1;
-            if (!first and pos < buf.len) {
-                buf[pos] = ',';
-                pos += 1;
-            }
+            if (!first) buf.append(alloc, ',') catch return null;
             first = false;
-            for (val) |ch| {
-                if (pos < buf.len) {
-                    buf[pos] = ch;
-                    pos += 1;
-                }
-            }
+            buf.appendSlice(alloc, val) catch return null;
         } else if (rest[i] == ' ' or rest[i] == ',' or rest[i] == '\t') {
             i += 1;
         } else {
@@ -222,25 +212,14 @@ fn parseInList(alloc: std.mem.Allocator, e: []const u8, cn: []const u8) ?[]const
             while (i < rest.len and rest[i] != ')' and rest[i] != ',' and rest[i] != ' ') i += 1;
             const v = std.mem.trim(u8, rest[s..i], " ");
             if (v.len > 0) {
-                if (!first and pos < buf.len) {
-                    buf[pos] = ',';
-                    pos += 1;
-                }
+                if (!first) buf.append(alloc, ',') catch return null;
                 first = false;
-                for (v) |ch| {
-                    if (pos < buf.len) {
-                        buf[pos] = ch;
-                        pos += 1;
-                    }
-                }
+                buf.appendSlice(alloc, v) catch return null;
             }
         }
     }
-    if (pos < buf.len) {
-        buf[pos] = '}';
-        pos += 1;
-    }
-    return alloc.dupe(u8, buf[0..pos]) catch null;
+    buf.append(alloc, '}') catch return null;
+    return buf.toOwnedSlice(alloc) catch null;
 }
 
 fn parseCompoundCmp(alloc: std.mem.Allocator, e: []const u8, cn: []const u8) ?[]const u8 {
@@ -287,46 +266,37 @@ fn classifyFk(alloc: std.mem.Allocator, fk: sp.SqlForeignKey) struct { form: FkF
 
     if (single and ref_is_id) return .{ .form = .shorthand, .text = fmtCheck(alloc, "> {s} {s}.id", .{ fk.fields[0], fk.ref_table }) };
 
-    // Full form
-    var buf: [256]u8 = undefined;
-    var pos: usize = 0;
-    const write = struct {
-        fn str(b: []u8, p: *usize, s: []const u8) void {
-            for (s) |ch| { if (p.* < b.len) { b[p.*] = ch; p.* += 1; } }
-        }
-        fn char(b: []u8, p: *usize, c: u8) void {
-            if (p.* < b.len) { b[p.*] = c; p.* += 1; }
-        }
-    };
-    write.str(&buf, &pos, "> ");
+    // Full form — use ArrayList for dynamic sizing
+    var buf = std.ArrayList(u8).initCapacity(alloc, 64) catch return .{ .form = .full, .text = null };
+    buf.appendSlice(alloc, "> ") catch return .{ .form = .full, .text = null };
     if (single) {
-        write.str(&buf, &pos, fk.fields[0]);
+        buf.appendSlice(alloc, fk.fields[0]) catch return .{ .form = .full, .text = null };
     } else {
-        write.char(&buf, &pos, '(');
+        buf.append(alloc, '(') catch return .{ .form = .full, .text = null };
         for (fk.fields, 0..) |f, i| {
-            if (i > 0) write.str(&buf, &pos, ", ");
-            write.str(&buf, &pos, f);
+            if (i > 0) buf.appendSlice(alloc, ", ") catch return .{ .form = .full, .text = null };
+            buf.appendSlice(alloc, f) catch return .{ .form = .full, .text = null };
         }
-        write.char(&buf, &pos, ')');
+        buf.append(alloc, ')') catch return .{ .form = .full, .text = null };
     }
-    write.char(&buf, &pos, ' ');
-    write.str(&buf, &pos, fk.ref_table);
-    write.char(&buf, &pos, '(');
+    buf.append(alloc, ' ') catch return .{ .form = .full, .text = null };
+    buf.appendSlice(alloc, fk.ref_table) catch return .{ .form = .full, .text = null };
+    buf.append(alloc, '(') catch return .{ .form = .full, .text = null };
     for (fk.ref_fields, 0..) |f, i| {
-        if (i > 0) write.str(&buf, &pos, ", ");
-        write.str(&buf, &pos, f);
+        if (i > 0) buf.appendSlice(alloc, ", ") catch return .{ .form = .full, .text = null };
+        buf.appendSlice(alloc, f) catch return .{ .form = .full, .text = null };
     }
-    write.char(&buf, &pos, ')');
+    buf.append(alloc, ')') catch return .{ .form = .full, .text = null };
 
     for (fk.actions) |a| {
-        write.char(&buf, &pos, ' ');
+        buf.append(alloc, ' ') catch return .{ .form = .full, .text = null };
         switch (a.trigger) {
-            .on_delete => if (a.action == .cascade) write.str(&buf, &pos, "-C") else write.str(&buf, &pos, "-N"),
-            .on_update => if (a.action == .cascade) write.str(&buf, &pos, " C") else write.str(&buf, &pos, " N"),
+            .on_delete => if (a.action == .cascade) buf.appendSlice(alloc, "-C") catch {} else buf.appendSlice(alloc, "-N") catch {},
+            .on_update => if (a.action == .cascade) buf.appendSlice(alloc, " C") catch {} else buf.appendSlice(alloc, " N") catch {},
         }
     }
 
-    return .{ .form = .full, .text = alloc.dupe(u8, buf[0..pos]) catch null };
+    return .{ .form = .full, .text = buf.toOwnedSlice(alloc) catch null };
 }
 
 // ─── Template Extraction ─────────────────────────────────────────
@@ -466,7 +436,8 @@ fn findBestWithNewFields(alloc: std.mem.Allocator, covered: []const []const u8, 
                     while (os <= other.columns.len - L) : (os += 1) {
                         var match = true;
                         for (candidate_slice, 0..) |col, ci| {
-                            if (!std.mem.eql(u8, col.name, other.columns[os + ci].name)) {
+                            if (!std.mem.eql(u8, col.name, other.columns[os + ci].name) or
+                                !std.mem.eql(u8, col.type_sql, other.columns[os + ci].type_sql)) {
                                 match = false;
                                 break;
                             }

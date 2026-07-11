@@ -1,5 +1,4 @@
 const std = @import("std");
-const sem = @import("semantic.zig");
 const ast_mod = @import("ast.zig");
 const type_map = @import("type_map.zig");
 const dialect_mod = @import("dialect.zig");
@@ -20,16 +19,6 @@ pub const Codegen = struct {
             .dialect = dialect,
             .backend = dialect_mod.getBackend(dialect),
         };
-    }
-
-    // ─── Delegated backend calls ───────────────────────────────
-
-    fn quoteIdent(self: Codegen, w: *Writer, name: []const u8) !void {
-        try self.backend.quoteIdent(w, name);
-    }
-
-    fn emitCreateDatabase(self: Codegen, w: *Writer, name: []const u8, charset: ?[]const u8) !void {
-        try self.backend.emitCreateDatabase(w, name, charset);
     }
 
     // ─── TypedAst API (sole codegen path) ───────────────────────
@@ -80,7 +69,7 @@ pub const Codegen = struct {
 
     fn generateTypedTable(self: Codegen, w: *Writer, table: typed_ast_mod.TypedTable) !void {
         try w.writeAll("CREATE TABLE ");
-        try self.quoteIdent(w, table.name);
+        try self.backend.quoteIdent(w, table.name);
         try w.writeAll(" (\n");
 
         var needs_comma = false;
@@ -90,7 +79,7 @@ pub const Codegen = struct {
             if (needs_comma) try w.writeAll(",\n");
             needs_comma = true;
             try w.writeAll("  ");
-            try self.quoteIdent(w, col.name);
+            try self.backend.quoteIdent(w, col.name);
             try w.print(" {s}", .{col.sql_type});
 
             if (col.unsigned) try self.backend.emitUnsigned(w);
@@ -186,11 +175,11 @@ pub const Codegen = struct {
             if (needs_comma) try w.writeAll(",\n");
             needs_comma = true;
             try w.writeAll("  FOREIGN KEY (");
-            for (fk.fields, 0..) |f, fi| { if (fi > 0) try w.writeAll(", "); try self.quoteIdent(w, f); }
+            for (fk.fields, 0..) |f, fi| { if (fi > 0) try w.writeAll(", "); try self.backend.quoteIdent(w, f); }
             try w.writeAll(") REFERENCES ");
-            try self.quoteIdent(w, fk.ref_table);
+            try self.backend.quoteIdent(w, fk.ref_table);
             try w.writeAll("(");
-            for (fk.ref_fields, 0..) |f, fi| { if (fi > 0) try w.writeAll(", "); try self.quoteIdent(w, f); }
+            for (fk.ref_fields, 0..) |f, fi| { if (fi > 0) try w.writeAll(", "); try self.backend.quoteIdent(w, f); }
             try w.writeAll(")");
             for (fk.actions) |action| {
                 try w.writeAll(" ");
