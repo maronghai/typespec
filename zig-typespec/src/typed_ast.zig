@@ -100,7 +100,7 @@ pub const TypeResolver = struct {
         };
     }
 
-    fn resolveColumn(self: *TypeResolver, field: Field, dialect: Dialect) !TypedColumn {
+    pub fn resolveColumn(self: *TypeResolver, field: Field, dialect: Dialect) !TypedColumn {
         // Resolve SQL type string using std.fmt.bufPrint
         var type_buf: [64]u8 = undefined;
         const sql_type = switch (field.type_info) {

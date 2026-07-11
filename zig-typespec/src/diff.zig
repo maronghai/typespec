@@ -592,3 +592,152 @@ pub fn printDiff(d: SchemaDiff) void {
         std.debug.print("No differences found.\n", .{});
     }
 }
+
+// ─── Unit Tests ─────────────────────────────────────────────
+
+const testing = std.testing;
+
+fn makeField(alloc: std.mem.Allocator, name: []const u8, type_info: TypeInfo) Field {
+    return .{
+        .name = alloc.dupe(u8, name) catch unreachable,
+        .type_info = type_info,
+        .modifiers = &.{},
+        .default_val = null,
+        .check = null,
+        .fk = null,
+        .comment = null,
+        .line_no = 1,
+    };
+}
+
+fn makeResolvedAst(_: std.mem.Allocator, tables: []const sem.ResolvedTable) sem.ResolvedAst {
+    return .{
+        .schema_name = null,
+        .schema_charset = null,
+        .tables = tables,
+        .sql_comments = &.{},
+    };
+}
+
+test "diff: no changes produces empty diff" {
+    const alloc = testing.allocator;
+    const fields = try alloc.alloc(Field, 1);
+    fields[0] = makeField(alloc, "id", .{ .simple = "n" });
+
+    const t = try alloc.dupe(sem.ResolvedTable, &.{.{
+        .name = "user",
+        .comment = null,
+        .engine = null,
+        .fields = fields,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
+    }});
+
+    const old_ast = makeResolvedAst(alloc, t);
+    const new_ast = makeResolvedAst(alloc, t);
+
+    const result = try diff(old_ast, new_ast, alloc);
+    try testing.expectEqual(@as(usize, 0), result.table_diffs.len);
+    try testing.expectEqual(@as(usize, 0), result.dropped_tables.len);
+}
+
+test "diff: new table detected as create" {
+    const alloc = testing.allocator;
+    const fields = try alloc.alloc(Field, 1);
+    fields[0] = makeField(alloc, "id", .{ .simple = "n" });
+
+    const old_ast = makeResolvedAst(alloc, &.{});
+    const new_table = try alloc.dupe(sem.ResolvedTable, &.{.{
+        .name = "user",
+        .comment = null,
+        .engine = null,
+        .fields = fields,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
+    }});
+    const new_ast = makeResolvedAst(alloc, new_table);
+
+    const result = try diff(old_ast, new_ast, alloc);
+    try testing.expectEqual(@as(usize, 1), result.table_diffs.len);
+    try testing.expectEqual(TableAction.create, result.table_diffs[0].action);
+    try testing.expectEqualStrings("user", result.table_diffs[0].name);
+}
+
+test "diff: dropped table detected" {
+    const alloc = testing.allocator;
+    const fields = try alloc.alloc(Field, 1);
+    fields[0] = makeField(alloc, "id", .{ .simple = "n" });
+
+    const old_table = try alloc.dupe(sem.ResolvedTable, &.{.{
+        .name = "user",
+        .comment = null,
+        .engine = null,
+        .fields = fields,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
+    }});
+    const old_ast = makeResolvedAst(alloc, old_table);
+    const new_ast = makeResolvedAst(alloc, &.{});
+
+    const result = try diff(old_ast, new_ast, alloc);
+    try testing.expectEqual(@as(usize, 0), result.table_diffs.len);
+    try testing.expectEqual(@as(usize, 1), result.dropped_tables.len);
+    try testing.expectEqualStrings("user", result.dropped_tables[0]);
+}
+
+test "diff: added field detected" {
+    const alloc = testing.allocator;
+    const old_fields = try alloc.alloc(Field, 1);
+    old_fields[0] = makeField(alloc, "id", .{ .simple = "n" });
+
+    const new_fields = try alloc.alloc(Field, 2);
+    new_fields[0] = makeField(alloc, "id", .{ .simple = "n" });
+    new_fields[1] = makeField(alloc, "name", .{ .varchar_explicit = 32 });
+
+    const old_ast = makeResolvedAst(alloc, try alloc.dupe(sem.ResolvedTable, &.{.{
+        .name = "user", .comment = null, .engine = null,
+        .fields = old_fields, .fks = &.{}, .indexes = &.{}, .line_no = 1,
+    }}));
+    const new_ast = makeResolvedAst(alloc, try alloc.dupe(sem.ResolvedTable, &.{.{
+        .name = "user", .comment = null, .engine = null,
+        .fields = new_fields, .fks = &.{}, .indexes = &.{}, .line_no = 1,
+    }}));
+
+    const result = try diff(old_ast, new_ast, alloc);
+    try testing.expectEqual(@as(usize, 1), result.table_diffs.len);
+    try testing.expectEqual(TableAction.alter, result.table_diffs[0].action);
+    try testing.expectEqual(@as(usize, 1), result.table_diffs[0].field_diffs.len);
+    try testing.expectEqual(FieldAction.add, result.table_diffs[0].field_diffs[0].action);
+    try testing.expectEqualStrings("name", result.table_diffs[0].field_diffs[0].name);
+}
+
+test "diff: renamed field detected by signature match" {
+    const alloc = testing.allocator;
+    const old_fields = try alloc.alloc(Field, 2);
+    old_fields[0] = makeField(alloc, "id", .{ .simple = "n" });
+    old_fields[1] = makeField(alloc, "name", .{ .varchar_explicit = 32 });
+
+    const new_fields = try alloc.alloc(Field, 2);
+    new_fields[0] = makeField(alloc, "id", .{ .simple = "n" });
+    new_fields[1] = makeField(alloc, "full_name", .{ .varchar_explicit = 32 });
+
+    const old_ast = makeResolvedAst(alloc, try alloc.dupe(sem.ResolvedTable, &.{.{
+        .name = "user", .comment = null, .engine = null,
+        .fields = old_fields, .fks = &.{}, .indexes = &.{}, .line_no = 1,
+    }}));
+    const new_ast = makeResolvedAst(alloc, try alloc.dupe(sem.ResolvedTable, &.{.{
+        .name = "user", .comment = null, .engine = null,
+        .fields = new_fields, .fks = &.{}, .indexes = &.{}, .line_no = 1,
+    }}));
+
+    const result = try diff(old_ast, new_ast, alloc);
+    try testing.expectEqual(@as(usize, 1), result.table_diffs.len);
+    try testing.expectEqual(@as(usize, 1), result.table_diffs[0].field_diffs.len);
+    try testing.expectEqual(FieldAction.rename, result.table_diffs[0].field_diffs[0].action);
+    try testing.expectEqualStrings("full_name", result.table_diffs[0].field_diffs[0].name);
+    try testing.expect(result.table_diffs[0].field_diffs[0].rename_from != null);
+    try testing.expectEqualStrings("name", result.table_diffs[0].field_diffs[0].rename_from.?);
+}

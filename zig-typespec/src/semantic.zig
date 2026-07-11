@@ -451,3 +451,164 @@ pub fn diagnosticTrace(resolved: ResolvedAst) void {
         std.debug.print("\n", .{});
     }
 }
+
+// ─── Unit Tests ─────────────────────────────────────────────
+
+const testing = std.testing;
+
+fn makeTestField(name: []const u8, type_info: ast_mod.TypeInfo) Field {
+    return .{
+        .name = name,
+        .type_info = type_info,
+        .modifiers = &.{},
+        .default_val = null,
+        .check = null,
+        .fk = null,
+        .comment = null,
+        .line_no = 1,
+    };
+}
+
+fn makeTestAst(_: std.mem.Allocator, tables: []const ast_mod.Table, templates: []const ast_mod.Template) Ast {
+    return .{
+        .schema = null,
+        .templates = templates,
+        .tables = tables,
+        .sql_comments = &.{},
+    };
+}
+
+test "suffix inference: _id → int" {
+    const alloc = testing.allocator;
+    const fields = try alloc.alloc(Field, 1);
+    fields[0] = makeTestField("user_id", .none);
+
+    const ast = makeTestAst(alloc, try alloc.dupe(ast_mod.Table, &.{.{
+        .name = "order",
+        .template_ref = null,
+        .comment = null,
+        .engine = null,
+        .fields = fields,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
+    }}), &.{});
+
+    var sa = SemanticAnalyzer.init(alloc);
+    const result = try sa.analyze(ast);
+
+    try testing.expectEqual(@as(usize, 1), result.tables.len);
+    try testing.expectEqual(@as(usize, 1), result.tables[0].fields.len);
+    try testing.expectEqualStrings("n", result.tables[0].fields[0].type_info.simple);
+}
+
+test "suffix inference: _at → datetime" {
+    const alloc = testing.allocator;
+    const fields = try alloc.alloc(Field, 1);
+    fields[0] = makeTestField("created_at", .none);
+
+    const ast = makeTestAst(alloc, try alloc.dupe(ast_mod.Table, &.{.{
+        .name = "log",
+        .template_ref = null,
+        .comment = null,
+        .engine = null,
+        .fields = fields,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
+    }}), &.{});
+
+    var sa = SemanticAnalyzer.init(alloc);
+    const result = try sa.analyze(ast);
+
+    try testing.expectEqualStrings("t", result.tables[0].fields[0].type_info.simple);
+}
+
+test "suffix inference: _on → date" {
+    const alloc = testing.allocator;
+    const fields = try alloc.alloc(Field, 1);
+    fields[0] = makeTestField("paid_on", .none);
+
+    const ast = makeTestAst(alloc, try alloc.dupe(ast_mod.Table, &.{.{
+        .name = "payment",
+        .template_ref = null,
+        .comment = null,
+        .engine = null,
+        .fields = fields,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
+    }}), &.{});
+
+    var sa = SemanticAnalyzer.init(alloc);
+    const result = try sa.analyze(ast);
+
+    try testing.expectEqualStrings("d", result.tables[0].fields[0].type_info.simple);
+}
+
+test "suffix inference: explicit type wins over suffix" {
+    const alloc = testing.allocator;
+    const fields = try alloc.alloc(Field, 1);
+    fields[0] = makeTestField("point_id", .{ .varchar_explicit = 32 });
+
+    const ast = makeTestAst(alloc, try alloc.dupe(ast_mod.Table, &.{.{
+        .name = "points",
+        .template_ref = null,
+        .comment = null,
+        .engine = null,
+        .fields = fields,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
+    }}), &.{});
+
+    var sa = SemanticAnalyzer.init(alloc);
+    const result = try sa.analyze(ast);
+
+    // Explicit varchar(32) should win over _id → int inference
+    const fi = result.tables[0].fields[0].type_info;
+    try testing.expect(std.meta.activeTag(fi) == .varchar_explicit);
+}
+
+test "template application: fields merged in order" {
+    const alloc = testing.allocator;
+
+    // Template: id n++, ..., status 1 =0
+    const tmpl_fields = try alloc.alloc(Field, 3);
+    tmpl_fields[0] = makeTestField("id", .{ .simple = "n" });
+    tmpl_fields[1] = makeTestField("...", .none); // slot
+    tmpl_fields[2] = makeTestField("status", .{ .simple = "1" });
+
+    const tmpl = ast_mod.Template{
+        .name = "base",
+        .parents = &.{},
+        .fields = tmpl_fields,
+        .slot_index = 1,
+    };
+
+    // Table: #base user, fields: name s32
+    const table_fields = try alloc.alloc(Field, 1);
+    table_fields[0] = makeTestField("name", .{ .varchar_explicit = 32 });
+
+    const table = ast_mod.Table{
+        .name = "user",
+        .template_ref = "base",
+        .comment = null,
+        .engine = null,
+        .fields = table_fields,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
+    };
+
+    const ast = makeTestAst(alloc, try alloc.dupe(ast_mod.Table, &.{table}), try alloc.dupe(ast_mod.Template, &.{tmpl}));
+
+    var sa = SemanticAnalyzer.init(alloc);
+    const result = try sa.analyze(ast);
+
+    // Expected: id (from template before slot), name (concrete), status (from template after slot)
+    try testing.expectEqual(@as(usize, 3), result.tables[0].fields.len);
+    try testing.expectEqualStrings("id", result.tables[0].fields[0].name);
+    try testing.expectEqualStrings("name", result.tables[0].fields[1].name);
+    try testing.expectEqualStrings("status", result.tables[0].fields[2].name);
+}

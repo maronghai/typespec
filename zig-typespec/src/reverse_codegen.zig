@@ -321,7 +321,8 @@ fn findTemplates(alloc: std.mem.Allocator, schema: sp.SqlSchema) ![]TemplateCand
 
     // Find templates greedily, each must introduce at least one new field
     var template_idx: usize = 0;
-    while (template_idx < 5) {
+    const max_templates = @max(1, schema.tables.len / 3);
+    while (template_idx < max_templates) {
         const result = findBestWithNewFields(alloc, covered_fields.items, schema, max_cols) orelse break;
         template_idx += 1;
         const name = if (template_idx == 1) "base" else try std.fmt.allocPrint(alloc, "base{d}", .{template_idx});

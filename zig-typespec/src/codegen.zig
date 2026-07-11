@@ -79,57 +79,7 @@ pub const Codegen = struct {
             if (needs_comma) try w.writeAll(",\n");
             needs_comma = true;
             try w.writeAll("  ");
-            try self.backend.quoteIdent(w, col.name);
-            try w.print(" {s}", .{col.sql_type});
-
-            if (col.unsigned) try self.backend.emitUnsigned(w);
-
-            // NOT NULL (before other modifiers per MySQL convention)
-            if (!col.nullable) try w.writeAll(" NOT NULL");
-
-            // Auto-increment (numeric only, not datetime)
-            if (col.auto_increment) {
-                if (self.dialect == .mysql) {
-                    try w.writeAll(" AUTO_INCREMENT");
-                } else if (self.dialect == .postgres) {
-                    try w.writeAll(" GENERATED ALWAYS AS IDENTITY");
-                }
-            }
-
-            // Timestamp default (datetime +/++)
-            if (col.has_timestamp_default) {
-                try self.backend.emitTimestampModifier(w, col.on_update_current_timestamp);
-            }
-
-            // PRIMARY KEY
-            if (col.primary_key and !(col.auto_increment and self.dialect == .sqlite)) {
-                try w.writeAll(" PRIMARY KEY");
-            }
-            if (col.auto_increment and col.primary_key and self.dialect == .sqlite) {
-                try w.writeAll(" PRIMARY KEY AUTOINCREMENT");
-            }
-
-            // DEFAULT
-            if (col.default) |dv| try emitDefault(w, dv);
-            if (col.check) |ck| {
-                try w.writeAll(" CHECK (");
-                try dialect_mod.emitCheckExpr(w, col.name, ck);
-                try w.writeAll(")");
-            }
-            if (col.comment) |c| {
-                if (c.len >= 1 and c[0] == ':' and self.dialect == .mysql) {
-                    try w.print(" COMMENT '{s}'", .{std.mem.trim(u8, c[1..], " ")});
-                }
-            }
-            if (col.is_enum and (self.dialect == .postgres or self.dialect == .sqlite)) {
-                try w.writeAll(" CHECK (");
-                try w.print("\"{s}\" IN (", .{col.name});
-                for (col.enum_values, 0..) |v, vi| {
-                    if (vi > 0) try w.writeAll(", ");
-                    try w.print("'{s}'", .{v});
-                }
-                try w.writeAll("))");
-            }
+            try self.emitColumnDef(w, col);
         }
 
         // Inline indexes
@@ -261,6 +211,56 @@ pub const Codegen = struct {
         }
     }
 
+    /// Render a single column definition (shared by CREATE TABLE and ALTER TABLE paths).
+    pub fn emitColumnDef(self: Codegen, w: *Writer, col: typed_ast_mod.TypedColumn) !void {
+        try self.backend.quoteIdent(w, col.name);
+        try w.print(" {s}", .{col.sql_type});
+
+        if (col.unsigned) try self.backend.emitUnsigned(w);
+
+        if (!col.nullable) try w.writeAll(" NOT NULL");
+
+        if (col.auto_increment) {
+            if (self.dialect == .mysql) {
+                try w.writeAll(" AUTO_INCREMENT");
+            } else if (self.dialect == .postgres) {
+                try w.writeAll(" GENERATED ALWAYS AS IDENTITY");
+            }
+        }
+
+        if (col.has_timestamp_default) {
+            try self.backend.emitTimestampModifier(w, col.on_update_current_timestamp);
+        }
+
+        if (col.primary_key and !(col.auto_increment and self.dialect == .sqlite)) {
+            try w.writeAll(" PRIMARY KEY");
+        }
+        if (col.auto_increment and col.primary_key and self.dialect == .sqlite) {
+            try w.writeAll(" PRIMARY KEY AUTOINCREMENT");
+        }
+
+        if (col.default) |dv| try emitDefault(w, dv);
+        if (col.check) |ck| {
+            try w.writeAll(" CHECK (");
+            try dialect_mod.emitCheckExpr(w, col.name, ck);
+            try w.writeAll(")");
+        }
+        if (col.comment) |c| {
+            if (c.len >= 1 and c[0] == ':' and self.dialect == .mysql) {
+                try w.print(" COMMENT '{s}'", .{std.mem.trim(u8, c[1..], " ")});
+            }
+        }
+        if (col.is_enum and (self.dialect == .postgres or self.dialect == .sqlite)) {
+            try w.writeAll(" CHECK (");
+            try w.print("\"{s}\" IN (", .{col.name});
+            for (col.enum_values, 0..) |v, vi| {
+                if (vi > 0) try w.writeAll(", ");
+                try w.print("'{s}'", .{v});
+            }
+            try w.writeAll("))");
+        }
+    }
+
     fn emitDefault(w: *Writer, value: []const u8) !void {
         const is_num_val = blk: {
             _ = std.fmt.parseFloat(f64, value) catch break :blk false;
@@ -320,4 +320,145 @@ pub fn diagnosticTrace(sql: []const u8) void {
     std.debug.print("Indexes:   {d}\n", .{index_count});
     std.debug.print("SQL lines: {d}\n", .{std.mem.count(u8, sql, "\n") + 1});
     std.debug.print("SQL bytes: {d}\n\n", .{sql.len});
+}
+
+// ─── Unit Tests ─────────────────────────────────────────────
+
+const testing = std.testing;
+
+fn makeTestColumn(name: []const u8, sql_type: []const u8) typed_ast_mod.TypedColumn {
+    return .{
+        .name = name,
+        .sql_type = sql_type,
+        .nullable = false,
+        .primary_key = false,
+        .auto_increment = false,
+        .unsigned = false,
+        .default = null,
+        .check = null,
+        .comment = null,
+        .inline_unique = false,
+        .inline_index = false,
+        .is_enum = false,
+        .enum_values = &.{},
+        .is_datetime = false,
+        .has_timestamp_default = false,
+        .on_update_current_timestamp = false,
+        .line_no = 1,
+    };
+}
+
+test "codegen: simple MySQL table" {
+    const alloc = testing.allocator;
+    const cols = try alloc.alloc(typed_ast_mod.TypedColumn, 2);
+    cols[0] = makeTestColumn("id", "int");
+    cols[0].primary_key = true;
+    cols[0].auto_increment = true;
+    cols[1] = makeTestColumn("name", "varchar(32)");
+    cols[1].nullable = false;
+
+    const table = typed_ast_mod.TypedTable{
+        .name = "user",
+        .comment = null,
+        .engine = null,
+        .columns = cols,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
+    };
+
+    const tables = try alloc.dupe(typed_ast_mod.TypedTable, &.{table});
+    const typed = typed_ast_mod.TypedAst{
+        .schema_name = null,
+        .schema_charset = null,
+        .tables = tables,
+        .sql_comments = &.{},
+    };
+
+    var cg = Codegen.init(alloc, .mysql);
+    const sql = try cg.generateFromTypedAst(typed);
+
+    try testing.expect(std.mem.indexOf(u8, sql, "CREATE TABLE `user`") != null);
+    try testing.expect(std.mem.indexOf(u8, sql, "`id` int") != null);
+    try testing.expect(std.mem.indexOf(u8, sql, "AUTO_INCREMENT") != null);
+    try testing.expect(std.mem.indexOf(u8, sql, "PRIMARY KEY") != null);
+    try testing.expect(std.mem.indexOf(u8, sql, "`name` varchar(32)") != null);
+    try testing.expect(std.mem.indexOf(u8, sql, "NOT NULL") != null);
+}
+
+test "codegen: PostgreSQL table uses double quotes" {
+    const alloc = testing.allocator;
+    const cols = try alloc.alloc(typed_ast_mod.TypedColumn, 1);
+    cols[0] = makeTestColumn("id", "integer");
+    cols[0].primary_key = true;
+    cols[0].auto_increment = true;
+
+    const table = typed_ast_mod.TypedTable{
+        .name = "user",
+        .comment = null,
+        .engine = null,
+        .columns = cols,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
+    };
+
+    const tables = try alloc.dupe(typed_ast_mod.TypedTable, &.{table});
+    const typed = typed_ast_mod.TypedAst{
+        .schema_name = null,
+        .schema_charset = null,
+        .tables = tables,
+        .sql_comments = &.{},
+    };
+
+    var cg = Codegen.init(alloc, .postgres);
+    const sql = try cg.generateFromTypedAst(typed);
+
+    try testing.expect(std.mem.indexOf(u8, sql, "CREATE TABLE \"user\"") != null);
+    try testing.expect(std.mem.indexOf(u8, sql, "GENERATED ALWAYS AS IDENTITY") != null);
+    // PG should not have backtick-quoted identifiers
+    try testing.expect(std.mem.indexOf(u8, sql, "`") == null);
+}
+
+test "codegen: emitColumnDef shared path" {
+    const alloc = testing.allocator;
+    var aw = std.Io.Writer.Allocating.init(alloc);
+    const w = &aw.writer;
+
+    const col = makeTestColumn("balance", "decimal(16, 2)");
+    col.nullable = false;
+    col.unsigned = true;
+    col.default = "0";
+
+    var cg = Codegen.init(alloc, .mysql);
+    try cg.emitColumnDef(w, col);
+    try w.flush();
+
+    var out = aw.toArrayList();
+    const result = try out.toOwnedSlice(alloc);
+
+    try testing.expect(std.mem.indexOf(u8, result, "`balance`") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "decimal(16, 2)") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "UNSIGNED") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "NOT NULL") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "DEFAULT 0") != null);
+}
+
+test "codegen: emitColumnDef PG omits UNSIGNED" {
+    const alloc = testing.allocator;
+    var aw = std.Io.Writer.Allocating.init(alloc);
+    const w = &aw.writer;
+
+    const col = makeTestColumn("count", "integer");
+    col.unsigned = true;
+
+    var cg = Codegen.init(alloc, .postgres);
+    try cg.emitColumnDef(w, col);
+    try w.flush();
+
+    var out = aw.toArrayList();
+    const result = try out.toOwnedSlice(alloc);
+
+    try testing.expect(std.mem.indexOf(u8, result, "UNSIGNED") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "\"count\"") != null);
 }

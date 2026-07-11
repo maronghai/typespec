@@ -117,7 +117,7 @@ pub const DiagnosticCollector = struct {
 
     /// Record a diagnostic (warning, error, or note).
     pub fn push(self: *DiagnosticCollector, d: Diagnostic) void {
-        self.diagnostics.append(d) catch {};
+        self.diagnostics.append(self.alloc, d) catch {};
     }
 
     /// Record a diagnostic using the existing printDiagnostic + store pattern.

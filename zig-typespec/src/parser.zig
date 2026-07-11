@@ -24,9 +24,14 @@ const SqlComment = ast_mod.SqlComment;
 
 pub const Parser = struct {
     alloc: std.mem.Allocator,
+    diagnostics: ?*diag.DiagnosticCollector,
 
     pub fn init(alloc: std.mem.Allocator) Parser {
-        return .{ .alloc = alloc };
+        return .{ .alloc = alloc, .diagnostics = null };
+    }
+
+    pub fn initWithDiagnostics(alloc: std.mem.Allocator, diagnostics: *diag.DiagnosticCollector) Parser {
+        return .{ .alloc = alloc, .diagnostics = diagnostics };
     }
 
     pub fn parse(self: *Parser, lines: []const tk.Line) !Ast {
@@ -157,7 +162,21 @@ pub const Parser = struct {
                 },
                 .Field => {
                     if (in_block != .none) {
-                        const fld = try self.parseField(line);
+                        const fld = self.parseField(line) catch |err| {
+                            if (self.diagnostics) |dc| {
+                                dc.record(.{
+                                    .severity = .@"error",
+                                    .line_no = line.line_no,
+                                    .col = if (line.tokens.len > 0) diag.tokenColumn(line.tokens[0], line.raw) else null,
+                                    .message = "failed to parse field",
+                                    .actual = @errorName(err),
+                                    .source_line = line.raw,
+                                });
+                            } else {
+                                return err;
+                            }
+                            continue;
+                        };
                         try cur_fields.append(self.alloc, fld);
                     }
                 },
@@ -177,7 +196,21 @@ pub const Parser = struct {
                 },
                 .FK => {
                     if (in_block == .table) {
-                        const fk = try self.parseFK(line);
+                        const fk = self.parseFK(line) catch |err| {
+                            if (self.diagnostics) |dc| {
+                                dc.record(.{
+                                    .severity = .@"error",
+                                    .line_no = line.line_no,
+                                    .col = if (line.tokens.len > 0) diag.tokenColumn(line.tokens[0], line.raw) else null,
+                                    .message = "failed to parse foreign key",
+                                    .actual = @errorName(err),
+                                    .source_line = line.raw,
+                                });
+                            } else {
+                                return err;
+                            }
+                            continue;
+                        };
                         try cur_fks.append(self.alloc, fk);
                     } else if (in_block == .template) {
                         diag.printDiagnostic(.{
@@ -191,7 +224,21 @@ pub const Parser = struct {
                 },
                 .Index => {
                     if (in_block == .table) {
-                        const idx = try self.parseIndex(line);
+                        const idx = self.parseIndex(line) catch |err| {
+                            if (self.diagnostics) |dc| {
+                                dc.record(.{
+                                    .severity = .@"error",
+                                    .line_no = line.line_no,
+                                    .col = if (line.tokens.len > 0) diag.tokenColumn(line.tokens[0], line.raw) else null,
+                                    .message = "failed to parse index",
+                                    .actual = @errorName(err),
+                                    .source_line = line.raw,
+                                });
+                            } else {
+                                return err;
+                            }
+                            continue;
+                        };
                         try cur_indexes.append(self.alloc, idx);
                     } else if (in_block == .template) {
                         diag.printDiagnostic(.{
@@ -205,7 +252,21 @@ pub const Parser = struct {
                 },
                 .CompositePK => {
                     if (in_block == .table) {
-                        const idx = try self.parseCompositePK(line);
+                        const idx = self.parseCompositePK(line) catch |err| {
+                            if (self.diagnostics) |dc| {
+                                dc.record(.{
+                                    .severity = .@"error",
+                                    .line_no = line.line_no,
+                                    .col = if (line.tokens.len > 0) diag.tokenColumn(line.tokens[0], line.raw) else null,
+                                    .message = "failed to parse composite primary key",
+                                    .actual = @errorName(err),
+                                    .source_line = line.raw,
+                                });
+                            } else {
+                                return err;
+                            }
+                            continue;
+                        };
                         try cur_indexes.append(self.alloc, idx);
                     } else if (in_block == .template) {
                         diag.printDiagnostic(.{
