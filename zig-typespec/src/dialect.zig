@@ -13,15 +13,26 @@ const Dialect = type_map.Dialect;
 //   2. Create a new DialectBackend instance below
 //   3. Register it in the getBackend() switch
 //
-// Column-level rendering is handled inline in Codegen.generateTypedTable().
-// Only table-level and dialect-wide operations go through this vtable.
+// All dialect-specific rendering goes through this vtable.
+// codegen.zig is fully dialect-agnostic.
 
 pub const DialectBackend = struct {
+    // ── Original 5 methods ──
     quoteIdent: *const fn (w: *Writer, name: []const u8) anyerror!void,
     emitIndex: *const fn (w: *Writer, idx: IndexDecl, needs_comma: *bool) anyerror!void,
     emitCreateDatabase: *const fn (w: *Writer, name: []const u8, charset: ?[]const u8) anyerror!void,
     emitUnsigned: *const fn (w: *Writer) anyerror!void,
     emitTimestampModifier: *const fn (w: *Writer, with_on_update: bool) anyerror!void,
+    // ── New methods (v0.4.8) ──
+    emitTableFooter: *const fn (w: *Writer, engine: ?[]const u8, charset: ?[]const u8, comment: ?[]const u8) anyerror!void,
+    emitTableComment: *const fn (w: *Writer, table_name: []const u8, comment: []const u8) anyerror!void,
+    emitColumnComment: *const fn (w: *Writer, table_name: []const u8, col_name: []const u8, comment: []const u8) anyerror!void,
+    emitAutoIncrement: *const fn (w: *Writer) anyerror!void,
+    emitPrimaryKey: *const fn (w: *Writer, auto_increment: bool) anyerror!void,
+    emitInlineIndex: *const fn (w: *Writer, col_name: []const u8, is_unique: bool, needs_comma: *bool) anyerror!void,
+    emitStandaloneIndex: *const fn (w: *Writer, table_name: []const u8, idx: IndexDecl) anyerror!void,
+    emitInlineColumnComment: *const fn (w: *Writer, comment: []const u8) anyerror!void,
+    emitEnumTypeCheck: *const fn (w: *Writer, col_name: []const u8, enum_values: []const []const u8) anyerror!void,
 };
 
 pub fn getBackend(dialect: Dialect) DialectBackend {
@@ -79,17 +90,76 @@ fn mysqlEmitTimestampModifier(w: *Writer, with_on_update: bool) anyerror!void {
     }
 }
 
+fn mysqlEmitTableFooter(w: *Writer, engine: ?[]const u8, _: ?[]const u8, comment: ?[]const u8) anyerror!void {
+    const eng = engine orelse "InnoDB";
+    const cs = "utf8mb4";
+    if (comment) |c| {
+        const ct = if (c.len >= 1 and c[0] == ':') c[1..] else c;
+        const tr = std.mem.trim(u8, ct, " ");
+        try w.print(") ENGINE={s} DEFAULT CHARSET={s} COMMENT='{s}';\n", .{ eng, cs, tr });
+    } else {
+        try w.print(") ENGINE={s} DEFAULT CHARSET={s};\n", .{ eng, cs });
+    }
+}
+
+fn mysqlEmitTableComment(_: *Writer, _: []const u8, _: []const u8) anyerror!void {
+    // MySQL: comment is in table footer (COMMENT='...'), no standalone statement
+}
+
+fn mysqlEmitColumnComment(_: *Writer, _: []const u8, _: []const u8, _: []const u8) anyerror!void {
+    // MySQL: column comments are inline in emitColumnDef (COMMENT '...'), not standalone
+}
+
+fn mysqlEmitAutoIncrement(w: *Writer) anyerror!void {
+    try w.writeAll(" AUTO_INCREMENT");
+}
+
+fn mysqlEmitPrimaryKey(w: *Writer, _: bool) anyerror!void {
+    try w.writeAll(" PRIMARY KEY");
+}
+
+fn mysqlEmitInlineIndex(w: *Writer, col_name: []const u8, is_unique: bool, needs_comma: *bool) anyerror!void {
+    if (needs_comma.*) try w.writeAll(",\n");
+    needs_comma.* = true;
+    if (is_unique) {
+        try w.print("  UNIQUE INDEX `uk_{s}` (`{s}`)", .{ col_name, col_name });
+    } else {
+        try w.print("  INDEX `idx_{s}` (`{s}`)", .{ col_name, col_name });
+    }
+}
+
+fn mysqlEmitStandaloneIndex(_: *Writer, _: []const u8, _: IndexDecl) anyerror!void {
+    // MySQL: indexes are inline in CREATE TABLE, no standalone CREATE INDEX
+}
+
+fn mysqlEmitInlineColumnComment(w: *Writer, comment: []const u8) anyerror!void {
+    const ct = if (comment.len >= 1 and comment[0] == ':') comment[1..] else comment;
+    const tr = std.mem.trim(u8, ct, " ");
+    if (tr.len > 0) try w.print(" COMMENT '{s}'", .{tr});
+}
+
+fn mysqlEmitEnumTypeCheck(_: *Writer, _: []const u8, _: []const []const u8) anyerror!void {
+    // MySQL: native ENUM type, no CHECK constraint needed
+}
+
 const mysql_backend = DialectBackend{
     .quoteIdent = mysqlQuoteIdent,
     .emitIndex = mysqlEmitIndex,
     .emitCreateDatabase = mysqlEmitCreateDatabase,
     .emitUnsigned = mysqlEmitUnsigned,
     .emitTimestampModifier = mysqlEmitTimestampModifier,
+    .emitTableFooter = mysqlEmitTableFooter,
+    .emitTableComment = mysqlEmitTableComment,
+    .emitColumnComment = mysqlEmitColumnComment,
+    .emitAutoIncrement = mysqlEmitAutoIncrement,
+    .emitPrimaryKey = mysqlEmitPrimaryKey,
+    .emitInlineIndex = mysqlEmitInlineIndex,
+    .emitStandaloneIndex = mysqlEmitStandaloneIndex,
+    .emitInlineColumnComment = mysqlEmitInlineColumnComment,
+    .emitEnumTypeCheck = mysqlEmitEnumTypeCheck,
 };
 
 // ─── Shared PG/SQLite Backend ──────────────────────────────────
-// PostgreSQL and SQLite share identical implementations for quoting,
-// index emission, unsigned (no-op), and timestamp modifier.
 
 fn pgSqliteQuoteIdent(w: *Writer, name: []const u8) anyerror!void {
     try w.print("\"{s}\"", .{name});
@@ -128,6 +198,99 @@ fn pgSqliteEmitTimestampModifier(w: *Writer, _: bool) anyerror!void {
     try w.writeAll(" DEFAULT CURRENT_TIMESTAMP");
 }
 
+fn pgSqliteEmitTableFooter(w: *Writer, _: ?[]const u8, _: ?[]const u8, _: ?[]const u8) anyerror!void {
+    try w.writeAll(");\n");
+}
+
+fn pgSqliteEmitTableCommentPG(w: *Writer, table_name: []const u8, comment: []const u8) anyerror!void {
+    const ct = if (comment.len >= 1 and comment[0] == ':') comment[1..] else comment;
+    const tr = std.mem.trim(u8, ct, " ");
+    if (tr.len > 0) try w.print("COMMENT ON TABLE \"{s}\" IS '{s}';\n", .{ table_name, tr });
+}
+
+fn pgSqliteEmitColumnCommentPG(w: *Writer, table_name: []const u8, col_name: []const u8, comment: []const u8) anyerror!void {
+    if (comment.len >= 1 and comment[0] == ':') {
+        const ct = std.mem.trim(u8, comment[1..], " ");
+        if (ct.len > 0) try w.print("COMMENT ON COLUMN \"{s}\".\"{s}\" IS '{s}';\n", .{ table_name, col_name, ct });
+    }
+}
+
+fn pgSqliteEmitTableCommentSQLite(w: *Writer, _: []const u8, comment: []const u8) anyerror!void {
+    const ct = if (comment.len >= 1 and comment[0] == ':') comment[1..] else comment;
+    const tr = std.mem.trim(u8, ct, " ");
+    if (tr.len > 0) try w.print("-- {s}\n", .{tr});
+}
+
+fn pgSqliteEmitColumnCommentSQLite(w: *Writer, table_name: []const u8, col_name: []const u8, comment: []const u8) anyerror!void {
+    if (comment.len >= 1 and comment[0] == ':') {
+        const ct = std.mem.trim(u8, comment[1..], " ");
+        if (ct.len > 0) try w.print("-- {s}.{s}: {s}\n", .{ table_name, col_name, ct });
+    }
+}
+
+fn pgSqliteEmitAutoIncrementPG(w: *Writer) anyerror!void {
+    try w.writeAll(" GENERATED ALWAYS AS IDENTITY");
+}
+
+fn pgSqliteEmitAutoIncrementSQLite(_: *Writer) anyerror!void {
+    // SQLite: no standalone AUTO_INCREMENT; uses PRIMARY KEY AUTOINCREMENT instead
+}
+
+fn pgSqliteEmitPrimaryKeyNormal(w: *Writer, _: bool) anyerror!void {
+    try w.writeAll(" PRIMARY KEY");
+}
+
+fn pgSqliteEmitPrimaryKeySQLite(w: *Writer, auto_increment: bool) anyerror!void {
+    if (auto_increment) {
+        try w.writeAll(" PRIMARY KEY AUTOINCREMENT");
+    } else {
+        try w.writeAll(" PRIMARY KEY");
+    }
+}
+
+fn pgSqliteEmitInlineIndexUnique(w: *Writer, col_name: []const u8, is_unique: bool, needs_comma: *bool) anyerror!void {
+    if (is_unique) {
+        if (needs_comma.*) try w.writeAll(",\n");
+        needs_comma.* = true;
+        try w.print("  UNIQUE (\"{s}\")", .{col_name});
+    }
+    // Regular inline index: no-op for PG/SQLite
+}
+
+fn pgSqliteEmitStandaloneIndexPG(w: *Writer, table_name: []const u8, idx: IndexDecl) anyerror!void {
+    if (idx.kind == .primary_key or idx.kind == .unique or idx.kind == .fulltext) return;
+    try w.writeAll("CREATE INDEX ");
+    if (idx.name.len > 0) {
+        try w.print("\"{s}\"", .{idx.name});
+    } else {
+        try w.print("\"idx_{s}_{s}\"", .{ table_name, idx.fields[0] });
+    }
+    try w.print(" ON \"{s}\" (", .{table_name});
+    for (idx.fields, 0..) |f, fi| {
+        if (fi > 0) try w.writeAll(", ");
+        try w.print("\"{s}\"", .{f});
+    }
+    try w.writeAll(");\n");
+}
+
+fn pgSqliteEmitInlineColumnCommentPG(_: *Writer, _: []const u8) anyerror!void {
+    // PG: column comments are standalone COMMENT ON COLUMN, not inline
+}
+
+fn pgSqliteEmitInlineColumnCommentSQLite(_: *Writer, _: []const u8) anyerror!void {
+    // SQLite: column comments are standalone -- comments, not inline
+}
+
+fn pgSqliteEmitEnumTypeCheck(w: *Writer, col_name: []const u8, enum_values: []const []const u8) anyerror!void {
+    try w.writeAll(" CHECK (");
+    try w.print("\"{s}\" IN (", .{col_name});
+    for (enum_values, 0..) |v, vi| {
+        if (vi > 0) try w.writeAll(", ");
+        try w.print("'{s}'", .{v});
+    }
+    try w.writeAll("))");
+}
+
 // ─── PostgreSQL Backend ────────────────────────────────────────
 
 fn pgEmitCreateDatabase(w: *Writer, name: []const u8, charset: ?[]const u8) anyerror!void {
@@ -144,6 +307,15 @@ const pg_backend = DialectBackend{
     .emitCreateDatabase = pgEmitCreateDatabase,
     .emitUnsigned = pgSqliteEmitUnsigned,
     .emitTimestampModifier = pgSqliteEmitTimestampModifier,
+    .emitTableFooter = pgSqliteEmitTableFooter,
+    .emitTableComment = pgSqliteEmitTableCommentPG,
+    .emitColumnComment = pgSqliteEmitColumnCommentPG,
+    .emitAutoIncrement = pgSqliteEmitAutoIncrementPG,
+    .emitPrimaryKey = pgSqliteEmitPrimaryKeyNormal,
+    .emitInlineIndex = pgSqliteEmitInlineIndexUnique,
+    .emitStandaloneIndex = pgSqliteEmitStandaloneIndexPG,
+    .emitInlineColumnComment = pgSqliteEmitInlineColumnCommentPG,
+    .emitEnumTypeCheck = pgSqliteEmitEnumTypeCheck,
 };
 
 // ─── SQLite Backend ────────────────────────────────────────────
@@ -156,6 +328,15 @@ const sqlite_backend = DialectBackend{
     .emitCreateDatabase = sqliteEmitCreateDatabase,
     .emitUnsigned = pgSqliteEmitUnsigned,
     .emitTimestampModifier = pgSqliteEmitTimestampModifier,
+    .emitTableFooter = pgSqliteEmitTableFooter,
+    .emitTableComment = pgSqliteEmitTableCommentSQLite,
+    .emitColumnComment = pgSqliteEmitColumnCommentSQLite,
+    .emitAutoIncrement = pgSqliteEmitAutoIncrementSQLite,
+    .emitPrimaryKey = pgSqliteEmitPrimaryKeySQLite,
+    .emitInlineIndex = pgSqliteEmitInlineIndexUnique,
+    .emitStandaloneIndex = pgSqliteEmitStandaloneIndexPG,
+    .emitInlineColumnComment = pgSqliteEmitInlineColumnCommentSQLite,
+    .emitEnumTypeCheck = pgSqliteEmitEnumTypeCheck,
 };
 
 // ─── Shared helpers (dialect-independent) ──────────────────────

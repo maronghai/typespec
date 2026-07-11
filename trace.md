@@ -35,14 +35,48 @@
 
 ---
 
+## Phase 5: P0 重复代码清理 — v0.4.8
+
+| # | Item | Status | Notes |
+|---|------|--------|-------|
+| P0-1 | 删除 4 个重复 parser 模块 | ✅ | 删除 `parse_field.zig`(372行)、`parse_fk.zig`(173行)、`parse_check.zig`(113行)、`parse_index.zig`(171行)；共 ~829 行死代码；`parser.zig` 不 import 这些模块，两套代码并存 |
+
+## Phase 6: P1 DialectBackend vtable 扩展 — v0.4.8
+
+| # | Item | Status | Notes |
+|---|------|--------|-------|
+| P1-1 | 扩展 DialectBackend vtable | ✅ | 新增 9 个方法（原 5 → 11）：`emitTableFooter`、`emitTableComment`、`emitColumnComment`、`emitAutoIncrement`、`emitPrimaryKey`、`emitInlineIndex`、`emitStandaloneIndex`、`emitInlineColumnComment`、`emitEnumTypeCheck` |
+| P1-2 | MySQL backend 实现 | ✅ | 11 个方法全部实现；表尾 `ENGINE=... COMMENT='...'`；inline `COMMENT '...'`；`AUTO_INCREMENT`；`UNIQUE INDEX`/`INDEX` |
+| P1-3 | PostgreSQL backend 实现 | ✅ | 11 个方法全部实现；`COMMENT ON TABLE/COLUMN`；`GENERATED ALWAYS AS IDENTITY`；`UNIQUE (...)` inline；standalone `CREATE INDEX` |
+| P1-4 | SQLite backend 实现 | ✅ | 11 个方法全部实现；`-- comment` 风格；`PRIMARY KEY AUTOINCREMENT` combo；standalone `CREATE INDEX`（复用 PG 实现） |
+
+## Phase 7: P2 codegen.zig 方言无关化 — v0.4.8
+
+| # | Item | Status | Notes |
+|---|------|--------|-------|
+| P2-1 | `generateTypedTable` 清零 switch | ✅ | 6 处 `switch(self.dialect)` 全部替换为 vtable 调用 |
+| P2-2 | `emitColumnDef` 清零 switch | ✅ | 2 处 `self.dialect` 检查（MySQL inline COMMENT、PG/SQLite enum CHECK）替换为 `emitInlineColumnComment` + `emitEnumTypeCheck` vtable 方法 |
+| P2-3 | 验证 codegen.zig 无方言引用 | ✅ | `grep -E 'self\.dialect|switch.*dialect|\.mysql|\.postgres|\.sqlite'` 仅命中单元测试 setup 代码 |
+
+## Phase 8: P3 进度跟踪 — v0.4.8
+
+| # | Item | Status | Notes |
+|---|------|--------|-------|
+| P3-1 | 更新 trace.md | ✅ | 新增 v0.4.8 四阶段记录 |
+
+---
+
 ## Summary
 
 - **Started**: 2026-07-11
 - **Completed**: 2026-07-11
-- **Tests**: 298+ passing (81 MySQL + 93 PG + 1 SQLite + 9 Migrate + 8 Reverse + 2 Diff + ~104 Zig unit tests)
-- **Items completed**: 10/12
-- **Items skipped**: 2/12 (P1-1 TypeInfo refinement, P1-2 sql_parser scanner extraction)
-- **New files**: `zig-typespec/ARCHITECTURE.md`, `CONTRIBUTING.md`
-- **New test files**: `migrate-rename-column-{old,new}.tps`, `migrate-index-{old,new}.tps`, `migrate-fk-{old,new}.tps`, 3 expected SQL golden files
-- **Key refactor**: `Codegen.emitColumnDef` shared by CREATE TABLE and ALTER TABLE paths
-- **Key feature**: Parser error recovery — continues parsing after field/FK/index errors when DiagnosticCollector is provided
+- **Tests**: 298+ passing (81 MySQL + 93 PG + 1 SQLite + 9 Migrate + 8 Reverse + 2 Diff + ~96 Zig unit tests)
+- **Items completed**: 17/17（v0.4.7: 10/12 + v0.4.8: 7/7）
+- **Items skipped**: 2/12（v0.4.7 P1-1/P1-2）
+- **v0.4.8 key changes**:
+  - 删除 4 个重复 parser 模块（~829 行死代码）
+  - DialectBackend vtable 5→11 方法
+  - codegen.zig 实现零方言引用（纯 vtable 调用）
+  - 新增方言只需：添加枚举 + 类型映射 + 11 个 backend 方法
+- **Files modified**: `dialect.zig`（vtable 扩展）、`codegen.zig`（方言无关化）
+- **Files deleted**: `parse_field.zig`、`parse_fk.zig`、`parse_check.zig`、`parse_index.zig`

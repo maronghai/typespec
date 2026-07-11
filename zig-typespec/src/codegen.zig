@@ -82,7 +82,7 @@ pub const Codegen = struct {
             try self.emitColumnDef(w, col);
         }
 
-        // Inline indexes
+        // Inline indexes (delegated entirely to backend)
         for (table.columns) |col| {
             if (col.inline_unique) {
                 var dominated = false;
@@ -93,29 +93,22 @@ pub const Codegen = struct {
                     if (dominated) break;
                 }
                 if (!dominated) {
-                    if (needs_comma) try w.writeAll(",\n");
-                    needs_comma = true;
-                    switch (self.dialect) {
-                        .mysql => try w.print("  UNIQUE INDEX `uk_{s}` (`{s}`)", .{ col.name, col.name }),
-                        .postgres, .sqlite => try w.print("  UNIQUE (\"{s}\")", .{col.name}),
-                    }
+                    try self.backend.emitInlineIndex(w, col.name, true, &needs_comma);
                 }
             }
-            if (col.inline_index and self.dialect == .mysql) {
+            if (col.inline_index) {
                 var dominated = false;
                 for (table.indexes) |idx| {
                     for (idx.fields) |f| { if (std.mem.eql(u8, f, col.name)) { dominated = true; break; } }
                     if (dominated) break;
                 }
                 if (!dominated) {
-                    if (needs_comma) try w.writeAll(",\n");
-                    needs_comma = true;
-                    try w.print("  INDEX `idx_{s}` (`{s}`)", .{ col.name, col.name });
+                    try self.backend.emitInlineIndex(w, col.name, false, &needs_comma);
                 }
             }
         }
 
-        // Standalone indexes
+        // Standalone indexes (via table-level vtable method)
         for (table.indexes) |idx| {
             try self.backend.emitIndex(w, idx, &needs_comma);
         }
@@ -141,73 +134,22 @@ pub const Codegen = struct {
 
         if (needs_comma) try w.writeAll("\n");
 
-        // Footer (dialect-specific)
-        switch (self.dialect) {
-            .mysql => {
-                const charset = table.comment; // unused for footer
-                _ = charset;
-                const cs = "utf8mb4";
-                const engine = table.engine orelse "InnoDB";
-                if (table.comment) |c| {
-                    const ct = if (c.len >= 1 and c[0] == ':') c[1..] else c;
-                    const tr = std.mem.trim(u8, ct, " ");
-                    try w.print(") ENGINE={s} DEFAULT CHARSET={s} COMMENT='{s}';\n", .{ engine, cs, tr });
-                } else {
-                    try w.print(") ENGINE={s} DEFAULT CHARSET={s};\n", .{ engine, cs });
-                }
-            },
-            .postgres, .sqlite => try w.writeAll(");\n"),
-        }
+        // Table footer (delegated to backend)
+        try self.backend.emitTableFooter(w, table.engine, null, table.comment);
 
-        // Comments
-        switch (self.dialect) {
-            .mysql => {},
-            .postgres => {
-                if (table.comment) |c| {
-                    const ct = if (c.len >= 1 and c[0] == ':') c[1..] else c;
-                    const tr = std.mem.trim(u8, ct, " ");
-                    if (tr.len > 0) try w.print("COMMENT ON TABLE \"{s}\" IS '{s}';\n", .{ table.name, tr });
-                }
-                for (table.columns) |col| {
-                    if (col.comment) |c| {
-                        if (c.len >= 1 and c[0] == ':') {
-                            const ct = std.mem.trim(u8, c[1..], " ");
-                            if (ct.len > 0) try w.print("COMMENT ON COLUMN \"{s}\".\"{s}\" IS '{s}';\n", .{ table.name, col.name, ct });
-                        }
-                    }
-                }
-            },
-            .sqlite => {
-                if (table.comment) |c| {
-                    const ct = if (c.len >= 1 and c[0] == ':') c[1..] else c;
-                    const tr = std.mem.trim(u8, ct, " ");
-                    if (tr.len > 0) try w.print("-- {s}\n", .{tr});
-                }
-                for (table.columns) |col| {
-                    if (col.comment) |c| {
-                        if (c.len >= 1 and c[0] == ':') {
-                            const ct = std.mem.trim(u8, c[1..], " ");
-                            if (ct.len > 0) try w.print("-- {s}.{s}: {s}\n", .{ table.name, col.name, ct });
-                        }
-                    }
-                }
-            },
+        // Table and column comments (delegated to backend)
+        if (table.comment) |c| {
+            try self.backend.emitTableComment(w, table.name, c);
         }
-
-        // Standalone CREATE INDEX (PG/SQLite)
-        if (self.dialect != .mysql) {
-            for (table.indexes) |idx| {
-                if (idx.kind == .primary_key or idx.kind == .unique or idx.kind == .fulltext) continue;
-                try w.writeAll("CREATE INDEX ");
-                if (idx.name.len > 0) {
-                    try w.print("\"{s}\"", .{idx.name});
-                } else {
-                    try w.print("\"idx_{s}_{s}\"", .{ table.name, idx.fields[0] });
-                }
-                try w.print(" ON \"{s}\" (", .{table.name});
-                for (idx.fields, 0..) |f, fi| { if (fi > 0) try w.writeAll(", "); try w.print("\"{s}\"", .{f}); }
-                try w.writeAll(");\n");
+        for (table.columns) |col| {
+            if (col.comment) |c| {
+                try self.backend.emitColumnComment(w, table.name, col.name, c);
             }
+        }
+
+        // Standalone CREATE INDEX (delegated to backend)
+        for (table.indexes) |idx| {
+            try self.backend.emitStandaloneIndex(w, table.name, idx);
         }
     }
 
@@ -221,22 +163,15 @@ pub const Codegen = struct {
         if (!col.nullable) try w.writeAll(" NOT NULL");
 
         if (col.auto_increment) {
-            if (self.dialect == .mysql) {
-                try w.writeAll(" AUTO_INCREMENT");
-            } else if (self.dialect == .postgres) {
-                try w.writeAll(" GENERATED ALWAYS AS IDENTITY");
-            }
+            try self.backend.emitAutoIncrement(w);
         }
 
         if (col.has_timestamp_default) {
             try self.backend.emitTimestampModifier(w, col.on_update_current_timestamp);
         }
 
-        if (col.primary_key and !(col.auto_increment and self.dialect == .sqlite)) {
-            try w.writeAll(" PRIMARY KEY");
-        }
-        if (col.auto_increment and col.primary_key and self.dialect == .sqlite) {
-            try w.writeAll(" PRIMARY KEY AUTOINCREMENT");
+        if (col.primary_key) {
+            try self.backend.emitPrimaryKey(w, col.auto_increment);
         }
 
         if (col.default) |dv| try emitDefault(w, dv);
@@ -245,19 +180,13 @@ pub const Codegen = struct {
             try dialect_mod.emitCheckExpr(w, col.name, ck);
             try w.writeAll(")");
         }
+        // Inline column comment (MySQL uses COMMENT '...' syntax; PG/SQLite use standalone)
         if (col.comment) |c| {
-            if (c.len >= 1 and c[0] == ':' and self.dialect == .mysql) {
-                try w.print(" COMMENT '{s}'", .{std.mem.trim(u8, c[1..], " ")});
-            }
+            try self.backend.emitInlineColumnComment(w, c);
         }
-        if (col.is_enum and (self.dialect == .postgres or self.dialect == .sqlite)) {
-            try w.writeAll(" CHECK (");
-            try w.print("\"{s}\" IN (", .{col.name});
-            for (col.enum_values, 0..) |v, vi| {
-                if (vi > 0) try w.writeAll(", ");
-                try w.print("'{s}'", .{v});
-            }
-            try w.writeAll("))");
+        // Enum type check constraint (PG/SQLite only; MySQL uses native ENUM)
+        if (col.is_enum) {
+            try self.backend.emitEnumTypeCheck(w, col.name, col.enum_values);
         }
     }
 

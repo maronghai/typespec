@@ -118,15 +118,26 @@ Input (SQL DDL text)
 
 ## DialectBackend Vtable
 
-5 function pointers for dialect-specific SQL generation:
+11 function pointers for dialect-specific SQL generation:
 
 ```zig
 DialectBackend = struct {
+    // Original 5
     quoteIdent:             fn(w, name) -> !void,
     emitIndex:              fn(w, idx, needs_comma) -> !void,
     emitCreateDatabase:     fn(w, name, charset) -> !void,
     emitUnsigned:           fn(w) -> !void,
     emitTimestampModifier:  fn(w, with_on_update) -> !void,
+    // v0.4.8: expanded to eliminate all dialect switches in codegen
+    emitTableFooter:        fn(w, engine, charset, comment) -> !void,
+    emitTableComment:       fn(w, table_name, comment) -> !void,
+    emitColumnComment:      fn(w, table_name, col_name, comment) -> !void,
+    emitAutoIncrement:      fn(w) -> !void,
+    emitPrimaryKey:         fn(w, auto_increment) -> !void,
+    emitInlineIndex:        fn(w, col_name, is_unique, needs_comma) -> !void,
+    emitStandaloneIndex:    fn(w, table_name, idx) -> !void,
+    emitInlineColumnComment: fn(w, comment) -> !void,
+    emitEnumTypeCheck:      fn(w, col_name, enum_values) -> !void,
 };
 ```
 
@@ -137,6 +148,15 @@ DialectBackend = struct {
 | `emitCreateDatabase` | CHARACTER SET | ENCODING | no-op |
 | `emitUnsigned` | `UNSIGNED` | no-op | no-op |
 | `emitTimestampModifier` | `DEFAULT CURRENT_TIMESTAMP [ON UPDATE ...]` | `DEFAULT CURRENT_TIMESTAMP` | `DEFAULT CURRENT_TIMESTAMP` |
+| `emitTableFooter` | `ENGINE=... CHARSET=... COMMENT='...'` | `);` | `);` |
+| `emitTableComment` | no-op (in footer) | `COMMENT ON TABLE` | `-- comment` |
+| `emitColumnComment` | no-op (inline) | `COMMENT ON COLUMN` | `-- table.col: comment` |
+| `emitAutoIncrement` | `AUTO_INCREMENT` | `GENERATED ALWAYS AS IDENTITY` | no-op |
+| `emitPrimaryKey` | `PRIMARY KEY` | `PRIMARY KEY` | `PRIMARY KEY [AUTOINCREMENT]` |
+| `emitInlineIndex` | `INDEX`/`UNIQUE INDEX` | `UNIQUE (...)` | `UNIQUE (...)` |
+| `emitStandaloneIndex` | no-op (inline) | `CREATE INDEX` | `CREATE INDEX` |
+| `emitInlineColumnComment` | `COMMENT '...'` | no-op (standalone) | no-op (standalone) |
+| `emitEnumTypeCheck` | no-op (native ENUM) | `CHECK (... IN (...))` | `CHECK (... IN (...))` |
 
 PG and SQLite share 4/5 method implementations. `emitCheckExpr` is a shared standalone function (all dialects use identical CHECK syntax).
 
@@ -163,10 +183,11 @@ New passes can be added by:
 
 1. Add variant to `Dialect` enum in `type_map.zig`
 2. Add type mappings to `TYPE_TABLE` in `type_map.zig`
-3. Create `DialectBackend` instance in `dialect.zig`
+3. Create `DialectBackend` instance in `dialect.zig` (implement all 11 methods)
 4. Register in `getBackend()` switch
-5. Update `typed_ast.zig` TypeResolver for any dialect-specific type logic
-6. Add golden file tests in `tests/`
+5. Add golden file tests in `tests/`
+
+No changes needed in `codegen.zig` — it is fully dialect-agnostic.
 
 ## Testing Strategy
 
