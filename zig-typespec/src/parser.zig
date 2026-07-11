@@ -2,26 +2,22 @@ const std = @import("std");
 const tk = @import("tokenizer.zig");
 const diag = @import("diagnostic.zig");
 const ast_mod = @import("ast.zig");
-
-// Re-export all AST types for backward compatibility
-pub const TypeInfo = ast_mod.TypeInfo;
-pub const ModifierType = ast_mod.ModifierType;
-pub const Modifier = ast_mod.Modifier;
-pub const DefaultVal = ast_mod.DefaultVal;
-pub const CheckKind = ast_mod.CheckKind;
-pub const CheckConstraint = ast_mod.CheckConstraint;
-pub const Field = ast_mod.Field;
-pub const FkActionType = ast_mod.FkActionType;
-pub const FkActionTrigger = ast_mod.FkActionTrigger;
-pub const FkAction = ast_mod.FkAction;
-pub const FkDecl = ast_mod.FkDecl;
-pub const IndexType = ast_mod.IndexType;
-pub const IndexDecl = ast_mod.IndexDecl;
-pub const Template = ast_mod.Template;
-pub const Table = ast_mod.Table;
-pub const Schema = ast_mod.Schema;
-pub const SqlComment = ast_mod.SqlComment;
-pub const Ast = ast_mod.Ast;
+const Ast = ast_mod.Ast;
+const Table = ast_mod.Table;
+const Field = ast_mod.Field;
+const Template = ast_mod.Template;
+const TypeInfo = ast_mod.TypeInfo;
+const Modifier = ast_mod.Modifier;
+const DefaultVal = ast_mod.DefaultVal;
+const CheckConstraint = ast_mod.CheckConstraint;
+const CheckKind = ast_mod.CheckKind;
+const FkDecl = ast_mod.FkDecl;
+const FkAction = ast_mod.FkAction;
+const FkActionType = ast_mod.FkActionType;
+const IndexDecl = ast_mod.IndexDecl;
+const IndexType = ast_mod.IndexType;
+const Schema = ast_mod.Schema;
+const SqlComment = ast_mod.SqlComment;
 
 // ─── Parser ──────────────────────────────────────────────────
 

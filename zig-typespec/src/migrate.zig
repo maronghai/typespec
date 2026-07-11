@@ -60,7 +60,7 @@ pub fn generateFromDiff(
                             }
                             if (fd.new_field) |nf| {
                                 try w.writeAll("ADD COLUMN ");
-                                try emitColumnDef(w, dialect, nf);
+                                try emitColumnDef(alloc, w, dialect, nf);
                                 try w.writeAll(",\n");
                             }
                         },
@@ -86,7 +86,7 @@ pub fn generateFromDiff(
                                 try w.writeAll("-- WARNING: MODIFY COLUMN not supported in SQLite; requires table recreation\n");
                             } else if (fd.new_field) |nf| {
                                 try w.writeAll("MODIFY COLUMN ");
-                                try emitColumnDef(w, dialect, nf);
+                                try emitColumnDef(alloc, w, dialect, nf);
                                 try w.writeAll(",\n");
                             }
                         },
@@ -102,7 +102,7 @@ pub fn generateFromDiff(
                                         try quoteIdent(w, dialect, old_name);
                                         try w.writeAll(" ");
                                         if (fd.new_field) |nf| {
-                                            try emitColumnDef(w, dialect, nf);
+                                            try emitColumnDef(alloc, w, dialect, nf);
                                         }
                                         try w.writeAll(",\n");
                                     },
@@ -237,7 +237,7 @@ fn emitAlterTable(w: anytype, dialect: codegen.Dialect, table_name: []const u8) 
     try w.writeAll("\n");
 }
 
-fn emitColumnDef(w: anytype, dialect: codegen.Dialect, field: Field) !void {
+fn emitColumnDef(alloc: std.mem.Allocator, w: anytype, dialect: codegen.Dialect, field: Field) !void {
     try quoteIdent(w, dialect, field.name);
     try w.writeAll(" ");
     try emitTypeForColumn(w, dialect, field.type_info);
@@ -291,7 +291,8 @@ fn emitColumnDef(w: anytype, dialect: codegen.Dialect, field: Field) !void {
     // CHECK constraint
     if (field.check) |ck| {
         try w.writeAll(" CHECK (");
-        try codegen.generateCheckExpr(w, field.name, ck);
+        var cg = codegen.Codegen.init(alloc, dialect);
+        try cg.generateCheckExpr(w, field.name, ck);
         try w.writeAll(")");
     }
 }

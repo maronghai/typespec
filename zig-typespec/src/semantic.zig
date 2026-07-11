@@ -31,6 +31,29 @@ pub const ResolvedAst = struct {
     sql_comments: []const SqlComment,
 };
 
+// ─── Pass Manager ──────────────────────────────────────────────
+
+/// Shared mutable context passed to each semantic pass.
+pub const PassContext = struct {
+    alloc: std.mem.Allocator,
+    tables: *std.ArrayList(ResolvedTable),
+    schema: ?ast_mod.Schema,
+};
+
+/// A semantic analysis pass that transforms the tables in PassContext.
+pub const SemanticPass = struct {
+    name: []const u8,
+    run: *const fn (ctx: *PassContext) anyerror!void,
+};
+
+/// Default pass pipeline — order matters!
+pub const DEFAULT_PASSES = [_]SemanticPass{
+    .{ .name = "autofk", .run = runAutoFk },
+    .{ .name = "suffix_inference", .run = runSuffixInference },
+};
+
+// ─── SemanticAnalyzer ──────────────────────────────────────────
+
 pub const SemanticAnalyzer = struct {
     alloc: std.mem.Allocator,
 
@@ -39,19 +62,19 @@ pub const SemanticAnalyzer = struct {
     }
 
     pub fn analyze(self: *SemanticAnalyzer, tree: Ast) !ResolvedAst {
+        // Build template map
         var tmpl_map = std.StringHashMap(*const Template).init(self.alloc);
         for (tree.templates) |*t| {
             try tmpl_map.put(t.name orelse "", t);
         }
-
         var default_tmpl: ?*const Template = null;
         for (tree.templates) |*t| {
             if (t.name == null) default_tmpl = t;
         }
 
+        // Template resolution (needs tree access, done inline)
         var resolved = std.StringHashMap([]const Field).init(self.alloc);
         var resolving = std.StringHashMap(bool).init(self.alloc);
-
         for (tree.templates) |*t| {
             const tname = t.name orelse "";
             if (!resolved.contains(tname)) {
@@ -59,13 +82,13 @@ pub const SemanticAnalyzer = struct {
             }
         }
 
+        // Build initial tables with templates applied
         var tables = try std.ArrayList(ResolvedTable).initCapacity(self.alloc, 8);
         for (tree.tables) |*t| {
             var fields: []const Field = t.fields;
             var tmpl_slot: ?usize = null;
             if (t.template_ref) |tref| {
                 if (resolved.get(tref)) |parent_fields| {
-                    // Find the template to get its slot position
                     for (tree.templates) |*tmpl| {
                         if (tmpl.name) |tn| {
                             if (std.mem.eql(u8, tn, tref)) {
@@ -82,7 +105,6 @@ pub const SemanticAnalyzer = struct {
                     fields = try self.applyTemplate(t, parent_fields, dt.slot_index);
                 }
             }
-
             try tables.append(self.alloc, .{
                 .name = t.name,
                 .comment = t.comment,
@@ -94,109 +116,15 @@ pub const SemanticAnalyzer = struct {
             });
         }
 
-        // Auto FK inference from _id suffix (when autofk flag is set)
-        if (tree.schema != null and tree.schema.?.autofk) {
-            // Build table name index
-            var table_map = std.StringHashMap(void).init(self.alloc);
-            for (tables.items) |t| {
-                try table_map.put(t.name, {});
-            }
-            // Rebuild tables with auto FKs and auto indexes added
-            var new_tables = try std.ArrayList(ResolvedTable).initCapacity(self.alloc, tables.items.len);
-            for (tables.items) |table| {
-                var new_fields = try std.ArrayList(Field).initCapacity(self.alloc, table.fields.len);
-                var new_indexes = try std.ArrayList(IndexDecl).initCapacity(self.alloc, table.indexes.len + 4);
-                // Copy existing indexes
-                for (table.indexes) |idx| {
-                    try new_indexes.append(self.alloc, idx);
-                }
-                for (table.fields) |field| {
-                    var f = field;
-                    if (f.fk == null and f.name.len > 3 and std.mem.endsWith(u8, f.name, "_id")) {
-                        const prefix = f.name[0 .. f.name.len - 3];
-                        if (prefix.len > 0 and table_map.contains(prefix)) {
-                            // Auto FK
-                            var local_fields = try self.alloc.alloc([]const u8, 1);
-                            local_fields[0] = f.name;
-                            var ref_fields = try self.alloc.alloc([]const u8, 1);
-                            ref_fields[0] = "id";
-                            f.fk = FkDecl{
-                                .fields = local_fields,
-                                .ref_table = try self.alloc.dupe(u8, prefix),
-                                .ref_fields = ref_fields,
-                                .actions = &.{},
-                                .line_no = f.line_no,
-                            };
-                            // Auto index for FK column (if not already indexed)
-                            var already_indexed = false;
-                            for (table.indexes) |idx| {
-                                for (idx.fields) |idx_f| {
-                                    if (std.mem.eql(u8, idx_f, f.name)) {
-                                        already_indexed = true;
-                                        break;
-                                    }
-                                }
-                                if (already_indexed) break;
-                            }
-                            if (!already_indexed) {
-                                var idx_fields = try self.alloc.alloc([]const u8, 1);
-                                idx_fields[0] = f.name;
-                                const idx_name = try std.fmt.allocPrint(self.alloc, "idx_{s}", .{f.name});
-                                try new_indexes.append(self.alloc, .{
-                                    .kind = .regular,
-                                    .name = idx_name,
-                                    .fields = idx_fields,
-                                    .descending = &.{false},
-                                    .line_no = f.line_no,
-                                });
-                            }
-                        }
-                    }
-                    try new_fields.append(self.alloc, f);
-                }
-                try new_tables.append(self.alloc, .{
-                    .name = table.name,
-                    .comment = table.comment,
-                    .engine = table.engine,
-                    .fields = try new_fields.toOwnedSlice(self.alloc),
-                    .fks = table.fks,
-                    .indexes = try new_indexes.toOwnedSlice(self.alloc),
-                    .line_no = table.line_no,
-                });
-            }
-            tables = new_tables;
+        // Run registered passes (autofk, suffix_inference, ...)
+        var ctx = PassContext{
+            .alloc = self.alloc,
+            .tables = &tables,
+            .schema = tree.schema,
+        };
+        for (DEFAULT_PASSES) |pass| {
+            try pass.run(&ctx);
         }
-
-        // Suffix-based type inference: _id → int, _on → date, _at → datetime
-        var ti_tables = try std.ArrayList(ResolvedTable).initCapacity(self.alloc, tables.items.len);
-        for (tables.items) |table| {
-            var ti_fields = try std.ArrayList(Field).initCapacity(self.alloc, table.fields.len);
-            for (table.fields) |field| {
-                var f = field;
-                if (f.type_info == .none) {
-                    if (f.name.len > 3 and std.mem.endsWith(u8, f.name, "_id")) {
-                        f.type_info = .{ .simple = "n" };
-                    } else if (f.name.len > 3 and std.mem.endsWith(u8, f.name, "_on")) {
-                        f.type_info = .{ .simple = "d" };
-                    } else if (f.name.len > 3 and std.mem.endsWith(u8, f.name, "_at")) {
-                        f.type_info = .{ .simple = "t" };
-                    } else {
-                        f.type_info = .{ .varchar_explicit = 0 };
-                    }
-                }
-                try ti_fields.append(self.alloc, f);
-            }
-            try ti_tables.append(self.alloc, .{
-                .name = table.name,
-                .comment = table.comment,
-                .engine = table.engine,
-                .fields = try ti_fields.toOwnedSlice(self.alloc),
-                .fks = table.fks,
-                .indexes = table.indexes,
-                .line_no = table.line_no,
-            });
-        }
-        tables = ti_tables;
 
         return .{
             .schema_name = if (tree.schema) |s| s.name else null,
@@ -242,7 +170,6 @@ pub const SemanticAnalyzer = struct {
     ) ![]const Field {
         if (parent_fields.len == 0) return child_fields;
 
-        // Find slot in parent
         var parent_slot: ?usize = null;
         for (parent_fields, 0..) |f, i| {
             if (std.mem.eql(u8, f.name, "...")) {
@@ -252,7 +179,7 @@ pub const SemanticAnalyzer = struct {
         }
 
         const pslot = parent_slot orelse parent_fields.len;
-        const cslot_raw = child_slot orelse pslot; // If child doesn't redefine slot, use parent's
+        const cslot_raw = child_slot orelse pslot;
         const cslot = if (cslot_raw > child_fields.len) child_fields.len else cslot_raw;
 
         const parent_before = parent_fields[0..pslot];
@@ -260,7 +187,6 @@ pub const SemanticAnalyzer = struct {
         const child_before = child_fields[0..cslot];
         const child_after = if (cslot < child_fields.len) child_fields[cslot + 1 ..] else &[_]Field{};
 
-        // Collect all names that override parent fields
         var override_names = std.StringHashMap(void).init(self.alloc);
         for (child_before) |f| try override_names.put(f.name, {});
         for (child_after) |f| try override_names.put(f.name, {});
@@ -268,33 +194,14 @@ pub const SemanticAnalyzer = struct {
 
         var result = try std.ArrayList(Field).initCapacity(self.alloc, 8);
 
-        // parent_before (skip overrides)
         for (parent_before) |f| {
-            if (!override_names.contains(f.name)) {
-                try result.append(self.alloc, f);
-            }
+            if (!override_names.contains(f.name)) try result.append(self.alloc, f);
         }
-
-        // child_before
-        for (child_before) |f| {
-            try result.append(self.alloc, f);
-        }
-
-        // concrete fields (inserted at child's slot position)
-        for (concrete_fields) |f| {
-            try result.append(self.alloc, f);
-        }
-
-        // child_after
-        for (child_after) |f| {
-            try result.append(self.alloc, f);
-        }
-
-        // parent_after (skip overrides)
+        for (child_before) |f| try result.append(self.alloc, f);
+        for (concrete_fields) |f| try result.append(self.alloc, f);
+        for (child_after) |f| try result.append(self.alloc, f);
         for (parent_after) |f| {
-            if (!override_names.contains(f.name)) {
-                try result.append(self.alloc, f);
-            }
+            if (!override_names.contains(f.name)) try result.append(self.alloc, f);
         }
 
         return try result.toOwnedSlice(self.alloc);
@@ -308,7 +215,6 @@ pub const SemanticAnalyzer = struct {
     ) ![]const Field {
         if (table.fields.len == 0) return template_fields;
 
-        // Find slot in table's fields (... defines where template content is inserted)
         var table_slot: ?usize = null;
         for (table.fields, 0..) |f, i| {
             if (std.mem.eql(u8, f.name, "...")) {
@@ -317,77 +223,152 @@ pub const SemanticAnalyzer = struct {
             }
         }
 
-        // All table field names that override template fields
         var table_names = std.StringHashMap(void).init(self.alloc);
         for (table.fields) |f| try table_names.put(f.name, {});
 
         if (table_slot) |slot| {
-            // Slot found: insert template fields at slot position
             const table_before = table.fields[0..slot];
             const table_after = table.fields[slot + 1 ..];
 
             var result = try std.ArrayList(Field).initCapacity(self.alloc, 8);
-
-            // Table fields before slot
-            for (table_before) |f| {
-                try result.append(self.alloc, f);
-            }
-
-            // Template fields (skip conflicts with any concrete field)
+            for (table_before) |f| try result.append(self.alloc, f);
             for (template_fields) |f| {
-                if (!table_names.contains(f.name)) {
-                    try result.append(self.alloc, f);
-                }
+                if (!table_names.contains(f.name)) try result.append(self.alloc, f);
             }
-
-            // Table fields after slot
-            for (table_after) |f| {
-                try result.append(self.alloc, f);
-            }
-
+            for (table_after) |f| try result.append(self.alloc, f);
             return try result.toOwnedSlice(self.alloc);
         } else {
-            // No slot: use template's ... position to determine where table fields go
             const insert_pos = template_slot orelse template_fields.len;
             var result = try std.ArrayList(Field).initCapacity(self.alloc, 8);
-
-            // Template fields before insert position (skip overrides)
             for (template_fields[0..insert_pos]) |f| {
-                if (!table_names.contains(f.name)) {
-                    try result.append(self.alloc, f);
-                }
+                if (!table_names.contains(f.name)) try result.append(self.alloc, f);
             }
-
-            // Table fields
-            for (table.fields) |f| {
-                try result.append(self.alloc, f);
-            }
-
-            // Template fields after insert position (skip overrides)
+            for (table.fields) |f| try result.append(self.alloc, f);
             if (insert_pos < template_fields.len) {
                 for (template_fields[insert_pos..]) |f| {
-                    if (!table_names.contains(f.name)) {
-                        try result.append(self.alloc, f);
-                    }
+                    if (!table_names.contains(f.name)) try result.append(self.alloc, f);
                 }
             }
-
             return try result.toOwnedSlice(self.alloc);
         }
     }
 };
+
+// ─── Pass Implementations ─────────────────────────────────────
+
+/// Auto FK inference: _id suffix → foreign key to matching table.
+fn runAutoFk(ctx: *PassContext) !void {
+    if (ctx.schema == null or !ctx.schema.?.autofk) return;
+
+    var table_map = std.StringHashMap(void).init(ctx.alloc);
+    for (ctx.tables.items) |t| {
+        try table_map.put(t.name, {});
+    }
+
+    var new_tables = try std.ArrayList(ResolvedTable).initCapacity(ctx.alloc, ctx.tables.items.len);
+    for (ctx.tables.items) |table| {
+        var new_fields = try std.ArrayList(Field).initCapacity(ctx.alloc, table.fields.len);
+        var new_indexes = try std.ArrayList(IndexDecl).initCapacity(ctx.alloc, table.indexes.len + 4);
+        for (table.indexes) |idx| {
+            try new_indexes.append(ctx.alloc, idx);
+        }
+        for (table.fields) |field| {
+            var f = field;
+            if (f.fk == null and f.name.len > 3 and std.mem.endsWith(u8, f.name, "_id")) {
+                const prefix = f.name[0 .. f.name.len - 3];
+                if (prefix.len > 0 and table_map.contains(prefix)) {
+                    var local_fields = try ctx.alloc.alloc([]const u8, 1);
+                    local_fields[0] = f.name;
+                    var ref_fields = try ctx.alloc.alloc([]const u8, 1);
+                    ref_fields[0] = "id";
+                    f.fk = FkDecl{
+                        .fields = local_fields,
+                        .ref_table = try ctx.alloc.dupe(u8, prefix),
+                        .ref_fields = ref_fields,
+                        .actions = &.{},
+                        .line_no = f.line_no,
+                    };
+                    var already_indexed = false;
+                    for (table.indexes) |idx| {
+                        for (idx.fields) |idx_f| {
+                            if (std.mem.eql(u8, idx_f, f.name)) {
+                                already_indexed = true;
+                                break;
+                            }
+                        }
+                        if (already_indexed) break;
+                    }
+                    if (!already_indexed) {
+                        var idx_fields = try ctx.alloc.alloc([]const u8, 1);
+                        idx_fields[0] = f.name;
+                        const idx_name = try std.fmt.allocPrint(ctx.alloc, "idx_{s}", .{f.name});
+                        try new_indexes.append(ctx.alloc, .{
+                            .kind = .regular,
+                            .name = idx_name,
+                            .fields = idx_fields,
+                            .descending = &.{false},
+                            .line_no = f.line_no,
+                        });
+                    }
+                }
+            }
+            try new_fields.append(ctx.alloc, f);
+        }
+        try new_tables.append(ctx.alloc, .{
+            .name = table.name,
+            .comment = table.comment,
+            .engine = table.engine,
+            .fields = try new_fields.toOwnedSlice(ctx.alloc),
+            .fks = table.fks,
+            .indexes = try new_indexes.toOwnedSlice(ctx.alloc),
+            .line_no = table.line_no,
+        });
+    }
+    ctx.tables.* = new_tables;
+}
+
+/// Suffix-based type inference: _id → int, _on → date, _at → datetime.
+fn runSuffixInference(ctx: *PassContext) !void {
+    var ti_tables = try std.ArrayList(ResolvedTable).initCapacity(ctx.alloc, ctx.tables.items.len);
+    for (ctx.tables.items) |table| {
+        var ti_fields = try std.ArrayList(Field).initCapacity(ctx.alloc, table.fields.len);
+        for (table.fields) |field| {
+            var f = field;
+            if (f.type_info == .none) {
+                if (f.name.len > 3 and std.mem.endsWith(u8, f.name, "_id")) {
+                    f.type_info = .{ .simple = "n" };
+                } else if (f.name.len > 3 and std.mem.endsWith(u8, f.name, "_on")) {
+                    f.type_info = .{ .simple = "d" };
+                } else if (f.name.len > 3 and std.mem.endsWith(u8, f.name, "_at")) {
+                    f.type_info = .{ .simple = "t" };
+                } else {
+                    f.type_info = .{ .varchar_explicit = 0 };
+                }
+            }
+            try ti_fields.append(ctx.alloc, f);
+        }
+        try ti_tables.append(ctx.alloc, .{
+            .name = table.name,
+            .comment = table.comment,
+            .engine = table.engine,
+            .fields = try ti_fields.toOwnedSlice(ctx.alloc),
+            .fks = table.fks,
+            .indexes = table.indexes,
+            .line_no = table.line_no,
+        });
+    }
+    ctx.tables.* = ti_tables;
+}
 
 // ─── Diagnostic ──────────────────────────────────────────────
 
 pub fn diagnosticTrace(resolved: ResolvedAst) void {
     std.debug.print("=== [Stage 3: Semantic] ===\n\n", .{});
 
-    // Suffix inference summary
     std.debug.print("Suffix inference:\n", .{});
     std.debug.print("  _id -> int, _on -> date, _at -> datetime, (none) -> varchar(255)\n", .{});
     if (resolved.schema_name != null) {
         std.debug.print("  autofk: ", .{});
-        // Check if any table has auto-generated FKs (heuristic: check for _id fields with FKs)
         var has_autofk = false;
         for (resolved.tables) |table| {
             for (table.fields) |field| {

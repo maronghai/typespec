@@ -4,16 +4,32 @@ const parser = @import("parser.zig");
 const ast_mod = @import("ast.zig");
 const semantic = @import("semantic.zig");
 const codegen = @import("codegen.zig");
+const typed_ast = @import("typed_ast.zig");
 const diag = @import("diagnostic.zig");
 const diff = @import("diff.zig");
 const migrate = @import("migrate.zig");
 const sql_parser = @import("sql_parser.zig");
 const reverse_codegen = @import("reverse_codegen.zig");
 
+// ─── Command Types ─────────────────────────────────────────────
+
+const Command = union(enum) {
+    compile: struct { input: ?[]const u8, output: ?[]const u8, trace: bool },
+    diff: struct { old: []const u8, new: []const u8 },
+    migrate: struct { old: []const u8, new: []const u8, output: ?[]const u8 },
+    reverse: struct { input: ?[]const u8, output: ?[]const u8, with_templates: bool },
+};
+
+const ParsedArgs = struct {
+    dialect: codegen.Dialect,
+    command: Command,
+};
+
+// ─── Entry Point ───────────────────────────────────────────────
+
 pub fn main(init: std.process.Init) !void {
     const alloc = init.arena.allocator();
 
-    // Collect args from iterator
     var args = try std.ArrayList([]const u8).initCapacity(alloc, 8);
     var arg_it = try std.process.Args.Iterator.initAllocator(init.minimal.args, alloc);
     defer arg_it.deinit();
@@ -22,112 +38,149 @@ pub fn main(init: std.process.Init) !void {
     }
     const arg_list = try args.toOwnedSlice(alloc);
 
-    // No args: check if stdin is a pipe or terminal
+    // No args: check stdin pipe vs interactive terminal
     if (arg_list.len < 2) {
         const is_tty = std.Io.File.stdin().isTty(init.io) catch true;
         if (is_tty) {
-            // Interactive terminal — show usage
             printUsage();
             std.process.exit(1);
         }
-        // Pipe mode — read from stdin
         const file_data = try readStdin(init.io, alloc);
         return handleCompile(init.io, alloc, file_data, "<stdin>", null, false, .mysql);
     }
 
-    // Parse global --dialect flag from all args
+    const parsed = try parseArgs(alloc, arg_list);
+    return dispatch(init.io, alloc, parsed);
+}
+
+// ─── Argument Parsing ──────────────────────────────────────────
+
+fn parseArgs(alloc: std.mem.Allocator, raw_args: []const []const u8) !ParsedArgs {
     var dialect: codegen.Dialect = .mysql;
-    var filtered_args = try std.ArrayList([]const u8).initCapacity(alloc, arg_list.len);
-    var ai: usize = 0;
-    while (ai < arg_list.len) : (ai += 1) {
-        if (std.mem.eql(u8, arg_list[ai], "--dialect") or std.mem.eql(u8, arg_list[ai], "-d")) {
-            if (ai + 1 < arg_list.len) {
-                const d = arg_list[ai + 1];
-                if (std.mem.eql(u8, d, "pg") or std.mem.eql(u8, d, "postgres")) {
-                    dialect = .postgres;
-                } else if (std.mem.eql(u8, d, "mysql")) {
-                    dialect = .mysql;
-                } else if (std.mem.eql(u8, d, "sqlite") or std.mem.eql(u8, d, "sq")) {
-                    dialect = .sqlite;
-                } else {
-                    std.debug.print("error: unknown dialect '{s}' (expected: mysql, pg, postgres, sqlite)\n", .{d});
+    var filtered = try std.ArrayList([]const u8).initCapacity(alloc, raw_args.len);
+
+    // Pass 1: extract --dialect / -d from all args
+    var i: usize = 1; // skip argv[0]
+    while (i < raw_args.len) : (i += 1) {
+        if (std.mem.eql(u8, raw_args[i], "--dialect") or std.mem.eql(u8, raw_args[i], "-d")) {
+            if (i + 1 < raw_args.len) {
+                dialect = parseDialect(raw_args[i + 1]) catch |e| {
+                    if (e == error.UnknownDialect) {
+                        std.debug.print("error: unknown dialect '{s}' (expected: mysql, pg, postgres, sqlite)\n", .{raw_args[i + 1]});
+                        std.process.exit(1);
+                    }
+                    std.debug.print("error: --dialect requires a value (mysql, pg, postgres, sqlite)\n", .{});
                     std.process.exit(1);
-                }
-                ai += 1; // skip dialect value
+                };
+                i += 1; // skip dialect value
             } else {
                 std.debug.print("error: --dialect requires a value (mysql, pg, postgres, sqlite)\n", .{});
                 std.process.exit(1);
             }
         } else {
-            try filtered_args.append(alloc, arg_list[ai]);
+            try filtered.append(alloc, raw_args[i]);
         }
     }
-    const fargs = try filtered_args.toOwnedSlice(alloc);
+    const fargs = try filtered.toOwnedSlice(alloc);
 
-    // Subcommand routing
-    if (fargs.len < 2) {
-        const is_tty = std.Io.File.stdin().isTty(init.io) catch true;
-        if (is_tty) {
-            printUsage();
+    // Pass 2: route subcommand
+    if (fargs.len < 1) {
+        return .{ .dialect = dialect, .command = .{ .compile = .{ .input = null, .output = null, .trace = false } } };
+    }
+
+    const sub = fargs[0];
+
+    if (std.mem.eql(u8, sub, "diff")) {
+        if (fargs.len < 3) {
+            std.debug.print("error: diff requires <old.tps> <new.tps>\n", .{});
             std.process.exit(1);
         }
-        const file_data = try readStdin(init.io, alloc);
-        return handleCompile(init.io, alloc, file_data, "<stdin>", null, false, dialect);
+        return .{ .dialect = dialect, .command = .{ .diff = .{ .old = fargs[1], .new = fargs[2] } } };
     }
 
-    if (std.mem.eql(u8, fargs[1], "diff") and fargs.len >= 4) {
-        return handleDiff(init.io, alloc, fargs[2], fargs[3], dialect);
-    } else if (std.mem.eql(u8, fargs[1], "migrate") and fargs.len >= 4) {
-        var output_path: ?[]const u8 = null;
-        var i: usize = 4;
-        while (i < fargs.len) : (i += 1) {
-            if (std.mem.eql(u8, fargs[i], "-o") and i + 1 < fargs.len) {
-                output_path = fargs[i + 1];
-                i += 1;
+    if (std.mem.eql(u8, sub, "migrate")) {
+        if (fargs.len < 3) {
+            std.debug.print("error: migrate requires <old.tps> <new.tps>\n", .{});
+            std.process.exit(1);
+        }
+        var output: ?[]const u8 = null;
+        var j: usize = 3;
+        while (j < fargs.len) : (j += 1) {
+            if (std.mem.eql(u8, fargs[j], "-o") and j + 1 < fargs.len) {
+                output = fargs[j + 1];
+                j += 1;
             }
         }
-        return handleMigrate(init.io, alloc, fargs[2], fargs[3], output_path, dialect);
-    } else if (std.mem.eql(u8, fargs[1], "reverse")) {
-        var output_path: ?[]const u8 = null;
+        return .{ .dialect = dialect, .command = .{ .migrate = .{ .old = fargs[1], .new = fargs[2], .output = output } } };
+    }
+
+    if (std.mem.eql(u8, sub, "reverse")) {
+        var output: ?[]const u8 = null;
         var with_templates = false;
-        var input_path: ?[]const u8 = null;
-        var i: usize = 2;
-        while (i < fargs.len) : (i += 1) {
-            if (std.mem.eql(u8, fargs[i], "-o") and i + 1 < fargs.len) {
-                output_path = fargs[i + 1];
-                i += 1;
-            } else if (std.mem.eql(u8, fargs[i], "-t")) {
+        var input: ?[]const u8 = null;
+        var j: usize = 1;
+        while (j < fargs.len) : (j += 1) {
+            if (std.mem.eql(u8, fargs[j], "-o") and j + 1 < fargs.len) {
+                output = fargs[j + 1];
+                j += 1;
+            } else if (std.mem.eql(u8, fargs[j], "-t")) {
                 with_templates = true;
-            } else if (input_path == null) {
-                input_path = fargs[i];
+            } else if (input == null) {
+                input = fargs[j];
             }
         }
-        const file_data = if (input_path) |path|
-            try readFileOrStdin(init.io, alloc, path)
-        else
-            try readStdin(init.io, alloc);
-        const name = input_path orelse "<stdin>";
-        return handleReverse(init.io, alloc, file_data, name, output_path, with_templates, dialect);
+        return .{ .dialect = dialect, .command = .{ .reverse = .{ .input = input, .output = output, .with_templates = with_templates } } };
     }
 
-    // Default: typespec <input.tps> [-o output.sql] [-t]
-    const input_path = fargs[1];
-    var output_path: ?[]const u8 = null;
-    var trace: bool = false;
-
-    var i: usize = 2;
-    while (i < fargs.len) : (i += 1) {
-        if (std.mem.eql(u8, fargs[i], "-o") and i + 1 < fargs.len) {
-            output_path = fargs[i + 1];
-            i += 1;
-        } else if (std.mem.eql(u8, fargs[i], "-t")) {
+    // Default: compile
+    var output: ?[]const u8 = null;
+    var trace = false;
+    var j: usize = 1;
+    while (j < fargs.len) : (j += 1) {
+        if (std.mem.eql(u8, fargs[j], "-o") and j + 1 < fargs.len) {
+            output = fargs[j + 1];
+            j += 1;
+        } else if (std.mem.eql(u8, fargs[j], "-t")) {
             trace = true;
         }
     }
-
-    const file_data = try readFileOrStdin(init.io, alloc, input_path);
-    return handleCompile(init.io, alloc, file_data, input_path, output_path, trace, dialect);
+    const input = if (fargs.len > 0) fargs[0] else null;
+    return .{ .dialect = dialect, .command = .{ .compile = .{ .input = input, .output = output, .trace = trace } } };
 }
+
+fn parseDialect(s: []const u8) !codegen.Dialect {
+    if (std.mem.eql(u8, s, "mysql")) return .mysql;
+    if (std.mem.eql(u8, s, "pg") or std.mem.eql(u8, s, "postgres")) return .postgres;
+    if (std.mem.eql(u8, s, "sqlite") or std.mem.eql(u8, s, "sq")) return .sqlite;
+    return error.UnknownDialect;
+}
+
+// ─── Command Dispatch ──────────────────────────────────────────
+
+fn dispatch(io: std.Io, alloc: std.mem.Allocator, parsed: ParsedArgs) !void {
+    switch (parsed.command) {
+        .compile => |cmd| {
+            const file_data = if (cmd.input) |path|
+                try readFileOrStdin(io, alloc, path)
+            else
+                try readStdin(io, alloc);
+            const name = cmd.input orelse "<stdin>";
+            return handleCompile(io, alloc, file_data, name, cmd.output, cmd.trace, parsed.dialect);
+        },
+        .diff => |cmd| return handleDiff(io, alloc, cmd.old, cmd.new, parsed.dialect),
+        .migrate => |cmd| return handleMigrate(io, alloc, cmd.old, cmd.new, cmd.output, parsed.dialect),
+        .reverse => |cmd| {
+            const file_data = if (cmd.input) |path|
+                try readFileOrStdin(io, alloc, path)
+            else
+                try readStdin(io, alloc);
+            const name = cmd.input orelse "<stdin>";
+            return handleReverse(io, alloc, file_data, name, cmd.output, cmd.with_templates, parsed.dialect);
+        },
+    }
+}
+
+// ─── Usage ─────────────────────────────────────────────────────
 
 fn printUsage() void {
     std.debug.print("Usage:\n", .{});
@@ -145,12 +198,16 @@ fn printUsage() void {
     std.debug.print("  cat schema.sql | typespec reverse -t\n", .{});
 }
 
+// ─── I/O Helpers ───────────────────────────────────────────────
+
 fn readStdin(io: std.Io, alloc: std.mem.Allocator) ![]const u8 {
     const stdin_file = std.Io.File.stdin();
     var buf: [4096]u8 = undefined;
     var r = stdin_file.readerStreaming(io, &buf);
     var result = try std.ArrayList(u8).initCapacity(alloc, 4096);
-    r.interface.appendRemainingUnlimited(alloc, &result) catch {};
+    r.interface.appendRemainingUnlimited(alloc, &result) catch |e| {
+        if (result.items.len == 0) return e;
+    };
     return try result.toOwnedSlice(alloc);
 }
 
@@ -160,6 +217,24 @@ fn readFileOrStdin(io: std.Io, alloc: std.mem.Allocator, path: []const u8) ![]co
     }
     return try std.Io.Dir.cwd().readFileAlloc(io, path, alloc, .unlimited);
 }
+
+fn writeOutput(io: std.Io, data: []const u8, output_path: ?[]const u8) !void {
+    if (output_path) |opath| {
+        try std.Io.Dir.cwd().writeFile(io, .{
+            .sub_path = opath,
+            .data = data,
+        });
+        std.debug.print("Written to {s}\n", .{opath});
+    } else {
+        var buf: [8192]u8 = undefined;
+        const stdout_file = std.Io.File.stdout();
+        var w = stdout_file.writer(io, &buf);
+        try w.interface.writeAll(data);
+        try w.flush();
+    }
+}
+
+// ─── Command Handlers ──────────────────────────────────────────
 
 fn handleCompile(io: std.Io, alloc: std.mem.Allocator, file_data: []const u8, input_name: []const u8, output_path: ?[]const u8, trace: bool, dialect: codegen.Dialect) !void {
     _ = input_name;
@@ -198,22 +273,9 @@ fn handleCompile(io: std.Io, alloc: std.mem.Allocator, file_data: []const u8, in
     const sql = try cg.generate(resolved);
     if (trace) codegen.diagnosticTrace(sql);
 
-    if (output_path) |opath| {
-        try std.Io.Dir.cwd().writeFile(io, .{
-            .sub_path = opath,
-            .data = sql,
-        });
-        std.debug.print("Written to {s}\n", .{opath});
-    } else {
-        var buf: [8192]u8 = undefined;
-        const stdout_file = std.Io.File.stdout();
-        var w = stdout_file.writer(io, &buf);
-        try w.interface.writeAll(sql);
-        try w.flush();
-    }
+    try writeOutput(io, sql, output_path);
 }
 
-/// Compile a .tps file to ResolvedAst (shared by diff and migrate)
 fn compileToAst(io: std.Io, alloc: std.mem.Allocator, path: []const u8) !semantic.ResolvedAst {
     const file_data = try std.Io.Dir.cwd().readFileAlloc(io, path, alloc, .unlimited);
     defer alloc.free(file_data);
@@ -248,20 +310,7 @@ fn handleMigrate(io: std.Io, alloc: std.mem.Allocator, old_path: []const u8, new
     const new_ast = try compileToAst(io, alloc, new_path);
     const schema_diff = try diff.diff(old_ast, new_ast, alloc);
     const migration_sql = try migrate.generateFromDiff(alloc, schema_diff, old_ast, new_ast, dialect);
-
-    if (output_path) |opath| {
-        try std.Io.Dir.cwd().writeFile(io, .{
-            .sub_path = opath,
-            .data = migration_sql,
-        });
-        std.debug.print("Written to {s}\n", .{opath});
-    } else {
-        var buf: [8192]u8 = undefined;
-        const stdout_file = std.Io.File.stdout();
-        var w = stdout_file.writer(io, &buf);
-        try w.interface.writeAll(migration_sql);
-        try w.flush();
-    }
+    try writeOutput(io, migration_sql, output_path);
 }
 
 fn handleReverse(io: std.Io, alloc: std.mem.Allocator, file_data: []const u8, input_name: []const u8, output_path: ?[]const u8, with_templates: bool, dialect: codegen.Dialect) !void {
@@ -295,7 +344,6 @@ fn handleReverse(io: std.Io, alloc: std.mem.Allocator, file_data: []const u8, in
     };
     const schema = result.schema;
 
-    // Print diagnostics
     var has_errors = false;
     for (result.diagnostics) |d| {
         const sev: []const u8 = if (d.severity == .@"error") "error" else "warning";
@@ -334,17 +382,5 @@ fn handleReverse(io: std.Io, alloc: std.mem.Allocator, file_data: []const u8, in
     else
         try rcg.generate(schema);
 
-    if (output_path) |opath| {
-        try std.Io.Dir.cwd().writeFile(io, .{
-            .sub_path = opath,
-            .data = tps,
-        });
-        std.debug.print("Written to {s}\n", .{opath});
-    } else {
-        var buf: [8192]u8 = undefined;
-        const stdout_file = std.Io.File.stdout();
-        var w = stdout_file.writer(io, &buf);
-        try w.interface.writeAll(tps);
-        try w.flush();
-    }
+    try writeOutput(io, tps, output_path);
 }
