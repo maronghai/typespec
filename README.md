@@ -30,6 +30,7 @@ balance   m =0
 - [Template System](#template-system)
 - [Examples](#examples)
 - [Migration](#migration)
+- [Reverse Engineering](#reverse-engineering)
 - [Grammar](#grammar)
 - [Design Principles](#design-principles)
 - [FAQ](#faq)
@@ -450,6 +451,45 @@ typespec migrate old.tps new.tps -d pg -o migration_pg.sql
 | No changes | Empty `BEGIN`/`COMMIT` |
 
 All operations are wrapped in a transaction. The diff engine works at the AST level — it detects field renames, type changes, and structural differences rather than comparing raw SQL text.
+
+## Reverse Engineering
+
+Convert existing SQL DDL back to TypeSpec `.tps` schemas:
+
+```bash
+# Basic reverse (MySQL)
+typespec reverse schema.sql
+
+# PostgreSQL
+typespec reverse -d pg schema.sql
+
+# SQLite
+typespec reverse -d sqlite schema.sql
+
+# With template extraction
+typespec reverse -t schema.sql
+
+# Write to file
+typespec reverse schema.sql -o schema.tps
+```
+
+**What it handles:**
+
+| Feature | Support |
+|---------|---------|
+| CREATE TABLE (columns, types, modifiers) | ✅ |
+| PRIMARY KEY (inline + composite) | ✅ |
+| AUTO_INCREMENT / GENERATED AS IDENTITY | ✅ |
+| NOT NULL / DEFAULT values | ✅ |
+| UNIQUE INDEX / INDEX / FULLTEXT INDEX | ✅ |
+| FOREIGN KEY with ON DELETE/UPDATE actions | ✅ |
+| CHECK constraints (range, IN list, comparison) | ✅ |
+| MySQL COMMENT / PG COMMENT ON / SQLite comments | ✅ |
+| ENUM types | ✅ |
+| Template extraction (`-t` flag) | ✅ |
+| Score-based template ranking (cross-table coverage) | ✅ |
+
+**Template extraction** (`-t`): Automatically discovers shared field sequences across tables and extracts them as reusable templates. Uses a scoring algorithm that favors templates covering many fields across many tables.
 
 ## FAQ
 

@@ -8,6 +8,7 @@ const Field = ast_mod.Field;
 const Template = ast_mod.Template;
 const TypeInfo = ast_mod.TypeInfo;
 const Modifier = ast_mod.Modifier;
+const ModifierType = ast_mod.ModifierType;
 const DefaultVal = ast_mod.DefaultVal;
 const CheckConstraint = ast_mod.CheckConstraint;
 const CheckKind = ast_mod.CheckKind;
@@ -393,7 +394,7 @@ pub const Parser = struct {
 
     /// Parse fused tokens like `n++`, `s128*`, `nu`, `*=0`, `t+`.
     /// Returns null if the token is not a fused type+modifier form.
-    fn parseFusedTypeModifier(_: *Parser, tok: []const u8, line_no: usize) ?FusedTypeResult {
+    pub fn parseFusedTypeModifier(_: *Parser, tok: []const u8, line_no: usize) ?FusedTypeResult {
         if (tok.len < 2) return null;
 
         // *=value (NOT NULL + DEFAULT)
@@ -571,7 +572,7 @@ pub const Parser = struct {
     };
 
     /// Parse standalone modifiers: `++`, `+`, `*`, `!`, `@`, `@u`.
-    fn parseStandaloneModifier(_: *Parser, tokens: []const []const u8, idx: usize, raw: []const u8, line_no: usize) ?ModifierResult {
+    pub fn parseStandaloneModifier(_: *Parser, tokens: []const []const u8, idx: usize, raw: []const u8, line_no: usize) ?ModifierResult {
         const tok = tokens[idx];
         if (std.mem.eql(u8, tok, "++")) {
             return .{ .modifier = .{ .kind = .auto_inc_pk, .line_no = line_no }, .end_idx = idx + 1 };
@@ -841,7 +842,7 @@ pub const Parser = struct {
         };
     }
 
-    fn tryParseType(tok: []const u8) ?TypeInfo {
+    pub fn tryParseType(tok: []const u8) ?TypeInfo {
         if (tok.len == 0) return null;
         const c = tok[0];
         switch (c) {
@@ -871,7 +872,7 @@ pub const Parser = struct {
         }
     }
 
-    fn classifyCheck(expr: []const u8, open_bracket: u8, close_bracket: u8) CheckKind {
+    pub fn classifyCheck(expr: []const u8, open_bracket: u8, close_bracket: u8) CheckKind {
         // Handle comparison (contains > < =)
         if (std.mem.indexOfScalar(u8, expr, '>') != null or std.mem.indexOfScalar(u8, expr, '<') != null) {
             // {braces} → always comparison
@@ -1332,4 +1333,118 @@ pub fn diagnosticTrace(tree: Ast) void {
         }
         std.debug.print("\n", .{});
     }
+}
+
+// ─── Unit Tests ──────────────────────────────────────────────
+
+test "tryParseType: single-char types" {
+    try std.testing.expectEqual(@as(?TypeInfo, .{ .simple = "n" }), Parser.tryParseType("n"));
+    try std.testing.expectEqual(@as(?TypeInfo, .{ .simple = "N" }), Parser.tryParseType("N"));
+    try std.testing.expectEqual(@as(?TypeInfo, .{ .simple = "s" }), Parser.tryParseType("s"));
+    try std.testing.expectEqual(@as(?TypeInfo, .{ .varchar_explicit = 0 }), Parser.tryParseType("s"));
+    try std.testing.expectEqual(@as(?TypeInfo, .{ .simple = "d" }), Parser.tryParseType("d"));
+    try std.testing.expectEqual(@as(?TypeInfo, .{ .simple = "t" }), Parser.tryParseType("t"));
+    try std.testing.expectEqual(@as(?TypeInfo, .{ .simple = "b" }), Parser.tryParseType("b"));
+    try std.testing.expectEqual(@as(?TypeInfo, .{ .simple = "j" }), Parser.tryParseType("j"));
+    try std.testing.expectEqual(@as(?TypeInfo, .{ .simple = "m" }), Parser.tryParseType("m"));
+}
+
+test "tryParseType: explicit types" {
+    try std.testing.expectEqual(@as(?TypeInfo, .{ .varchar_explicit = 128 }), Parser.tryParseType("s128"));
+    try std.testing.expectEqual(@as(?TypeInfo, .{ .varchar_explicit = 255 }), Parser.tryParseType("s255"));
+    try std.testing.expectEqual(@as(?TypeInfo, .{ .int_explicit = 11 }), Parser.tryParseType("11"));
+    try std.testing.expectEqual(@as(?TypeInfo, .{ .decimal_explicit = .{ .precision = 10, .scale = 2 } }), Parser.tryParseType("10,2"));
+}
+
+test "tryParseType: invalid" {
+    try std.testing.expectEqual(@as(?TypeInfo, null), Parser.tryParseType(""));
+    try std.testing.expectEqual(@as(?TypeInfo, null), Parser.tryParseType("x"));
+    try std.testing.expectEqual(@as(?TypeInfo, null), Parser.tryParseType("abc"));
+}
+
+test "parseFusedTypeModifier: auto_inc_pk" {
+    var p = Parser.init(std.testing.allocator);
+    const r = p.parseFusedTypeModifier("n++", 1).?;
+    try std.testing.expect(r.type_info != null);
+    try std.testing.expect(r.modifier != null);
+    try std.testing.expectEqual(ModifierType.auto_inc_pk, r.modifier.?.kind);
+}
+
+test "parseFusedTypeModifier: auto_inc" {
+    var p = Parser.init(std.testing.allocator);
+    const r = p.parseFusedTypeModifier("t+", 1).?;
+    try std.testing.expect(r.type_info != null);
+    try std.testing.expect(r.modifier != null);
+    try std.testing.expectEqual(ModifierType.auto_inc, r.modifier.?.kind);
+}
+
+test "parseFusedTypeModifier: primary_key" {
+    var p = Parser.init(std.testing.allocator);
+    const r = p.parseFusedTypeModifier("n!", 1).?;
+    try std.testing.expect(r.type_info != null);
+    try std.testing.expectEqual(ModifierType.primary_key, r.modifier.?.kind);
+}
+
+test "parseFusedTypeModifier: not_null" {
+    var p = Parser.init(std.testing.allocator);
+    const r = p.parseFusedTypeModifier("s128*", 1).?;
+    try std.testing.expect(r.type_info != null);
+    try std.testing.expectEqual(ModifierType.not_null, r.modifier.?.kind);
+}
+
+test "parseFusedTypeModifier: not_null_default" {
+    var p = Parser.init(std.testing.allocator);
+    const r = p.parseFusedTypeModifier("*=0", 1).?;
+    try std.testing.expect(r.type_info == null);
+    try std.testing.expect(r.modifier != null);
+    try std.testing.expectEqual(ModifierType.not_null, r.modifier.?.kind);
+    try std.testing.expect(r.default_val != null);
+    try std.testing.expectEqualStrings("0", r.default_val.?.value);
+}
+
+test "parseFusedTypeModifier: unsigned" {
+    var p = Parser.init(std.testing.allocator);
+    const r = p.parseFusedTypeModifier("nu", 1).?;
+    try std.testing.expect(r.type_info != null);
+    try std.testing.expect(r.modifier != null);
+    try std.testing.expectEqual(ModifierType.unsigned, r.modifier.?.kind);
+}
+
+test "parseFusedTypeModifier: null for non-fused" {
+    var p = Parser.init(std.testing.allocator);
+    try std.testing.expectEqual(@as(?Parser.FusedTypeResult, null), p.parseFusedTypeModifier("n", 1));
+    try std.testing.expectEqual(@as(?Parser.FusedTypeResult, null), p.parseFusedTypeModifier("hello", 1));
+    try std.testing.expectEqual(@as(?Parser.FusedTypeResult, null), p.parseFusedTypeModifier("+", 1));
+}
+
+test "parseStandaloneModifier: all modifiers" {
+    var p = Parser.init(std.testing.allocator);
+    const toks = &.{ "++", "+", "*", "!", "@", "@u" };
+    const expected = &.{ ModifierType.auto_inc_pk, ModifierType.auto_inc, ModifierType.not_null, ModifierType.primary_key, ModifierType.inline_index, ModifierType.inline_unique };
+    inline for (0..6) |i| {
+        const r = p.parseStandaloneModifier(&.{toks[i]}, 0, toks[i], 1).?;
+        try std.testing.expectEqual(expected[i], r.modifier.kind);
+    }
+}
+
+test "parseStandaloneModifier: null for non-modifier" {
+    var p = Parser.init(std.testing.allocator);
+    try std.testing.expectEqual(@as(?Parser.ModifierResult, null), p.parseStandaloneModifier(&.{"hello"}, 0, "hello", 1));
+    try std.testing.expectEqual(@as(?Parser.ModifierResult, null), p.parseStandaloneModifier(&.{"n"}, 0, "n", 1));
+}
+
+test "classifyCheck: range" {
+    try std.testing.expectEqual(CheckKind.range, Parser.classifyCheck("1, 100", '[', ']'));
+    try std.testing.expectEqual(CheckKind.range_upper_exclusive, Parser.classifyCheck("1, 100", '[', ')'));
+    try std.testing.expectEqual(CheckKind.range_lower_exclusive, Parser.classifyCheck("1, 100", '(', ']'));
+    try std.testing.expectEqual(CheckKind.range_both_exclusive, Parser.classifyCheck("1, 100", '(', ')'));
+}
+
+test "classifyCheck: in_list" {
+    try std.testing.expectEqual(CheckKind.in_list, Parser.classifyCheck("active inactive", '{', '}'));
+}
+
+test "classifyCheck: comparison" {
+    try std.testing.expectEqual(CheckKind.comparison, Parser.classifyCheck("price > 0", '{', '}'));
+    try std.testing.expectEqual(CheckKind.comparison, Parser.classifyCheck("price > 0 AND price < 10000", '[', ']'));
 }

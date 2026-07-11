@@ -78,7 +78,8 @@ pub const TypeResolver = struct {
             for (table.fks) |fk| try all_fks.append(self.alloc, fk);
             for (table.fields) |field| {
                 if (std.mem.eql(u8, field.name, "...")) continue;
-                try columns.append(self.alloc, try self.resolveColumn(field, dialect));
+                const col = try self.resolveColumn(field, dialect);
+                try columns.append(self.alloc, col);
                 if (field.fk) |fk| try all_fks.append(self.alloc, fk);
             }
             try tables.append(self.alloc, .{

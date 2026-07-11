@@ -293,11 +293,32 @@ Parser       AST construction (tokens → AST via ast.zig types)
 Semantic     Template resolution, inheritance merging, suffix inference, autofk
   │
   ▼
-Codegen      MySQL/PostgreSQL DDL generation (via type_map.zig for type resolution)
+ResolvedAst
+  │
+  ▼
+TypeResolver  TypeInfo → SQL type strings per dialect (typed_ast.zig IR)
+  │
+  ▼
+TypedAst      Dialect-agnostic IR: sql_type string + boolean column flags
+  │
+  ▼
+Codegen      SQL DDL generation via DialectBackend vtable (5 methods)
   │
   ▼
 .sql output
 ```
+
+**DialectBackend vtable** (5 methods):
+
+| Method | MySQL | PostgreSQL | SQLite |
+|--------|-------|-----------|--------|
+| `quoteIdent` | backticks | double-quotes | double-quotes |
+| `emitIndex` | inline INDEX/UNIQUE/FULLTEXT | UNIQUE (...) inline | UNIQUE (...) inline |
+| `emitCreateDatabase` | CHARACTER SET | ENCODING | no-op |
+| `emitUnsigned` | `UNSIGNED` | no-op | no-op |
+| `emitTimestampModifier` | `DEFAULT CURRENT_TIMESTAMP [ON UPDATE ...]` | `DEFAULT CURRENT_TIMESTAMP` | `DEFAULT CURRENT_TIMESTAMP` |
+
+PG and SQLite share 4/5 method implementations. `emitCheckExpr` is a shared standalone function (all dialects use identical CHECK syntax).
 
 ## Diff/Migrate Pipeline
 
@@ -342,21 +363,44 @@ Reverse Codegen   Type mapping (via type_map.zig), modifier reconstruction,
 
 ```
 src/
-├── main.zig             Entry point, CLI parsing, pipeline orchestration
+├── main.zig             Entry point, CLI parsing, pipeline orchestration (compilePipeline)
 ├── tokenizer.zig        Line classification (Schema/Table/Field/FK/Index/Slot/Comment)
 ├── ast.zig              AST type definitions (Field, Table, Template, TypeInfo, etc.)
-├── parser.zig           Parser (tokens → AST, 1339 lines)
-├── semantic.zig         Template resolution, suffix inference, autofk
+├── parser.zig           Parser (tokens → AST, ~1340 lines)
+├── parse_field.zig      Field parsing module (fused type, enum, modifier, inline FK/CHECK)
+├── parse_fk.zig         Foreign key parsing module (inline + standalone FK)
+├── parse_check.zig      CHECK constraint parsing module (range, IN list, comparison)
+├── parse_index.zig      Index parsing module (shorthand, full form, composite PK)
+├── semantic.zig         Template resolution, suffix inference, autofk + PassManager
 ├── type_map.zig         Unified tps ↔ SQL type mapping (single source of truth)
-├── codegen.zig          SQL DDL generation (MySQL + PostgreSQL)
+├── typed_ast.zig        TypeResolver: TypeInfo → SQL type strings (dialect-agnostic IR)
+├── dialect.zig          DialectBackend vtable (5 methods) + shared PG/SQLite impls
+├── codegen.zig          SQL DDL generation via DialectBackend vtable
 ├── diagnostic.zig       Error/warning reporting with source context + DiagnosticCollector
 ├── diff.zig             Schema diff engine (AST-level, rename detection)
 ├── migrate.zig          AST-diff-driven migration SQL generator (ALTER TABLE)
-├── sql_parser.zig       MySQL/PG DDL parser (CREATE DATABASE/TABLE → IR)
-└── reverse_codegen.zig  IR → .tps reverse codegen + template extraction
+├── sql_parser.zig       MySQL/PG/SQLite DDL parser (CREATE DATABASE/TABLE → IR)
+└── reverse_codegen.zig  IR → .tps reverse codegen + template extraction (score-based)
 ```
 
+### Parser Module Split (v0.4.6)
+
+The parser was split into 4 extracted modules (~790 lines total) for modularity and unit testing. The main `parser.zig` retains its own implementations; the extracted modules serve as standalone reference implementations that can be tested independently.
+
 ## Testing
+
+### Test suites
+
+| Script | Tests | Description |
+|--------|-------|-------------|
+| `tests/test.sh` | 81 | MySQL forward compilation golden files |
+| `tests/test_postgres.sh` | 93 | PostgreSQL forward compilation golden files |
+| `tests/test_sqlite.sh` | 1 | SQLite forward compilation |
+| `tests/test_migrate.sh` | 6 | Migration SQL golden files |
+| `tests/test_reverse.sh` | 8 | Reverse engineering golden files (MySQL/PG/SQLite) |
+| `tests/test_diff.sh` | 2 | Schema diff golden files |
+| `zig build test` | 76 | Zig inline unit tests (type_map + tokenizer + parser) |
+| **Total** | **267** | |
 
 ### Golden-file tests (compile)
 
@@ -377,6 +421,23 @@ bash tests/test_migrate.sh add-table # Filter by name
 ```
 
 Each test runs `typespec migrate` on a pair of files and diffs against a golden SQL file.
+
+### Reverse engineering tests
+
+```bash
+bash tests/test_reverse.sh           # Run all
+bash tests/test_reverse.sh auto-inc  # Filter by name
+```
+
+Each test runs `typespec reverse` on a `.sql` file and diffs against a golden `.tps` file. Supports dialect-specific golden files (`.mysql.tps`, `.pg.tps`, `.sqlite.tps`).
+
+### Unit tests
+
+```bash
+cd zig-typespec && zig build test
+```
+
+Inline tests covering: type_map (41), tokenizer (20), parser (15 — tryParseType, parseFusedTypeModifier, parseStandaloneModifier, classifyCheck).
 
 Test file naming convention:
 

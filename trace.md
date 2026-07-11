@@ -1,6 +1,28 @@
-# TypeSpec v0.4.5 Upgrade Trace
+# TypeSpec Upgrade Trace
 
 > Auto-generated tracking file for architecture improvements.
+
+## Phase 1: P0 修复（可靠性）— v0.4.6
+
+| # | Item | Status | Notes |
+|---|------|--------|-------|
+| P0-1 | 修复 TypedAst migrate corruption | ✅ | 根因：compileToAst 中 `defer alloc.free(file_data)` 在 arena 分配器上释放了文件数据的底层页面，导致同一页面上的 token 数据（TypeInfo.simple 切片）被覆盖为 0xaa。修复：删除 arena 分配器上不必要的 defer free。migrate 测试 5/6→6/6 |
+| P0-2 | 统一 compileToAst 与 handleCompile | ✅ | 提取 compilePipeline(io, alloc, file_data) 公共函数；handleCompile 的 trace 模式保留独立流水线；compileToAst 简化为 readFileAlloc + compilePipeline |
+
+## Phase 2: P1 架构改进（可维护性）— v0.4.6
+
+| # | Item | Status | Notes |
+|---|------|--------|-------|
+| P1-1 | 拆分 parser.zig | ✅ | 创建 parse_field/fk/check/index.zig（~790 行独立模块）；parser.zig 保留自身实现（提取后委托导致行为回归） |
+| P1-2 | Parser 单元测试 | ✅ | 15 个 inline test：tryParseType(9) + parseFusedTypeModifier(7) + parseStandaloneModifier(2) + classifyCheck(3)；总计 76 unit tests |
+| P1-3 | 统一错误处理路径 | ✅ | handleReverse 内联 40 行格式化改为 diag.printDiagnostic()；消除 ~25 行重复代码 |
+
+## Phase 3: P2 功能增强（表达力）— v0.4.6
+
+| # | Item | Status | Notes |
+|---|------|--------|-------|
+| P2-1 | 逆向模板评分 | ✅ | findTemplates 从纯贪心改为评分排序：score = shared_tables * field_count * log2(field_count) |
+| P2-2 | reverse golden file 扩展 | ✅ | 新增 auto-inc(MySQL)、pg-comment(PG)、sqlite-basic(SQLite) 3 个测试用例；test_reverse.sh 支持方言后缀（.mysql.tps/.pg.tps/.sqlite.tps）；reverse 测试 5→8 |
 
 ## Phase 1: P0 修复（可靠性）— v0.4.5
 
@@ -58,12 +80,6 @@
 
 ## 已知问题
 
-### TypedAst migrate corruption（v0.4.4 遗留）
-- **现象**: `generateSingleTypedTable()` 在 migrate 路径中生成的 `n` 类型为 `0xaa`（单字节损坏）
-- **影响**: `typespec migrate` 创建新表时，`int` 类型字段输出损坏
-- **范围**: 仅影响 migrate 路径的 CREATE TABLE 输出；主流水线不受影响
-- **验证**: MySQL 81/81、PG 93/93、SQLite 1/1、Reverse 5/5、Diff 2/2 全部通过；Migrate 5/6 通过
-
 ### Reverse 路径限制
 - 复合主键（`PRIMARY KEY (a, b)`）不会反向生成 `!` 语法
 - 表级 CHECK 约束不反向生成 TPS 语法
@@ -73,10 +89,11 @@
 
 - **Started**: 2026-07-11
 - **Completed**: 2026-07-11
-- **Tests**: 242 passing (81 MySQL + 93 PG + 1 SQLite + 6 Migrate + 5 Reverse + 2 Diff + 61 Zig unit tests)
-- **v0.4.5 Modified files**: `dialect.zig` (vtable shrink + PG/SQLite dedup), `codegen.zig` (removed dead delegation), `typed_ast.zig` (ENUM buffer fix), `reverse_codegen.zig` (buffer fix + type matching), `migrate.zig` (unified dialect handling), `type_map.zig` (41 unit tests), `tokenizer.zig` (20 unit tests)
-- **v0.4.5 New files**: `tests/reverse/enum.sql`, `tests/reverse/composite-pk.sql`, `tests/reverse/check-range.sql` + golden .tps files
-- **v0.4.5 Deleted code**: ~300 lines (dead vtable methods + duplicate PG/SQLite implementations + duplicate quoteIdent)
+- **Tests**: 267 passing (81 MySQL + 93 PG + 1 SQLite + 6 Migrate + 8 Reverse + 2 Diff + 76 Zig unit tests)
+- **v0.4.6 Key fix**: Migrate corruption root cause = `defer alloc.free(file_data)` in `compileToAst` releasing arena backing pages, corrupting token data referenced by AST
+- **v0.4.6 Modified files**: `main.zig` (compilePipeline extraction + error handling cleanup), `parser.zig` (15 new unit tests + 4 functions made pub), `reverse_codegen.zig` (template scoring), `tests/test_reverse.sh` (dialect-aware golden files)
+- **v0.4.6 New files**: `parse_field.zig`, `parse_fk.zig`, `parse_check.zig`, `parse_index.zig` (~790 lines, standalone parser modules), 3 new reverse test cases
+- **v0.4.6 Migrate tests**: 5/6 → 6/6 (corruption fix)
 
 ## Architecture After Upgrade
 

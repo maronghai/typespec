@@ -27,33 +27,41 @@ for sql_file in "$TEST_DIR"/*.sql; do
     continue
   fi
 
-  expected_file="$TEST_DIR/$base.mysql.tps"
-  if [ ! -f "$expected_file" ]; then
-    echo "SKIP  $base  (no golden file)"
-    continue
-  fi
+  # Check for dialect-specific golden files (.mysql.tps, .pg.tps, .sqlite.tps)
+  for dialect_suffix in mysql pg sqlite; do
+    expected_file="$TEST_DIR/$base.$dialect_suffix.tps"
+    if [ ! -f "$expected_file" ]; then
+      continue
+    fi
 
-  tmp_file=$(mktemp)
-  trap "rm -f '$tmp_file'" EXIT
+    case "$dialect_suffix" in
+      mysql)  dialect="mysql" ;;
+      pg)     dialect="pg" ;;
+      sqlite) dialect="sqlite" ;;
+    esac
 
-  if ! "$COMPILER" reverse "$sql_file" -d mysql -o "$tmp_file" 2>/dev/null; then
-    echo "ERROR $base  (compiler failed)"
-    FAIL=$((FAIL + 1))
+    tmp_file=$(mktemp)
+    trap "rm -f '$tmp_file'" EXIT
+
+    if ! "$COMPILER" reverse "$sql_file" -d "$dialect" -o "$tmp_file" 2>/dev/null; then
+      echo "ERROR $base ($dialect)  (compiler failed)"
+      FAIL=$((FAIL + 1))
+      rm -f "$tmp_file"
+      continue
+    fi
+
+    if diff -u "$expected_file" "$tmp_file" > /dev/null 2>&1; then
+      echo "PASS  $base ($dialect)"
+      PASS=$((PASS + 1))
+    else
+      echo "FAIL  $base ($dialect)"
+      diff -u "$expected_file" "$tmp_file" 2>&1 | head -20 || true
+      echo ""
+      FAIL=$((FAIL + 1))
+    fi
+
     rm -f "$tmp_file"
-    continue
-  fi
-
-  if diff -u "$expected_file" "$tmp_file" > /dev/null 2>&1; then
-    echo "PASS  $base"
-    PASS=$((PASS + 1))
-  else
-    echo "FAIL  $base"
-    diff -u "$expected_file" "$tmp_file" 2>&1 | head -20 || true
-    echo ""
-    FAIL=$((FAIL + 1))
-  fi
-
-  rm -f "$tmp_file"
+  done
 done
 
 echo ""

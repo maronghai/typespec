@@ -402,6 +402,7 @@ fn findTemplates(alloc: std.mem.Allocator, schema: sp.SqlSchema) ![]TemplateCand
 fn findBestWithNewFields(alloc: std.mem.Allocator, covered: []const []const u8, schema: sp.SqlSchema, max_cols: usize) ?BestResult {
     var best: ?BestResult = null;
     var best_match_count: usize = 0;
+    var best_score: f64 = 0.0;
 
     var L = max_cols;
     while (L >= 2) : (L -= 1) {
@@ -451,17 +452,19 @@ fn findBestWithNewFields(alloc: std.mem.Allocator, covered: []const []const u8, 
                 }
 
                 if (matching.items.len >= 2) {
+                    // Score = shared_tables * field_count * log2(field_count)
+                    // Favors templates that cover many fields across many tables
+                    const score = @as(f64, @floatFromInt(matching.items.len)) *
+                        @as(f64, @floatFromInt(L)) *
+                        std.math.log2(@as(f64, @floatFromInt(L)));
                     const is_better = if (best == null)
                         true
-                    else if (matching.items.len > best_match_count)
-                        true
-                    else if (matching.items.len == best_match_count and L > best.?.fields.len)
-                        true
                     else
-                        false;
+                        score > best_score;
 
                     if (is_better) {
                         best_match_count = matching.items.len;
+                        best_score = score;
                         best = .{
                             .fields = candidate_slice,
                             .table_indices = matching.toOwnedSlice(alloc) catch return null,
