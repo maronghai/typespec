@@ -151,6 +151,35 @@ pub const Codegen = struct {
         for (table.indexes) |idx| {
             try self.backend.emitStandaloneIndex(w, table.name, idx);
         }
+
+        // Inline regular indexes → standalone CREATE INDEX for PG/SQLite only
+        // (MySQL handles them inline via emitInlineIndex; PG/SQLite emitInlineIndex is no-op for non-unique)
+        if (self.dialect != .mysql) {
+            for (table.columns) |col| {
+                if (col.inline_index) {
+                    // Skip if already covered by a standalone index
+                    var dominated = false;
+                    for (table.indexes) |idx| {
+                        for (idx.fields) |f| {
+                            if (std.mem.eql(u8, f, col.name)) {
+                                dominated = true;
+                                break;
+                            }
+                        }
+                        if (dominated) break;
+                    }
+                    if (!dominated) {
+                        try w.writeAll("CREATE INDEX ");
+                        try self.backend.quoteIdent(w, try std.fmt.allocPrint(self.alloc, "idx_{s}_{s}", .{ table.name, col.name }));
+                        try w.print(" ON ", .{});
+                        try self.backend.quoteIdent(w, table.name);
+                        try w.writeAll(" (");
+                        try self.backend.quoteIdent(w, col.name);
+                        try w.writeAll(");\n");
+                    }
+                }
+            }
+        }
     }
 
     /// Render a single column definition (shared by CREATE TABLE and ALTER TABLE paths).

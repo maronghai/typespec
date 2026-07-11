@@ -333,8 +333,26 @@ fn handleMigrate(io: std.Io, alloc: std.mem.Allocator, old_path: []const u8, new
     try writeOutput(io, migration_sql, output_path);
 }
 
+/// Auto-detect SQL dialect from content patterns.
+/// Returns SQLite if content has SQLite-specific patterns, otherwise MySQL.
+fn detectSqlDialect(sql: []const u8) codegen.Dialect {
+    // SQLite-specific patterns that distinguish it from MySQL
+    const sqlite_patterns = [_][]const u8{
+        "AUTOINCREMENT",
+        "INTEGER PRIMARY KEY",
+    };
+    for (sqlite_patterns) |pat| {
+        if (std.mem.indexOf(u8, sql, pat) != null) return .sqlite;
+    }
+    // Check for double-quoted identifiers (SQLite/PG) vs backtick (MySQL)
+    // If we see CREATE TABLE " (double-quote), it's likely SQLite or PG, not MySQL
+    if (std.mem.indexOf(u8, sql, "CREATE TABLE \"") != null) return .sqlite;
+    return .mysql;
+}
+
 fn handleReverse(io: std.Io, alloc: std.mem.Allocator, file_data: []const u8, input_name: []const u8, output_path: ?[]const u8, with_templates: bool, dialect: codegen.Dialect) !void {
-    const sql_dialect: sql_parser.Dialect = dialect;
+    // Auto-detect dialect from SQL content when not explicitly specified
+    const sql_dialect: sql_parser.Dialect = if (dialect == .mysql) detectSqlDialect(file_data) else dialect;
     var sp_parser = sql_parser.SqlParser.init(alloc, file_data, sql_dialect);
     const result = sp_parser.parse() catch |err| {
         const lc = sp_parser.lineColAt(sp_parser.pos);

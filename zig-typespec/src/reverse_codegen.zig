@@ -5,8 +5,8 @@ const Dialect = sp.Dialect;
 
 // ─── Type Reverse Mapping ────────────────────────────────────────
 
-fn reverseType(sql_type: []const u8, col_name: []const u8, is_auto_inc: bool, is_default_ts: bool) TypeResult {
-    const r = type_map.reverseLookup(sql_type, col_name, is_auto_inc, is_default_ts);
+fn reverseType(sql_type: []const u8, col_name: []const u8, is_auto_inc: bool, is_default_ts: bool, dialect: Dialect) TypeResult {
+    const r = type_map.reverseLookup(sql_type, col_name, is_auto_inc, is_default_ts, dialect);
     return .{ .tps = r.tps, .omit = r.omit };
 }
 
@@ -22,11 +22,11 @@ fn isCurrentTimestamp(dv: []const u8) bool {
 
 // ─── Write Modifier + CHECK inline ──────────────────────────────
 
-fn writeColumnSuffix(w: anytype, col: sp.SqlColumn, indexes: []const sp.SqlIndex, check_expr: ?[]const u8) !void {
+fn writeColumnSuffix(w: anytype, col: sp.SqlColumn, indexes: []const sp.SqlIndex, check_expr: ?[]const u8, dialect: Dialect) !void {
     // ---- type ----
     const is_ai = col.auto_increment;
     const is_ts = if (col.default_val) |dv| isCurrentTimestamp(dv) else false;
-    const tr = reverseType(col.type_sql, col.name, is_ai, is_ts);
+    const tr = reverseType(col.type_sql, col.name, is_ai, is_ts, dialect);
     if (!tr.omit) {
         try w.writeAll(" ");
         try w.writeAll(tr.tps);
@@ -50,7 +50,7 @@ fn writeColumnSuffix(w: anytype, col: sp.SqlColumn, indexes: []const sp.SqlIndex
         try w.writeAll(" ++");
     } else if (col.auto_increment) {
         try w.writeAll(" +");
-    } else if (isDatetime(col.type_sql)) {
+    } else if (isDatetime(col.type_sql) or std.mem.eql(u8, tr.tps, "t")) {
         // datetime without auto_increment — check DEFAULT for +/++
         if (col.default_val) |dv| {
             if (isCurrentTimestamp(dv)) {
@@ -93,7 +93,7 @@ fn writeColumnSuffix(w: anytype, col: sp.SqlColumn, indexes: []const sp.SqlIndex
     // 5. DEFAULT value
     if (col.default_val) |dv| {
         // datetime + CURRENT_TIMESTAMP/now() is already handled above (via + or ++)
-        if (isDatetime(col.type_sql) and isCurrentTimestamp(dv)) {
+        if ((isDatetime(col.type_sql) or std.mem.eql(u8, tr.tps, "t")) and isCurrentTimestamp(dv)) {
             // already emitted + or ++ above — skip
         } else if (std.mem.eql(u8, dv, "")) {
             // Empty string default (DEFAULT '') — skip, equivalent to no default
@@ -582,7 +582,7 @@ pub const ReverseCodegen = struct {
                 }
                 if (in_parent) continue;
                 try w.writeAll(col.name);
-                try writeColumnSuffix(w, col, ref_indexes, null);
+                try writeColumnSuffix(w, col, ref_indexes, null, self.dialect);
                 try w.writeAll("\n");
             }
             try w.writeAll("\n");
@@ -638,7 +638,7 @@ pub const ReverseCodegen = struct {
                     if (in_template) continue;
                     try w.writeAll(col.name);
                     const ck = if (col.check_expr) |ce| reverseCheck(self.alloc, ce, col.name) else check_map.get(col.name);
-                    try writeColumnSuffix(w, col, table.indexes, ck);
+                    try writeColumnSuffix(w, col, table.indexes, ck, self.dialect);
                     try w.writeAll("\n");
                 }
             } else {
@@ -646,7 +646,7 @@ pub const ReverseCodegen = struct {
                 for (table.columns) |col| {
                     try w.writeAll(col.name);
                     const ck = if (col.check_expr) |ce| reverseCheck(self.alloc, ce, col.name) else check_map.get(col.name);
-                    try writeColumnSuffix(w, col, table.indexes, ck);
+                    try writeColumnSuffix(w, col, table.indexes, ck, self.dialect);
                     try w.writeAll("\n");
                 }
             }

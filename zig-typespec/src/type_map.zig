@@ -158,10 +158,15 @@ pub const ReverseResult = struct {
 
 /// Reverse-lookup a SQL type string to its TPS symbol.
 /// Handles exact match from TYPE_TABLE + parameterized types (int(N), decimal(P,S), varchar(N)).
-pub fn reverseLookup(sql_type: []const u8, col_name: []const u8, is_auto_inc: bool, is_default_ts: bool) ReverseResult {
+pub fn reverseLookup(sql_type: []const u8, col_name: []const u8, is_auto_inc: bool, is_default_ts: bool, dialect: Dialect) ReverseResult {
     const t = std.mem.trim(u8, sql_type, " \t");
 
-    // Exact match from TYPE_TABLE (skip single-char TPS entries — those are forward-only)
+    // SQLite: match against m.sqlite with case-insensitive comparison and disambiguation heuristics
+    if (dialect == .sqlite) {
+        return reverseLookupSqlite(t, col_name, is_auto_inc, is_default_ts);
+    }
+
+    // MySQL/PG: exact match from TYPE_TABLE (skip single-char TPS entries — those are forward-only)
     var best_match: ?ReverseResult = null;
     var best_priority: u32 = std.math.maxInt(u32);
     for (TYPE_TABLE) |m| {
@@ -222,6 +227,130 @@ pub fn reverseLookup(sql_type: []const u8, col_name: []const u8, is_auto_inc: bo
         return .{ .tps = t, .omit = false };
 
     return .{ .tps = t, .omit = false };
+}
+
+// ─── SQLite Reverse Lookup ────────────────────────────────────
+
+fn reverseLookupSqlite(t: []const u8, col_name: []const u8, is_auto_inc: bool, is_default_ts: bool) ReverseResult {
+    // Normalize to uppercase for case-insensitive comparison
+    var upper_buf: [64]u8 = undefined;
+    const upper_t = if (t.len <= upper_buf.len) blk: {
+        for (t, 0..) |ch, i| upper_buf[i] = std.ascii.toUpper(ch);
+        break :blk upper_buf[0..t.len];
+    } else t;
+
+    // Check against TYPE_TABLE SQLite entries (including single-char TPS entries)
+    // Collect all matching TPS candidates
+    var found_tps: ?[]const u8 = null;
+    for (TYPE_TABLE) |m| {
+        if (std.mem.eql(u8, upper_t, m.sqlite)) {
+            found_tps = m.tps;
+            break; // first match is sufficient for disambiguation below
+        }
+    }
+
+    if (found_tps) |tps| {
+        // Single-result types: BLOB, REAL — no ambiguity
+        if (std.mem.eql(u8, tps, "B") or std.mem.eql(u8, tps, "real") or
+            std.mem.eql(u8, tps, "float4") or std.mem.eql(u8, tps, "float8"))
+        {
+            return .{ .tps = tps, .omit = canOmitType(col_name, tps, is_auto_inc, is_default_ts) };
+        }
+
+        // INTEGER group (n, N, b) — disambiguate with heuristics
+        if (std.mem.eql(u8, upper_t, "INTEGER")) {
+            if (is_auto_inc) return .{ .tps = "n", .omit = false };
+            if (col_name.len > 3 and std.mem.endsWith(u8, col_name, "_id"))
+                return .{ .tps = "n", .omit = canOmitType(col_name, "n", is_auto_inc, is_default_ts) };
+            // Boolean heuristic: is_*, has_*, can_*, should_*, was_*, did_* prefixes
+            if (isBooleanColumnName(col_name))
+                return .{ .tps = "b", .omit = canOmitType(col_name, "b", is_auto_inc, is_default_ts) };
+            return .{ .tps = "n", .omit = canOmitType(col_name, "n", is_auto_inc, is_default_ts) };
+        }
+
+        // NUMERIC group (m, M) — m is most common
+        if (std.mem.eql(u8, upper_t, "NUMERIC")) {
+            return .{ .tps = "m", .omit = canOmitType(col_name, "m", is_auto_inc, is_default_ts) };
+        }
+
+        // TEXT group (s, S, j, d, t) — disambiguate with heuristics
+        if (std.mem.eql(u8, upper_t, "TEXT")) {
+            if (col_name.len > 3 and std.mem.endsWith(u8, col_name, "_at"))
+                return .{ .tps = "t", .omit = canOmitType(col_name, "t", is_auto_inc, is_default_ts) };
+            if (col_name.len > 3 and std.mem.endsWith(u8, col_name, "_on"))
+                return .{ .tps = "d", .omit = canOmitType(col_name, "d", is_auto_inc, is_default_ts) };
+            if (is_default_ts)
+                return .{ .tps = "t", .omit = canOmitType(col_name, "t", is_auto_inc, is_default_ts) };
+            // JSON heuristic: settings, data, metadata, config, extra, params, options, etc.
+            if (isJsonColumnName(col_name))
+                return .{ .tps = "j", .omit = canOmitType(col_name, "j", is_auto_inc, is_default_ts) };
+            // Long text heuristic: description, content, note, bio, summary, body, etc.
+            if (isTextColumnName(col_name))
+                return .{ .tps = "S", .omit = canOmitType(col_name, "S", is_auto_inc, is_default_ts) };
+            return .{ .tps = "s", .omit = canOmitType(col_name, "s", is_auto_inc, is_default_ts) };
+        }
+    }
+
+    // Fallback: return as-is (unknown type)
+    return .{ .tps = t, .omit = false };
+}
+
+// ─── SQLite column name heuristics ───────────────────────────
+
+fn isBooleanColumnName(name: []const u8) bool {
+    return std.mem.startsWith(u8, name, "is_") or
+        std.mem.startsWith(u8, name, "has_") or
+        std.mem.startsWith(u8, name, "can_") or
+        std.mem.startsWith(u8, name, "should_") or
+        std.mem.startsWith(u8, name, "was_") or
+        std.mem.startsWith(u8, name, "did_") or
+        std.mem.startsWith(u8, name, "enable") or
+        std.mem.startsWith(u8, name, "active");
+}
+
+fn isJsonColumnName(name: []const u8) bool {
+    return std.mem.eql(u8, name, "settings") or
+        std.mem.eql(u8, name, "data") or
+        std.mem.eql(u8, name, "metadata") or
+        std.mem.eql(u8, name, "config") or
+        std.mem.eql(u8, name, "extra") or
+        std.mem.eql(u8, name, "params") or
+        std.mem.eql(u8, name, "options") or
+        std.mem.eql(u8, name, "json") or
+        std.mem.eql(u8, name, "props") or
+        std.mem.eql(u8, name, "attrs") or
+        std.mem.eql(u8, name, "properties") or
+        std.mem.endsWith(u8, name, "_json") or
+        std.mem.endsWith(u8, name, "_data") or
+        std.mem.endsWith(u8, name, "_meta") or
+        std.mem.endsWith(u8, name, "_config") or
+        std.mem.endsWith(u8, name, "_settings") or
+        std.mem.endsWith(u8, name, "_extra") or
+        std.mem.endsWith(u8, name, "_params") or
+        std.mem.endsWith(u8, name, "_options");
+}
+
+fn isTextColumnName(name: []const u8) bool {
+    return std.mem.eql(u8, name, "description") or
+        std.mem.eql(u8, name, "content") or
+        std.mem.eql(u8, name, "note") or
+        std.mem.eql(u8, name, "notes") or
+        std.mem.eql(u8, name, "bio") or
+        std.mem.eql(u8, name, "summary") or
+        std.mem.eql(u8, name, "body") or
+        std.mem.eql(u8, name, "text") or
+        std.mem.eql(u8, name, "detail") or
+        std.mem.eql(u8, name, "remark") or
+        std.mem.eql(u8, name, "remarks") or
+        std.mem.eql(u8, name, "message") or
+        std.mem.eql(u8, name, "memo") or
+        std.mem.eql(u8, name, "address") or
+        std.mem.endsWith(u8, name, "_desc") or
+        std.mem.endsWith(u8, name, "_text") or
+        std.mem.endsWith(u8, name, "_content") or
+        std.mem.endsWith(u8, name, "_note") or
+        std.mem.endsWith(u8, name, "_body") or
+        std.mem.endsWith(u8, name, "_remark");
 }
 
 // ─── Helper: can omit type symbol in .tps output ─────────────
@@ -437,38 +566,38 @@ test "forward: enum_type maps to TEXT in PostgreSQL" {
 }
 
 test "reverse: int maps to n" {
-    const r = reverseLookup("int", "col", false, false);
+    const r = reverseLookup("int", "col", false, false, .mysql);
     try std.testing.expectEqualStrings("int", r.tps);
     // "int" is a multi-char entry, should match
 }
 
 test "reverse: varchar(255) maps to s" {
-    const r = reverseLookup("varchar(255)", "col", false, false);
+    const r = reverseLookup("varchar(255)", "col", false, false, .mysql);
     try std.testing.expectEqualStrings("s", r.tps);
 }
 
 test "reverse: varchar(128) maps to s128" {
-    const r = reverseLookup("varchar(128)", "col", false, false);
+    const r = reverseLookup("varchar(128)", "col", false, false, .mysql);
     try std.testing.expectEqualStrings("s128", r.tps);
 }
 
 test "reverse: decimal(16, 2) maps to 16,2" {
-    const r = reverseLookup("decimal(16, 2)", "col", false, false);
+    const r = reverseLookup("decimal(16, 2)", "col", false, false, .mysql);
     try std.testing.expectEqualStrings("16,2", r.tps);
 }
 
 test "reverse: numeric(16, 2) maps to 16,2" {
-    const r = reverseLookup("numeric(16, 2)", "col", false, false);
+    const r = reverseLookup("numeric(16, 2)", "col", false, false, .postgres);
     try std.testing.expectEqualStrings("16,2", r.tps);
 }
 
 test "reverse: ENUM(...) passes through" {
-    const r = reverseLookup("ENUM('M', 'F')", "col", false, false);
+    const r = reverseLookup("ENUM('M', 'F')", "col", false, false, .mysql);
     try std.testing.expectEqualStrings("ENUM('M', 'F')", r.tps);
 }
 
 test "reverse: tinyint maps to n" {
-    const r = reverseLookup("tinyint", "col", false, false);
+    const r = reverseLookup("tinyint", "col", false, false, .mysql);
     try std.testing.expectEqualStrings("n", r.tps);
 }
 
@@ -550,4 +679,109 @@ test "isNumericTpsType: int_explicit is numeric" {
 
 test "isNumericTpsType: decimal_explicit is numeric" {
     try std.testing.expect(isNumericTpsType(.{ .decimal_explicit = .{ .precision = 10, .scale = 2 } }));
+}
+
+// ─── SQLite reverse tests ──────────────────────────────────────
+
+test "reverse sqlite: INTEGER + auto_increment maps to n" {
+    const r = reverseLookup("INTEGER", "id", true, false, .sqlite);
+    try std.testing.expectEqualStrings("n", r.tps);
+    try std.testing.expect(!r.omit);
+}
+
+test "reverse sqlite: INTEGER + _id suffix maps to n with omit" {
+    const r = reverseLookup("INTEGER", "user_id", false, false, .sqlite);
+    try std.testing.expectEqualStrings("n", r.tps);
+    try std.testing.expect(r.omit);
+}
+
+test "reverse sqlite: INTEGER bare maps to n" {
+    const r = reverseLookup("INTEGER", "count", false, false, .sqlite);
+    try std.testing.expectEqualStrings("n", r.tps);
+}
+
+test "reverse sqlite: lowercase integer maps to n" {
+    const r = reverseLookup("integer", "status", false, false, .sqlite);
+    try std.testing.expectEqualStrings("n", r.tps);
+}
+
+test "reverse sqlite: NUMERIC maps to m" {
+    const r = reverseLookup("NUMERIC", "balance", false, false, .sqlite);
+    try std.testing.expectEqualStrings("m", r.tps);
+}
+
+test "reverse sqlite: TEXT + _at suffix maps to t with omit" {
+    const r = reverseLookup("TEXT", "created_at", false, false, .sqlite);
+    try std.testing.expectEqualStrings("t", r.tps);
+    try std.testing.expect(r.omit);
+}
+
+test "reverse sqlite: TEXT + _on suffix maps to d with omit" {
+    const r = reverseLookup("TEXT", "birth_on", false, false, .sqlite);
+    try std.testing.expectEqualStrings("d", r.tps);
+    try std.testing.expect(r.omit);
+}
+
+test "reverse sqlite: TEXT + is_default_ts maps to t" {
+    const r = reverseLookup("TEXT", "created_at", false, true, .sqlite);
+    try std.testing.expectEqualStrings("t", r.tps);
+    try std.testing.expect(!r.omit); // is_default_ts prevents omission
+}
+
+test "reverse sqlite: TEXT bare maps to s with omit" {
+    const r = reverseLookup("TEXT", "name", false, false, .sqlite);
+    try std.testing.expectEqualStrings("s", r.tps);
+    try std.testing.expect(r.omit);
+}
+
+test "reverse sqlite: BLOB maps to B" {
+    const r = reverseLookup("BLOB", "data", false, false, .sqlite);
+    try std.testing.expectEqualStrings("B", r.tps);
+}
+
+// ─── SQLite heuristic tests ──────────────────────────────────
+
+test "reverse sqlite: INTEGER + is_ prefix maps to b" {
+    const r = reverseLookup("INTEGER", "is_admin", false, false, .sqlite);
+    try std.testing.expectEqualStrings("b", r.tps);
+}
+
+test "reverse sqlite: INTEGER + has_ prefix maps to b" {
+    const r = reverseLookup("INTEGER", "has_permission", false, false, .sqlite);
+    try std.testing.expectEqualStrings("b", r.tps);
+}
+
+test "reverse sqlite: INTEGER + can_ prefix maps to b" {
+    const r = reverseLookup("INTEGER", "can_edit", false, false, .sqlite);
+    try std.testing.expectEqualStrings("b", r.tps);
+}
+
+test "reverse sqlite: TEXT + settings maps to j" {
+    const r = reverseLookup("TEXT", "settings", false, false, .sqlite);
+    try std.testing.expectEqualStrings("j", r.tps);
+}
+
+test "reverse sqlite: TEXT + metadata maps to j" {
+    const r = reverseLookup("TEXT", "metadata", false, false, .sqlite);
+    try std.testing.expectEqualStrings("j", r.tps);
+}
+
+test "reverse sqlite: TEXT + extra_data maps to j" {
+    const r = reverseLookup("TEXT", "extra_data", false, false, .sqlite);
+    try std.testing.expectEqualStrings("j", r.tps);
+}
+
+test "reverse sqlite: TEXT + description maps to S" {
+    const r = reverseLookup("TEXT", "description", false, false, .sqlite);
+    try std.testing.expectEqualStrings("S", r.tps);
+}
+
+test "reverse sqlite: TEXT + note maps to S" {
+    const r = reverseLookup("TEXT", "note", false, false, .sqlite);
+    try std.testing.expectEqualStrings("S", r.tps);
+}
+
+test "reverse sqlite: TEXT + content maps to S" {
+    const r = reverseLookup("TEXT", "content", false, false, .sqlite);
+    try std.testing.expectEqualStrings("S", r.tps);
 }
