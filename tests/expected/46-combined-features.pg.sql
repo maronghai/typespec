@@ -16,8 +16,7 @@ CREATE TABLE "user" (
   "delete_at" timestamp,
   "create_at" timestamp DEFAULT CURRENT_TIMESTAMP,
   "update_at" timestamp DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE ("email"),
-  
+  UNIQUE ("email")
 );
 COMMENT ON TABLE "user" IS '用户表';
 COMMENT ON COLUMN "user"."name" IS '用户登录名';
@@ -27,6 +26,7 @@ COMMENT ON COLUMN "user"."avatar" IS '头像 URL';
 COMMENT ON COLUMN "user"."is_admin" IS '管理员标记';
 COMMENT ON COLUMN "user"."balance" IS '账户余额（分）';
 COMMENT ON COLUMN "user"."settings" IS 'JSON 用户偏好';
+CREATE INDEX "idx_name" ON "user" ("name");
 
 CREATE TABLE "product" (
   "id" integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -39,9 +39,7 @@ CREATE TABLE "product" (
   "status" integer DEFAULT 0,
   "delete_at" timestamp,
   "create_at" timestamp DEFAULT CURRENT_TIMESTAMP,
-  "update_at" timestamp DEFAULT CURRENT_TIMESTAMP,
-  ,
-  
+  "update_at" timestamp DEFAULT CURRENT_TIMESTAMP
 );
 COMMENT ON TABLE "product" IS '商品表';
 COMMENT ON COLUMN "product"."name" IS '商品名称';
@@ -49,6 +47,8 @@ COMMENT ON COLUMN "product"."description" IS '商品详情';
 COMMENT ON COLUMN "product"."price" IS '单价（分）';
 COMMENT ON COLUMN "product"."stock" IS '库存数量';
 COMMENT ON COLUMN "product"."category_id" IS '分类 ID';
+CREATE INDEX "idx_category_id" ON "product" ("category_id");
+CREATE INDEX "idx_price" ON "product" ("price");
 
 CREATE TABLE "order" (
   "id" integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -64,8 +64,6 @@ CREATE TABLE "order" (
   "create_at" timestamp DEFAULT CURRENT_TIMESTAMP,
   "update_at" timestamp DEFAULT CURRENT_TIMESTAMP,
   UNIQUE ("order_no"),
-  ,
-  ,
   FOREIGN KEY ("user_id") REFERENCES "user"("id")
 );
 COMMENT ON TABLE "order" IS '订单表';
@@ -75,3 +73,5 @@ COMMENT ON COLUMN "order"."amount" IS '订单总额（分）';
 COMMENT ON COLUMN "order"."discount" IS '折扣金额（分）';
 COMMENT ON COLUMN "order"."note" IS '买家留言';
 COMMENT ON COLUMN "order"."paid_on" IS '支付日期';
+CREATE INDEX "idx_user_id" ON "order" ("user_id");
+CREATE INDEX "idx_paid_on" ON "order" ("paid_on");

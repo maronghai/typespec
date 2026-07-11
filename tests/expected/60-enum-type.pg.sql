@@ -4,7 +4,7 @@ CREATE DATABASE "demo" ENCODING 'UTF8';
 
 CREATE TABLE "user" (
   "id" integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-  "gender" text NOT NULL CHECK ("gender" IN ('M', 'F', 'X')),
-  "status" text DEFAULT 'pending' CHECK ("status" IN ('pending', 'active', 'closed')),
-  "role" text CHECK ("role" IN ('admin', 'user', 'guest'))
+  "gender" TEXT NOT NULL CHECK ("gender" IN ('M', 'F', 'X')),
+  "status" TEXT DEFAULT 'pending' CHECK ("status" IN ('pending', 'active', 'closed')),
+  "role" TEXT CHECK ("role" IN ('admin', 'user', 'guest'))
 );

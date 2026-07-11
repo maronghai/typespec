@@ -2,7 +2,7 @@ const std = @import("std");
 
 // ─── SQL Dialect ────────────────────────────────────────────────
 
-pub const Dialect = enum { mysql, postgres };
+pub const Dialect = enum { mysql, postgres, sqlite };
 
 // ─── SQL IR Types ────────────────────────────────────────────────
 
@@ -185,6 +185,13 @@ pub const SqlParser = struct {
         var saw_create = false;
 
         while (self.pos < self.src.len) {
+            self.skipSpacesAndNewlines();
+            if (self.pos >= self.src.len) break;
+
+            // Capture -- comments before skipping them (for SQLite column/table comments)
+            self.captureTrailingComments(tables.items);
+
+            // Now skip -- comments
             self.skipWhitespaceAndComments();
             if (self.pos >= self.src.len) break;
 
@@ -200,7 +207,61 @@ pub const SqlParser = struct {
                     try tables.append(self.alloc, table);
                 } else if (self.matchKeyword("INDEX") or self.matchKeyword("UNIQUE")) {
                     // PG: CREATE [UNIQUE] INDEX idx_name ON table (cols)
-                    // Parse and skip for now (we don't add standalone indexes to table IR)
+                    // matchKeyword consumed either INDEX or UNIQUE.
+                    // If UNIQUE was consumed, INDEX follows. If INDEX was consumed, no UNIQUE.
+                    self.skipSpaces();
+                    var is_unique = false;
+                    if (std.mem.eql(u8, self.peekWord(), "INDEX")) {
+                        // UNIQUE was consumed above, INDEX is next → consume it
+                        is_unique = true;
+                        self.skipWord();
+                        self.skipSpaces();
+                    }
+                    _ = self.matchKeyword("IF");
+                    _ = self.matchKeyword("NOT");
+                    _ = self.matchKeyword("EXISTS");
+                    self.skipSpaces();
+                    const idx_name = try self.parseIdentifier();
+                    self.skipSpaces();
+                    _ = self.matchKeyword("ON");
+                    self.skipSpaces();
+                    const tbl_ident = try self.parseIdentifier();
+                    const tbl_name = blk: {
+                        if (std.mem.lastIndexOfScalar(u8, tbl_ident, '.')) |dot_pos|
+                            break :blk tbl_ident[dot_pos + 1 ..];
+                        break :blk tbl_ident;
+                    };
+                    self.skipSpaces();
+                    if (self.peek() == '(') {
+                        self.advance(); // skip (
+                        var fields = try std.ArrayList([]const u8).initCapacity(self.alloc, 4);
+                        while (self.peek() != ')' and self.pos < self.src.len) {
+                            self.skipSpaces();
+                            if (self.peek() == ')') break;
+                            const field = try self.parseIdentifier();
+                            try fields.append(self.alloc, field);
+                            self.skipSpaces();
+                            if (self.peek() == ',') self.advance();
+                        }
+                        if (self.peek() == ')') self.advance(); // skip )
+                        const kind: IndexKind = if (is_unique) .unique else .regular;
+                        const idx = SqlIndex{
+                            .kind = kind,
+                            .name = idx_name,
+                            .fields = try fields.toOwnedSlice(self.alloc),
+                            .descending = &.{},
+                        };
+                        for (tables.items) |*tbl| {
+                            if (std.mem.eql(u8, tbl.name, tbl_name)) {
+                                const old = tbl.indexes;
+                                const new = try self.alloc.alloc(SqlIndex, old.len + 1);
+                                for (old, 0..) |o, i| new[i] = o;
+                                new[old.len] = idx;
+                                tbl.indexes = new;
+                                break;
+                            }
+                        }
+                    }
                     self.skipToSemicolon();
                 } else if (self.matchKeyword("EXTENSION") or self.matchKeyword("SCHEMA") or self.matchKeyword("TYPE") or self.matchKeyword("FUNCTION") or self.matchKeyword("TRIGGER") or self.matchKeyword("VIEW") or self.matchKeyword("SEQUENCE")) {
                     // PG: CREATE EXTENSION/SCHEMA/TYPE/FUNCTION/TRIGGER/VIEW/SEQUENCE — skip
@@ -228,14 +289,14 @@ pub const SqlParser = struct {
                     self.skipSpacesAndNewlines();
                     if (self.matchKeyword("TABLE")) {
                         self.skipSpaces();
-                        const tbl_name = try self.parseIdentifier();
+                        const full_ident = try self.parseDottedIdentifier();
+                        // Match against full table name (may include schema prefix)
                         self.skipSpaces();
                         if (self.matchKeyword("IS")) {
                             self.skipSpaces();
                             const cmt = try self.parseStringLiteral();
-                            // Find matching table and set comment
                             for (tables.items) |*tbl| {
-                                if (std.mem.eql(u8, tbl.name, tbl_name)) {
+                                if (std.mem.eql(u8, tbl.name, full_ident)) {
                                     tbl.comment = cmt;
                                     break;
                                 }
@@ -243,11 +304,11 @@ pub const SqlParser = struct {
                         }
                     } else if (self.matchKeyword("COLUMN")) {
                         self.skipSpaces();
-                        // PG: COLUMN table.column or schema.table.column
-                        const full_ident = try self.parseIdentifier();
-                        var tbl_name = full_ident;
+                        // PG: "schema"."table"."column" or "table"."column"
+                        const full_ident = try self.parseDottedIdentifier();
+                        // Split at last dot: tbl=everything_before, col=last_part
+                        var tbl_name: []const u8 = full_ident;
                         var col_name: []const u8 = "";
-                        // Split at first dot: schema.table.col → tbl=schema.table, col=col
                         if (std.mem.lastIndexOfScalar(u8, full_ident, '.')) |dot_pos| {
                             tbl_name = full_ident[0..dot_pos];
                             col_name = full_ident[dot_pos + 1 ..];
@@ -256,7 +317,6 @@ pub const SqlParser = struct {
                         if (self.matchKeyword("IS")) {
                             self.skipSpaces();
                             const cmt = try self.parseStringLiteral();
-                            // Find matching table and column
                             for (tables.items) |*tbl| {
                                 if (std.mem.eql(u8, tbl.name, tbl_name)) {
                                     for (tbl.columns) |*col| {
@@ -359,7 +419,7 @@ pub const SqlParser = struct {
             _ = self.matchKeyword("EXISTS");
         }
         self.skipSpaces();
-        const name = try self.parseIdentifier();
+        const name = try self.parseDottedIdentifier();
         self.skipSpaces();
         self.expect('(');
 
@@ -416,9 +476,9 @@ pub const SqlParser = struct {
                 const idx = try self.parseUniqueIndex();
                 try indexes.append(self.alloc, idx);
             } else if (self.lookaheadIs("FULLTEXT")) {
-                if (self.dialect == .postgres) {
-                    // PG doesn't support FULLTEXT — skip with warning
-                    self.reportWarning("FULLTEXT index not supported in PostgreSQL, skipping", .{});
+                if (self.dialect == .postgres or self.dialect == .sqlite) {
+                    // PG/SQLite doesn't support FULLTEXT inline — skip with warning
+                    self.reportWarning("FULLTEXT index not supported inline in this dialect, skipping", .{});
                     self.skipToSemicolon();
                 } else {
                     const idx = try self.parseFulltextIndex();
@@ -428,6 +488,10 @@ pub const SqlParser = struct {
                 if (self.dialect == .postgres) {
                     // PG doesn't support inline INDEX/KEY — skip with warning
                     self.reportWarning("inline INDEX/KEY not supported in PostgreSQL, skipping", .{});
+                    self.skipToSemicolon();
+                } else if (self.dialect == .sqlite) {
+                    // SQLite supports inline UNIQUE but not named INDEX — skip named ones
+                    self.reportWarning("inline INDEX not supported in SQLite, skipping", .{});
                     self.skipToSemicolon();
                 } else {
                     const idx = try self.parseIndex();
@@ -602,7 +666,7 @@ pub const SqlParser = struct {
             } else if (self.matchKeyword("UNSIGNED")) {
                 if (self.dialect == .mysql) unsigned = true;
                 // PG: silently ignore UNSIGNED
-            } else if (self.matchKeyword("AUTO_INCREMENT")) {
+            } else if (self.matchKeyword("AUTO_INCREMENT") or self.matchKeyword("AUTOINCREMENT")) {
                 auto_increment = true;
             } else if (self.matchKeyword("GENERATED")) {
                 // MySQL: GENERATED ALWAYS AS (expr) STORED/VIRTUAL
@@ -865,6 +929,35 @@ pub const SqlParser = struct {
         return self.parseUnquotedWord();
     }
 
+    /// Read a potentially schema-qualified identifier: "schema"."table"."col"
+    /// Returns the full raw string including dots and quotes.
+    fn parseDottedIdentifier(self: *SqlParser) ![]const u8 {
+        self.skipSpaces();
+        const start = self.pos;
+        _ = try self.parseIdentifier();
+        // Check for dot-separated parts
+        while (self.pos < self.src.len) {
+            self.skipSpaces();
+            if (self.peek() != '.') break;
+            self.advance(); // skip dot
+            _ = try self.parseIdentifier();
+        }
+        // Find the actual end of the identifier (before any trailing whitespace)
+        var end = self.pos;
+        while (end > start and (self.src[end - 1] == ' ' or self.src[end - 1] == '\t')) {
+            end -= 1;
+        }
+        // Strip double-quote characters from the raw result
+        const raw = self.src[start..end];
+        var stripped = try std.ArrayList(u8).initCapacity(self.alloc, raw.len);
+        for (raw) |c| {
+            if (c != '"') {
+                stripped.appendAssumeCapacity(c);
+            }
+        }
+        return try stripped.toOwnedSlice(self.alloc);
+    }
+
     fn parseBacktickIdent(self: *SqlParser) ![]const u8 {
         self.advance(); // skip opening `
         const start = self.pos;
@@ -1082,6 +1175,14 @@ pub const SqlParser = struct {
         return result;
     }
 
+    fn peekWord(self: *SqlParser) []const u8 {
+        const saved = self.pos;
+        self.skipSpaces();
+        const word = self.parseWord();
+        self.pos = saved;
+        return word;
+    }
+
     fn peek(self: *SqlParser) u8 {
         if (self.pos < self.src.len) return self.src[self.pos];
         return 0;
@@ -1139,5 +1240,62 @@ pub const SqlParser = struct {
     fn skipToSemicolon(self: *SqlParser) void {
         while (self.pos < self.src.len and self.src[self.pos] != ';') self.pos += 1;
         if (self.pos < self.src.len) self.pos += 1; // skip the semicolon
+    }
+
+    /// Read a -- comment (without advancing past whitespace before it).
+    /// Returns the comment text after "--", or null if no comment found.
+    fn readLineComment(self: *SqlParser) ?[]const u8 {
+        // Skip whitespace including newlines to find next -- comment
+        while (self.pos < self.src.len) {
+            const c = self.src[self.pos];
+            if (c == ' ' or c == '\t' or c == '\n' or c == '\r') {
+                self.pos += 1;
+            } else break;
+        }
+        if (self.pos + 1 < self.src.len and self.src[self.pos] == '-' and self.src[self.pos + 1] == '-') {
+            const start = self.pos + 2;
+            while (self.pos < self.src.len and self.src[self.pos] != '\n') self.pos += 1;
+            return std.mem.trim(u8, self.src[start..self.pos], " \t");
+        }
+        return null;
+    }
+
+    /// Capture trailing -- comments after a statement and attach to tables/columns.
+    /// SQLite format: "-- table.col: comment" or "-- comment" (table-level).
+    fn captureTrailingComments(self: *SqlParser, tables: []SqlTable) void {
+        while (self.readLineComment()) |cmt| {
+            if (cmt.len == 0) continue;
+            // Try to match "-- table.column: text" pattern
+            if (std.mem.indexOfScalar(u8, cmt, '.')) |dot_pos| {
+                const tbl_part = std.mem.trim(u8, cmt[0..dot_pos], " \t");
+                const rest = std.mem.trim(u8, cmt[dot_pos + 1 ..], " \t");
+                if (std.mem.indexOfScalar(u8, rest, ':')) |colon_pos| {
+                    const col_part = std.mem.trim(u8, rest[0..colon_pos], " \t");
+                    const text = std.mem.trim(u8, rest[colon_pos + 1 ..], " \t");
+                    if (text.len > 0) {
+                        for (tables) |*tbl| {
+                            if (std.mem.eql(u8, tbl.name, tbl_part)) {
+                                for (tbl.columns) |*col| {
+                                    if (std.mem.eql(u8, col.name, col_part)) {
+                                        col.comment = text;
+                                        break;
+                                    }
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+            } else {
+                // No dot — could be a table comment: "-- text"
+                // Attach to the most recently added table
+                if (tables.len > 0) {
+                    const last = &tables[tables.len - 1];
+                    if (last.comment == null) {
+                        last.comment = cmt;
+                    }
+                }
+            }
+        }
     }
 };

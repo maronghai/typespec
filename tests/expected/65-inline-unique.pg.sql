@@ -7,6 +7,6 @@ CREATE TABLE "user" (
   "email" varchar(128) NOT NULL,
   "name" varchar(32),
   "code" varchar(16),
-  UNIQUE (email),
-  UNIQUE (code)
+  UNIQUE ("email"),
+  UNIQUE ("code")
 );

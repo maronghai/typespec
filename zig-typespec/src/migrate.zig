@@ -69,16 +69,22 @@ pub fn generateFromDiff(
                                 try emitAlterTable(w, dialect, td.name);
                                 table_has_ops = true;
                             }
-                            try w.writeAll("DROP COLUMN ");
-                            try quoteIdent(w, dialect, fd.name);
-                            try w.writeAll(",\n");
+                            if (dialect == .sqlite) {
+                                try w.writeAll("-- WARNING: DROP COLUMN not supported in SQLite < 3.35; requires table recreation\n");
+                            } else {
+                                try w.writeAll("DROP COLUMN ");
+                                try quoteIdent(w, dialect, fd.name);
+                                try w.writeAll(",\n");
+                            }
                         },
                         .modify => {
                             if (!table_has_ops) {
                                 try emitAlterTable(w, dialect, td.name);
                                 table_has_ops = true;
                             }
-                            if (fd.new_field) |nf| {
+                            if (dialect == .sqlite) {
+                                try w.writeAll("-- WARNING: MODIFY COLUMN not supported in SQLite; requires table recreation\n");
+                            } else if (fd.new_field) |nf| {
                                 try w.writeAll("MODIFY COLUMN ");
                                 try emitColumnDef(w, dialect, nf);
                                 try w.writeAll(",\n");
@@ -100,7 +106,7 @@ pub fn generateFromDiff(
                                         }
                                         try w.writeAll(",\n");
                                     },
-                                    .postgres => {
+                                    .postgres, .sqlite => {
                                         try w.writeAll("RENAME COLUMN ");
                                         try quoteIdent(w, dialect, old_name);
                                         try w.writeAll(" TO ");
@@ -243,12 +249,14 @@ fn emitColumnDef(w: anytype, dialect: codegen.Dialect, field: Field) !void {
                 switch (dialect) {
                     .mysql => try w.writeAll(" AUTO_INCREMENT PRIMARY KEY"),
                     .postgres => try w.writeAll(" GENERATED ALWAYS AS IDENTITY PRIMARY KEY"),
+                    .sqlite => try w.writeAll(" PRIMARY KEY AUTOINCREMENT"),
                 }
             },
             .auto_inc => {
                 switch (dialect) {
                     .mysql => try w.writeAll(" AUTO_INCREMENT"),
                     .postgres => try w.writeAll(" GENERATED ALWAYS AS IDENTITY"),
+                    .sqlite => try w.writeAll(" AUTOINCREMENT"),
                 }
             },
             .primary_key => try w.writeAll(" PRIMARY KEY"),
@@ -256,7 +264,7 @@ fn emitColumnDef(w: anytype, dialect: codegen.Dialect, field: Field) !void {
             .unsigned => {
                 switch (dialect) {
                     .mysql => try w.writeAll(" UNSIGNED"),
-                    .postgres => {},
+                    .postgres, .sqlite => {},
                 }
             },
             .inline_unique => {},
@@ -289,84 +297,10 @@ fn emitColumnDef(w: anytype, dialect: codegen.Dialect, field: Field) !void {
 }
 
 fn emitTypeForColumn(w: anytype, dialect: codegen.Dialect, type_info: TypeInfo) !void {
-    switch (dialect) {
-        .mysql => {
-            switch (type_info) {
-                .none => try w.writeAll("varchar(255)"),
-                .simple => |s| {
-                    if (s.len == 1) {
-                        switch (s[0]) {
-                            'n' => try w.writeAll("int"),
-                            'N' => try w.writeAll("bigint"),
-                            'm' => try w.writeAll("decimal(16, 2)"),
-                            'M' => try w.writeAll("decimal(20, 6)"),
-                            'S' => try w.writeAll("text"),
-                            'b' => try w.writeAll("boolean"),
-                            'B' => try w.writeAll("blob"),
-                            'j' => try w.writeAll("json"),
-                            'd' => try w.writeAll("date"),
-                            't' => try w.writeAll("datetime"),
-                            else => try w.writeAll(s),
-                        }
-                    } else {
-                        try w.writeAll(s);
-                    }
-                },
-                .int_explicit => |n| try w.print("int({d})", .{n}),
-                .decimal_explicit => |ds| try w.print("decimal({d}, {d})", .{ ds.precision, ds.scale }),
-                .varchar_explicit => |n| {
-                    if (n > 0) try w.print("varchar({d})", .{n}) else try w.writeAll("varchar(255)");
-                },
-                .enum_type => |vals| {
-                    try w.writeAll("ENUM(");
-                    for (vals, 0..) |v, vi| {
-                        if (vi > 0) try w.writeAll(", ");
-                        try w.print("'{s}'", .{v});
-                    }
-                    try w.writeAll(")");
-                },
-            }
-        },
-        .postgres => {
-            switch (type_info) {
-                .none => try w.writeAll("varchar(255)"),
-                .simple => |s| {
-                    if (s.len == 1) {
-                        switch (s[0]) {
-                            'n' => try w.writeAll("integer"),
-                            'N' => try w.writeAll("bigint"),
-                            'm' => try w.writeAll("numeric(16, 2)"),
-                            'M' => try w.writeAll("numeric(20, 6)"),
-                            'S' => try w.writeAll("text"),
-                            'b' => try w.writeAll("boolean"),
-                            'B' => try w.writeAll("bytea"),
-                            'j' => try w.writeAll("json"),
-                            'd' => try w.writeAll("date"),
-                            't' => try w.writeAll("timestamp"),
-                            else => try w.writeAll(s),
-                        }
-                    } else {
-                        try w.writeAll(s);
-                    }
-                },
-                .int_explicit => |n| {
-                    _ = n;
-                    try w.writeAll("integer");
-                },
-                .decimal_explicit => |ds| try w.print("numeric({d}, {d})", .{ ds.precision, ds.scale }),
-                .varchar_explicit => |n| {
-                    if (n > 0) try w.print("varchar({d})", .{n}) else try w.writeAll("varchar(255)");
-                },
-                .enum_type => |vals| {
-                    try w.writeAll("text");
-                    _ = vals;
-                },
-            }
-        },
-    }
+    try type_map.toSqlType(w, dialect, type_info);
 }
 
-fn emitAddIndex(w: anytype, dialect: codegen.Dialect, _: []const u8, idx: ast_mod.IndexDecl) !void {
+fn emitAddIndex(w: anytype, dialect: codegen.Dialect, table_name: []const u8, idx: ast_mod.IndexDecl) !void {
     switch (dialect) {
         .mysql => {
             switch (idx.kind) {
@@ -411,6 +345,28 @@ fn emitAddIndex(w: anytype, dialect: codegen.Dialect, _: []const u8, idx: ast_mo
                 },
             }
         },
+        .sqlite => {
+            // SQLite: can't add indexes via ALTER TABLE; emit CREATE INDEX as standalone
+            switch (idx.kind) {
+                .unique => {
+                    try w.print("CREATE UNIQUE INDEX IF NOT EXISTS \"uk_{s}\" ON ", .{idx.name});
+                    try quoteIdent(w, .sqlite, table_name);
+                    try w.writeAll(" (");
+                    try emitIndexFields(w, .sqlite, idx);
+                    try w.writeAll(")");
+                },
+                .regular => {
+                    try w.print("CREATE INDEX IF NOT EXISTS \"idx_{s}\" ON ", .{idx.name});
+                    try quoteIdent(w, .sqlite, table_name);
+                    try w.writeAll(" (");
+                    try emitIndexFields(w, .sqlite, idx);
+                    try w.writeAll(")");
+                },
+                else => {
+                    try w.print("-- NOTE: PRIMARY KEY/FULLTEXT cannot be added via ALTER TABLE in SQLite\n", .{});
+                },
+            }
+        },
     }
 }
 
@@ -423,10 +379,10 @@ fn emitDropIndex(w: anytype, dialect: codegen.Dialect, table_name: []const u8, i
                 else => try w.print("DROP INDEX `{s}`", .{idx.name}),
             }
         },
-        .postgres => {
+        .postgres, .sqlite => {
             switch (idx.kind) {
                 .primary_key => try w.writeAll("DROP PRIMARY KEY"),
-                else => try w.print("DROP INDEX \"{s}\"", .{idx.name}),
+                else => try w.print("DROP INDEX IF EXISTS \"{s}\"", .{idx.name}),
             }
         },
     }
@@ -437,7 +393,7 @@ fn emitIndexFields(w: anytype, dialect: codegen.Dialect, idx: ast_mod.IndexDecl)
         if (fi > 0) try w.writeAll(", ");
         switch (dialect) {
             .mysql => try w.print("`{s}`", .{f}),
-            .postgres => try w.print("\"{s}\"", .{f}),
+            .postgres, .sqlite => try w.print("\"{s}\"", .{f}),
         }
     }
 }
@@ -473,6 +429,10 @@ fn emitAddFk(w: anytype, dialect: codegen.Dialect, table_name: []const u8, fk: a
 
 fn emitDropFk(w: anytype, dialect: codegen.Dialect, table_name: []const u8, fk: ast_mod.FkDecl) !void {
     _ = table_name;
+    if (dialect == .sqlite) {
+        try w.writeAll("-- WARNING: DROP FOREIGN KEY not supported via ALTER TABLE in SQLite\n");
+        return;
+    }
     // Generate a FK constraint name from the local fields
     try w.writeAll("DROP FOREIGN KEY ");
     switch (dialect) {
@@ -489,13 +449,14 @@ fn emitDropFk(w: anytype, dialect: codegen.Dialect, table_name: []const u8, fk: 
             }
             try w.writeAll("\"");
         },
+        .sqlite => unreachable, // handled above
     }
 }
 
 fn quoteIdent(w: anytype, dialect: codegen.Dialect, name: []const u8) !void {
     switch (dialect) {
         .mysql => try w.print("`{s}`", .{name}),
-        .postgres => try w.print("\"{s}\"", .{name}),
+        .postgres, .sqlite => try w.print("\"{s}\"", .{name}),
     }
 }
 

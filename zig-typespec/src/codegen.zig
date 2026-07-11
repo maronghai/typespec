@@ -27,7 +27,7 @@ pub const Codegen = struct {
     fn quoteIdent(self: Codegen, w: anytype, name: []const u8) !void {
         switch (self.dialect) {
             .mysql => try w.print("`{s}`", .{name}),
-            .postgres => try w.print("\"{s}\"", .{name}),
+            .postgres, .sqlite => try w.print("\"{s}\"", .{name}),
         }
     }
 
@@ -49,6 +49,9 @@ pub const Codegen = struct {
                     try w.print("CREATE DATABASE \"{s}\";\n\n", .{name});
                 }
             },
+            .sqlite => {
+                // SQLite has no CREATE DATABASE statement (file-based)
+            },
         }
     }
 
@@ -67,8 +70,8 @@ pub const Codegen = struct {
                     .mysql => {
                         try w.print(" COMMENT '{s}'", .{std.mem.trim(u8, c[1..], " ")});
                     },
-                    .postgres => {
-                        // PG comments emitted as COMMENT ON after table
+                    .postgres, .sqlite => {
+                        // PG: COMMENT ON after table; SQLite: SQL comment after table
                     },
                 }
             } else if (c.len >= 2 and c[0] == '-' and c[1] == '-') {
@@ -108,7 +111,7 @@ pub const Codegen = struct {
                     needs_comma.* = true;
                     switch (self.dialect) {
                         .mysql => try w.print("  UNIQUE INDEX `uk_{s}` (`{s}`)", .{ field.name, field.name }),
-                        .postgres => try w.print("  UNIQUE ({s})", .{field.name}),
+                        .postgres, .sqlite => try w.print("  UNIQUE (\"{s}\")", .{field.name}),
                     }
                 }
             }
@@ -148,6 +151,7 @@ pub const Codegen = struct {
             switch (self.dialect) {
                 .mysql => try self.emitMysqlIndex(w, idx, needs_comma),
                 .postgres => try self.emitPostgresIndex(w, idx, needs_comma),
+                .sqlite => try self.emitSqliteIndex(w, idx, needs_comma),
             }
         }
     }
@@ -177,34 +181,70 @@ pub const Codegen = struct {
 
     fn emitPostgresIndex(self: Codegen, w: anytype, idx: IndexDecl, needs_comma: *bool) !void {
         _ = self;
-        if (needs_comma.*) try w.writeAll(",\n");
-        needs_comma.* = true;
-        try w.writeAll("  ");
         switch (idx.kind) {
             .regular => {
-                // PG: regular INDEX not supported inline in CREATE TABLE — skip
-                // (use CREATE INDEX separately)
+                // PG: regular INDEX not supported inline — emitted as standalone CREATE INDEX later
                 return;
             },
-            .unique => try w.writeAll("UNIQUE "),
             .fulltext => {
-                // PG has no inline FULLTEXT; emit as comment
-                try w.writeAll("-- WARNING: FULLTEXT INDEX not supported inline in PostgreSQL, skipping\n  ");
+                // PG has no inline FULLTEXT; skip silently (no standalone equivalent in PG)
                 return;
             },
-            .primary_key => try w.writeAll("PRIMARY KEY "),
+            .unique => {
+                if (needs_comma.*) try w.writeAll(",\n");
+                needs_comma.* = true;
+                try w.writeAll("  UNIQUE (");
+                for (idx.fields, 0..) |f, fi| {
+                    if (fi > 0) try w.writeAll(", ");
+                    try w.print("\"{s}\"", .{f});
+                }
+                try w.writeAll(")");
+            },
+            .primary_key => {
+                if (needs_comma.*) try w.writeAll(",\n");
+                needs_comma.* = true;
+                try w.writeAll("  PRIMARY KEY (");
+                for (idx.fields, 0..) |f, fi| {
+                    if (fi > 0) try w.writeAll(", ");
+                    try w.print("\"{s}\"", .{f});
+                }
+                try w.writeAll(")");
+            },
         }
-        if (idx.kind == .primary_key) {
-            // primary key is table constraint — name not needed
-        } else {
-            // For unique: already written "UNIQUE" above
+    }
+
+    fn emitSqliteIndex(self: Codegen, w: anytype, idx: IndexDecl, needs_comma: *bool) !void {
+        _ = self;
+        switch (idx.kind) {
+            .regular => {
+                // SQLite: regular INDEX emitted as standalone CREATE INDEX later
+                return;
+            },
+            .fulltext => {
+                // SQLite FTS is via virtual tables, not inline; skip silently
+                return;
+            },
+            .unique => {
+                if (needs_comma.*) try w.writeAll(",\n");
+                needs_comma.* = true;
+                try w.writeAll("  UNIQUE (");
+                for (idx.fields, 0..) |f, fi| {
+                    if (fi > 0) try w.writeAll(", ");
+                    try w.print("\"{s}\"", .{f});
+                }
+                try w.writeAll(")");
+            },
+            .primary_key => {
+                if (needs_comma.*) try w.writeAll(",\n");
+                needs_comma.* = true;
+                try w.writeAll("  PRIMARY KEY (");
+                for (idx.fields, 0..) |f, fi| {
+                    if (fi > 0) try w.writeAll(", ");
+                    try w.print("\"{s}\"", .{f});
+                }
+                try w.writeAll(")");
+            },
         }
-        try w.writeAll("(");
-        for (idx.fields, 0..) |f, fi| {
-            if (fi > 0) try w.writeAll(", ");
-            try w.print("\"{s}\"", .{f});
-        }
-        try w.writeAll(")");
     }
 
     // ─── Foreign keys ──────────────────────────────────────────
@@ -272,7 +312,7 @@ pub const Codegen = struct {
             switch (mod.kind) {
                 .auto_inc_pk => {
                     switch (self.dialect) {
-                        .mysql => {
+                        .mysql, .sqlite => {
                             // Handled via has_auto_inc/has_pk flags below
                         },
                         .postgres => {
@@ -298,7 +338,7 @@ pub const Codegen = struct {
                 .unsigned => {
                     switch (self.dialect) {
                         .mysql => try w.writeAll(" UNSIGNED"),
-                        .postgres => {}, // PG has no UNSIGNED
+                        .postgres, .sqlite => {}, // PG/SQLite have no UNSIGNED
                     }
                 },
                 .inline_unique => {},
@@ -315,9 +355,9 @@ pub const Codegen = struct {
                     try w.writeAll(" ON UPDATE CURRENT_TIMESTAMP");
                 }
             },
-            .postgres => {
+            .postgres, .sqlite => {
                 try w.writeAll(" DEFAULT CURRENT_TIMESTAMP");
-                // PG has no ON UPDATE; omit it
+                // PG/SQLite have no ON UPDATE; omit it
             },
         }
     }
@@ -338,6 +378,7 @@ pub const Codegen = struct {
         switch (self.dialect) {
             .mysql => try emitMysqlFieldSuffix(w, field, has_auto_inc, has_pk),
             .postgres => try self.emitPostgresFieldSuffix(w, field, has_auto_inc, has_pk),
+            .sqlite => try emitSqliteFieldSuffix(w, field, has_auto_inc, has_pk),
         }
     }
 
@@ -368,10 +409,24 @@ pub const Codegen = struct {
         }
     }
 
-    // ─── ENUM CHECK constraint for PostgreSQL ──────────────────
+    fn emitSqliteFieldSuffix(w: anytype, field: Field, has_auto_inc: bool, has_pk: bool) !void {
+        // SQLite: PRIMARY KEY AUTOINCREMENT (only valid on INTEGER PRIMARY KEY)
+        if (has_auto_inc and has_pk) {
+            try w.writeAll(" PRIMARY KEY AUTOINCREMENT");
+        } else if (has_pk) {
+            try w.writeAll(" PRIMARY KEY");
+        }
+        if (field.check) |ck| {
+            try w.writeAll(" CHECK (");
+            try generateCheckExpr(w, field.name, ck);
+            try w.writeAll(")");
+        }
+    }
+
+    // ─── ENUM CHECK constraint for PostgreSQL/SQLite ───────────
 
     fn emitEnumCheck(self: Codegen, w: anytype, field: Field) !void {
-        if (self.dialect != .postgres) return;
+        if (self.dialect != .postgres and self.dialect != .sqlite) return;
         if (field.type_info != .enum_type) return;
         const vals = field.type_info.enum_type;
         if (vals.len == 0) return;
@@ -406,6 +461,9 @@ pub const Codegen = struct {
             .postgres => {
                 try w.writeAll(");\n");
             },
+            .sqlite => {
+                try w.writeAll(");\n");
+            },
         }
     }
 
@@ -430,6 +488,53 @@ pub const Codegen = struct {
                     }
                 }
             }
+        }
+    }
+
+    /// Emit SQLite column/table comments as SQL line comments after CREATE TABLE.
+    fn emitSqliteComments(self: Codegen, w: anytype, table: sem.ResolvedTable) !void {
+        if (self.dialect != .sqlite) return;
+        // Table comment
+        if (table.comment) |c| {
+            const comment_text = if (c.len >= 1 and c[0] == ':') c[1..] else c;
+            const trimmed = std.mem.trim(u8, comment_text, " ");
+            if (trimmed.len > 0) {
+                try w.print("-- {s}\n", .{trimmed});
+            }
+        }
+        // Column comments
+        for (table.fields) |field| {
+            if (std.mem.eql(u8, field.name, "...")) continue;
+            if (field.comment) |c| {
+                if (c.len >= 1 and c[0] == ':') {
+                    const trimmed = std.mem.trim(u8, c[1..], " ");
+                    if (trimmed.len > 0) {
+                        try w.print("-- {s}.{s}: {s}\n", .{ table.name, field.name, trimmed });
+                    }
+                }
+            }
+        }
+    }
+
+    /// Emit standalone CREATE INDEX statements for PG/SQLite (after CREATE TABLE).
+    fn emitStandaloneIndexes(self: Codegen, w: anytype, table: sem.ResolvedTable) !void {
+        if (self.dialect == .mysql) return; // MySQL uses inline indexes
+        for (table.indexes) |idx| {
+            if (idx.kind == .primary_key) continue; // PK is inline
+            if (idx.kind == .unique) continue; // UNIQUE is inline in PG/SQLite
+            if (idx.kind == .fulltext) continue; // FULLTEXT not supported in PG/SQLite
+            try w.writeAll("CREATE INDEX ");
+            if (idx.name.len > 0) {
+                try w.print("\"{s}\"", .{idx.name});
+            } else {
+                try w.print("\"idx_{s}_{s}\"", .{ table.name, idx.fields[0] });
+            }
+            try w.print(" ON \"{s}\" (", .{table.name});
+            for (idx.fields, 0..) |f, fi| {
+                if (fi > 0) try w.writeAll(", ");
+                try w.print("\"{s}\"", .{f});
+            }
+            try w.writeAll(");\n");
         }
     }
 
@@ -518,8 +623,8 @@ pub const Codegen = struct {
             // MySQL: inline comment
             try self.emitFieldComment(w, field.comment);
 
-            // PostgreSQL: ENUM CHECK constraint (inline)
-            if (self.dialect == .postgres and field.type_info == .enum_type) {
+            // PostgreSQL/SQLite: ENUM CHECK constraint (inline)
+            if ((self.dialect == .postgres or self.dialect == .sqlite) and field.type_info == .enum_type) {
                 try self.emitEnumCheck(w, field);
             }
         }
@@ -547,6 +652,12 @@ pub const Codegen = struct {
 
         // PostgreSQL: COMMENT ON statements after table
         try self.emitPostgresComments(w, table);
+
+        // SQLite: column/table comments as SQL line comments
+        try self.emitSqliteComments(w, table);
+
+        // PostgreSQL/SQLite: standalone CREATE INDEX statements (after table + comments)
+        try self.emitStandaloneIndexes(w, table);
     }
 
     fn emitDefault(w: anytype, value: []const u8) !void {

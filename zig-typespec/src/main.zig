@@ -47,13 +47,15 @@ pub fn main(init: std.process.Init) !void {
                     dialect = .postgres;
                 } else if (std.mem.eql(u8, d, "mysql")) {
                     dialect = .mysql;
+                } else if (std.mem.eql(u8, d, "sqlite") or std.mem.eql(u8, d, "sq")) {
+                    dialect = .sqlite;
                 } else {
-                    std.debug.print("error: unknown dialect '{s}' (expected: mysql, pg, postgres)\n", .{d});
+                    std.debug.print("error: unknown dialect '{s}' (expected: mysql, pg, postgres, sqlite)\n", .{d});
                     std.process.exit(1);
                 }
                 ai += 1; // skip dialect value
             } else {
-                std.debug.print("error: --dialect requires a value (mysql, pg, postgres)\n", .{});
+                std.debug.print("error: --dialect requires a value (mysql, pg, postgres, sqlite)\n", .{});
                 std.process.exit(1);
             }
         } else {
@@ -129,15 +131,15 @@ pub fn main(init: std.process.Init) !void {
 
 fn printUsage() void {
     std.debug.print("Usage:\n", .{});
-    std.debug.print("  typespec [input.tps] [-o output.sql] [-t] [-d mysql|pg]  Compile .tps to SQL DDL\n", .{});
-    std.debug.print("  typespec diff <old.tps> <new.tps> [-d mysql|pg]         Show schema differences\n", .{});
-    std.debug.print("  typespec migrate <old.tps> <new.tps> [-o migration.sql] [-d mysql|pg]\n", .{});
+    std.debug.print("  typespec [input.tps] [-o output.sql] [-t] [-d mysql|pg|sqlite]  Compile .tps to SQL DDL\n", .{});
+    std.debug.print("  typespec diff <old.tps> <new.tps> [-d mysql|pg|sqlite]         Show schema differences\n", .{});
+    std.debug.print("  typespec migrate <old.tps> <new.tps> [-o migration.sql] [-d mysql|pg|sqlite]\n", .{});
     std.debug.print("                                                           Generate ALTER TABLE migration SQL\n", .{});
-    std.debug.print("  typespec reverse [input.sql] [-o output.tps] [-t] [-d mysql|pg]\n", .{});
+    std.debug.print("  typespec reverse [input.sql] [-o output.tps] [-t] [-d mysql|pg|sqlite]\n", .{});
     std.debug.print("                                                           Reverse SQL DDL to .tps schema\n", .{});
     std.debug.print("                                                           -t: extract shared templates\n", .{});
     std.debug.print("\nOptions:\n", .{});
-    std.debug.print("  -d, --dialect  Target SQL dialect: mysql (default), pg, postgres\n", .{});
+    std.debug.print("  -d, --dialect  Target SQL dialect: mysql (default), pg, postgres, sqlite\n", .{});
     std.debug.print("\nPipe mode: read from stdin when no input file is given.\n", .{});
     std.debug.print("  echo '# t\\nid n' | typespec\n", .{});
     std.debug.print("  cat schema.sql | typespec reverse -t\n", .{});
@@ -263,7 +265,11 @@ fn handleMigrate(io: std.Io, alloc: std.mem.Allocator, old_path: []const u8, new
 }
 
 fn handleReverse(io: std.Io, alloc: std.mem.Allocator, file_data: []const u8, input_name: []const u8, output_path: ?[]const u8, with_templates: bool, dialect: codegen.Dialect) !void {
-    const sql_dialect: sql_parser.Dialect = if (dialect == .postgres) .postgres else .mysql;
+    const sql_dialect: sql_parser.Dialect = switch (dialect) {
+        .postgres => .postgres,
+        .sqlite => .sqlite,
+        .mysql => .mysql,
+    };
     var sp_parser = sql_parser.SqlParser.init(alloc, file_data, sql_dialect);
     const result = sp_parser.parse() catch |err| {
         const lc = sp_parser.lineColAt(sp_parser.pos);

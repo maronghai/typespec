@@ -7,12 +7,13 @@ const TypeInfo = ast_mod.TypeInfo;
 // Single source of truth for tps ↔ SQL type mappings.
 // Used by codegen (forward), reverse_codegen (reverse), and migrate.
 
-pub const Dialect = enum { mysql, postgres };
+pub const Dialect = enum { mysql, postgres, sqlite };
 
 pub const TypeMapping = struct {
     tps: []const u8,
     mysql: []const u8,
     pg: []const u8,
+    sqlite: []const u8,
     /// Reverse-match priority: lower = preferred when multiple SQL types map to same TPS.
     /// Higher-priority entries (lower number) are checked first.
     rev_priority: u32 = 0,
@@ -23,56 +24,56 @@ pub const TypeMapping = struct {
 /// Multi-char entries (e.g. "tinyint", "bytea") are reverse-only (not emitted by forward path).
 pub const TYPE_TABLE = [_]TypeMapping{
     // ─── Core single-char symbols (forward + reverse) ───
-    .{ .tps = "n", .mysql = "int", .pg = "integer", .rev_priority = 10 },
-    .{ .tps = "N", .mysql = "bigint", .pg = "bigint", .rev_priority = 10 },
-    .{ .tps = "m", .mysql = "decimal(16, 2)", .pg = "numeric(16, 2)", .rev_priority = 10 },
-    .{ .tps = "M", .mysql = "decimal(20, 6)", .pg = "numeric(20, 6)", .rev_priority = 10 },
-    .{ .tps = "S", .mysql = "text", .pg = "text", .rev_priority = 10 },
-    .{ .tps = "b", .mysql = "boolean", .pg = "boolean", .rev_priority = 10 },
-    .{ .tps = "B", .mysql = "blob", .pg = "bytea", .rev_priority = 10 },
-    .{ .tps = "j", .mysql = "json", .pg = "json", .rev_priority = 10 },
-    .{ .tps = "d", .mysql = "date", .pg = "date", .rev_priority = 10 },
-    .{ .tps = "t", .mysql = "datetime", .pg = "timestamp", .rev_priority = 10 },
+    .{ .tps = "n", .mysql = "int", .pg = "integer", .sqlite = "INTEGER", .rev_priority = 10 },
+    .{ .tps = "N", .mysql = "bigint", .pg = "bigint", .sqlite = "INTEGER", .rev_priority = 10 },
+    .{ .tps = "m", .mysql = "decimal(16, 2)", .pg = "numeric(16, 2)", .sqlite = "NUMERIC", .rev_priority = 10 },
+    .{ .tps = "M", .mysql = "decimal(20, 6)", .pg = "numeric(20, 6)", .sqlite = "NUMERIC", .rev_priority = 10 },
+    .{ .tps = "S", .mysql = "text", .pg = "text", .sqlite = "TEXT", .rev_priority = 10 },
+    .{ .tps = "b", .mysql = "boolean", .pg = "boolean", .sqlite = "INTEGER", .rev_priority = 10 },
+    .{ .tps = "B", .mysql = "blob", .pg = "bytea", .sqlite = "BLOB", .rev_priority = 10 },
+    .{ .tps = "j", .mysql = "json", .pg = "json", .sqlite = "TEXT", .rev_priority = 10 },
+    .{ .tps = "d", .mysql = "date", .pg = "date", .sqlite = "TEXT", .rev_priority = 10 },
+    .{ .tps = "t", .mysql = "datetime", .pg = "timestamp", .sqlite = "TEXT", .rev_priority = 10 },
 
     // ─── MySQL integer variants → reverse to "n" ───
-    .{ .tps = "n", .mysql = "tinyint", .pg = "smallint", .rev_priority = 20 },
-    .{ .tps = "n", .mysql = "smallint", .pg = "smallint", .rev_priority = 20 },
-    .{ .tps = "n", .mysql = "mediumint", .pg = "integer", .rev_priority = 20 },
+    .{ .tps = "n", .mysql = "tinyint", .pg = "smallint", .sqlite = "INTEGER", .rev_priority = 20 },
+    .{ .tps = "n", .mysql = "smallint", .pg = "smallint", .sqlite = "INTEGER", .rev_priority = 20 },
+    .{ .tps = "n", .mysql = "mediumint", .pg = "integer", .sqlite = "INTEGER", .rev_priority = 20 },
 
     // ─── MySQL BLOB/TEXT variants ───
-    .{ .tps = "B", .mysql = "tinyblob", .pg = "bytea", .rev_priority = 20 },
-    .{ .tps = "B", .mysql = "mediumblob", .pg = "bytea", .rev_priority = 20 },
-    .{ .tps = "B", .mysql = "longblob", .pg = "bytea", .rev_priority = 20 },
-    .{ .tps = "s", .mysql = "tinytext", .pg = "varchar(255)", .rev_priority = 20 },
-    .{ .tps = "S", .mysql = "mediumtext", .pg = "text", .rev_priority = 20 },
-    .{ .tps = "S", .mysql = "longtext", .pg = "text", .rev_priority = 20 },
+    .{ .tps = "B", .mysql = "tinyblob", .pg = "bytea", .sqlite = "BLOB", .rev_priority = 20 },
+    .{ .tps = "B", .mysql = "mediumblob", .pg = "bytea", .sqlite = "BLOB", .rev_priority = 20 },
+    .{ .tps = "B", .mysql = "longblob", .pg = "bytea", .sqlite = "BLOB", .rev_priority = 20 },
+    .{ .tps = "s", .mysql = "tinytext", .pg = "varchar(255)", .sqlite = "TEXT", .rev_priority = 20 },
+    .{ .tps = "S", .mysql = "mediumtext", .pg = "text", .sqlite = "TEXT", .rev_priority = 20 },
+    .{ .tps = "S", .mysql = "longtext", .pg = "text", .sqlite = "TEXT", .rev_priority = 20 },
 
     // ─── MySQL datetime → reverse to "t" ───
-    .{ .tps = "t", .mysql = "datetime", .pg = "timestamp", .rev_priority = 15 },
+    .{ .tps = "t", .mysql = "datetime", .pg = "timestamp", .sqlite = "TEXT", .rev_priority = 15 },
 
     // ─── MySQL-specific → reverse to core types ───
-    .{ .tps = "b", .mysql = "bit(1)", .pg = "boolean", .rev_priority = 15 },
-    .{ .tps = "m", .mysql = "decimal(16,2)", .pg = "numeric(16, 2)", .rev_priority = 15 },
-    .{ .tps = "M", .mysql = "decimal(20,6)", .pg = "numeric(20, 6)", .rev_priority = 15 },
+    .{ .tps = "b", .mysql = "bit(1)", .pg = "boolean", .sqlite = "INTEGER", .rev_priority = 15 },
+    .{ .tps = "m", .mysql = "decimal(16,2)", .pg = "numeric(16, 2)", .sqlite = "NUMERIC", .rev_priority = 15 },
+    .{ .tps = "M", .mysql = "decimal(20,6)", .pg = "numeric(20, 6)", .sqlite = "NUMERIC", .rev_priority = 15 },
 
     // ─── PostgreSQL types → reverse to core types ───
-    .{ .tps = "n", .mysql = "serial", .pg = "serial", .rev_priority = 20 },
-    .{ .tps = "N", .mysql = "bigserial", .pg = "bigserial", .rev_priority = 20 },
-    .{ .tps = "m", .mysql = "numeric", .pg = "numeric", .rev_priority = 20 },
-    .{ .tps = "s", .mysql = "varchar", .pg = "varchar", .rev_priority = 20 },
-    .{ .tps = "b", .mysql = "boolean", .pg = "boolean", .rev_priority = 15 },
-    .{ .tps = "j", .mysql = "jsonb", .pg = "jsonb", .rev_priority = 20 },
-    .{ .tps = "t", .mysql = "timestamp", .pg = "timestamp", .rev_priority = 15 },
-    .{ .tps = "t", .mysql = "timestamp without time zone", .pg = "timestamp without time zone", .rev_priority = 25 },
-    .{ .tps = "t", .mysql = "timestamp with time zone", .pg = "timestamp with time zone", .rev_priority = 25 },
+    .{ .tps = "n", .mysql = "serial", .pg = "serial", .sqlite = "INTEGER", .rev_priority = 20 },
+    .{ .tps = "N", .mysql = "bigserial", .pg = "bigserial", .sqlite = "INTEGER", .rev_priority = 20 },
+    .{ .tps = "m", .mysql = "numeric", .pg = "numeric", .sqlite = "NUMERIC", .rev_priority = 20 },
+    .{ .tps = "s", .mysql = "varchar", .pg = "varchar", .sqlite = "TEXT", .rev_priority = 20 },
+    .{ .tps = "b", .mysql = "boolean", .pg = "boolean", .sqlite = "INTEGER", .rev_priority = 15 },
+    .{ .tps = "j", .mysql = "jsonb", .pg = "jsonb", .sqlite = "TEXT", .rev_priority = 20 },
+    .{ .tps = "t", .mysql = "timestamp", .pg = "timestamp", .sqlite = "TEXT", .rev_priority = 15 },
+    .{ .tps = "t", .mysql = "timestamp without time zone", .pg = "timestamp without time zone", .sqlite = "TEXT", .rev_priority = 25 },
+    .{ .tps = "t", .mysql = "timestamp with time zone", .pg = "timestamp with time zone", .sqlite = "TEXT", .rev_priority = 25 },
 
     // ─── Passthrough types (not in TypeSpec DSL, emitted as-is) ───
-    .{ .tps = "uuid", .mysql = "uuid", .pg = "uuid" },
-    .{ .tps = "real", .mysql = "real", .pg = "real" },
-    .{ .tps = "float4", .mysql = "float4", .pg = "float4" },
-    .{ .tps = "float8", .mysql = "float8", .pg = "float8" },
-    .{ .tps = "float8", .mysql = "double precision", .pg = "double precision" },
-    .{ .tps = "s", .mysql = "character", .pg = "character" },
+    .{ .tps = "uuid", .mysql = "uuid", .pg = "uuid", .sqlite = "TEXT" },
+    .{ .tps = "real", .mysql = "real", .pg = "real", .sqlite = "REAL" },
+    .{ .tps = "float4", .mysql = "float4", .pg = "float4", .sqlite = "REAL" },
+    .{ .tps = "float8", .mysql = "float8", .pg = "float8", .sqlite = "REAL" },
+    .{ .tps = "float8", .mysql = "double precision", .pg = "double precision", .sqlite = "REAL" },
+    .{ .tps = "s", .mysql = "character", .pg = "character", .sqlite = "TEXT" },
 };
 
 // ─── Forward Mapping: TPS → SQL ──────────────────────────────
@@ -89,9 +90,10 @@ pub fn toSqlType(w: anytype, dialect: Dialect, type_info: TypeInfo) !void {
                         const sql_type = switch (dialect) {
                             .mysql => m.mysql,
                             .postgres => m.pg,
+                            .sqlite => m.sqlite,
                         };
-                        // For PG integer, strip display width (PG ignores it)
-                        if (dialect == .postgres and std.mem.startsWith(u8, sql_type, "int(")) {
+                        // For PG/SQLite integer, strip display width (PG/SQLite ignore it)
+                        if (dialect != .mysql and std.mem.startsWith(u8, sql_type, "int(")) {
                             try w.writeAll("integer");
                         } else {
                             try w.writeAll(sql_type);
@@ -116,11 +118,14 @@ pub fn toSqlType(w: anytype, dialect: Dialect, type_info: TypeInfo) !void {
             const type_name: []const u8 = switch (dialect) {
                 .mysql => "decimal",
                 .postgres => "numeric",
+                .sqlite => "NUMERIC",
             };
             try w.print("{s}({d}, {d})", .{ type_name, ds.precision, ds.scale });
         },
         .varchar_explicit => |n| {
-            if (n > 0) {
+            if (dialect == .sqlite) {
+                try w.writeAll("TEXT");
+            } else if (n > 0) {
                 try w.print("varchar({d})", .{n});
             } else {
                 try w.writeAll("varchar(255)");
@@ -136,8 +141,8 @@ pub fn toSqlType(w: anytype, dialect: Dialect, type_info: TypeInfo) !void {
                     }
                     try w.writeAll(")");
                 },
-                .postgres => {
-                    try w.writeAll("text");
+                .postgres, .sqlite => {
+                    try w.writeAll("TEXT");
                 },
             }
         },

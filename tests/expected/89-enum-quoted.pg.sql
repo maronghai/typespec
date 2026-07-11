@@ -4,6 +4,6 @@ CREATE DATABASE "demo" ENCODING 'UTF8';
 
 CREATE TABLE "users" (
   "id" integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-  "role" text CHECK ("role" IN ('admin', 'user', 'guest')),
-  "status" text CHECK ("status" IN ('A', 'B', 'C'))
+  "role" TEXT CHECK ("role" IN ('admin', 'user', 'guest')),
+  "status" TEXT CHECK ("status" IN ('A', 'B', 'C'))
 );

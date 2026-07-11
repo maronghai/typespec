@@ -8,6 +8,6 @@ CREATE TABLE "user" (
   "email" varchar(128),
   "status" integer DEFAULT 0,
   "create_at" timestamp DEFAULT CURRENT_TIMESTAMP,
-  ,
   UNIQUE ("email", "status")
 );
+CREATE INDEX "idx_name_email" ON "user" ("name", "email");

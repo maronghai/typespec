@@ -7,6 +7,6 @@ CREATE TABLE "multi" (
   "name" varchar(32),
   "email" varchar(128),
   "status" integer,
-  ,
   UNIQUE ("email", "status")
 );
+CREATE INDEX "idx_name_email" ON "multi" ("name", "email");

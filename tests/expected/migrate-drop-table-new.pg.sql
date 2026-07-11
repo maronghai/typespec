@@ -6,5 +6,5 @@ CREATE TABLE "user" (
   "id" integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   "name" varchar(32) NOT NULL,
   "email" varchar(64) NOT NULL,
-  UNIQUE (email)
+  UNIQUE ("email")
 );

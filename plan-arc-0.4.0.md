@@ -331,7 +331,7 @@ Phase 1 (拆 parser) ──→ Phase 2 (统一类型映射)
 | Phase 2: 统一类型映射 | type_map.zig | ✅ 完成 — type_map.zig 作为单一数据源，codegen/reverse_codegen/migrate 统一调用 |
 | Phase 3: migrate 接入 AST diff | ALTER TABLE 生成 | ✅ 完成 — 支持 ADD/DROP/MODIFY/RENAME COLUMN + ADD/DROP INDEX + ADD/DROP FK |
 | Phase 4: 错误恢复 | DiagnosticCollector | ✅ 完成 — Collector 就绪，parser 框架可用 |
-| Phase 5: 方言扩展框架 | DialectImpl | ⏸️ 延后 — 当前 2 方言 enum+switch 够用 |
+| Phase 5: 方言扩展框架 | DialectImpl | ✅ 完成 — 以 SQLite 为实例验证三方言架构，Dialect enum + type_map 统一扩展 |
 
 ### Migration 改进效果
 

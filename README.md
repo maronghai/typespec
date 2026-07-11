@@ -471,23 +471,35 @@ Yes. Use `-d pg` or `-d postgres` to generate PostgreSQL DDL:
 ```bash
 typespec schema.tps -d pg          # PostgreSQL output
 typespec schema.tps -d mysql       # MySQL output (default)
+typespec schema.tps -d sqlite      # SQLite output
 typespec reverse -d pg schema.sql  # Reverse-engineer PG DDL
 typespec migrate old.tps new.tps   # Generate ALTER TABLE migration
 ```
 
 Type differences between dialects:
 
-| Symbol | MySQL | PostgreSQL |
-|--------|-------|-----------|
-| `n` | `int` | `integer` |
-| `m` | `decimal(16,2)` | `numeric(16,2)` |
-| `B` | `blob` | `bytea` |
-| `t` | `datetime` | `timestamp` |
-| `b` | `boolean` | `boolean` |
-| `e(...)` | `ENUM(...)` | `text` + `CHECK` |
-| `n++` | `AUTO_INCREMENT` | `GENERATED ALWAYS AS IDENTITY` |
+| Symbol | MySQL | PostgreSQL | SQLite |
+|--------|-------|-----------|--------|
+| `n` | `int` | `integer` | `INTEGER` |
+| `m` | `decimal(16,2)` | `numeric(16,2)` | `NUMERIC` |
+| `B` | `blob` | `bytea` | `BLOB` |
+| `t` | `datetime` | `timestamp` | `TEXT` |
+| `b` | `boolean` | `boolean` | `INTEGER` |
+| `e(...)` | `ENUM(...)` | `text` + `CHECK` | `TEXT` + `CHECK` |
+| `s32` | `varchar(32)` | `varchar(32)` | `TEXT` |
+| `n++` | `AUTO_INCREMENT` | `GENERATED ALWAYS AS IDENTITY` | `PRIMARY KEY AUTOINCREMENT` |
 
 PostgreSQL does not support: `UNSIGNED`, `ENGINE=`, `CHARSET=`, inline `FULLTEXT INDEX`, or `ON UPDATE CURRENT_TIMESTAMP`.
+
+**Q: What about SQLite support?**
+SQLite uses a simplified type affinity system. The compiler maps TypeSpec types to SQLite affinities (`INTEGER`, `NUMERIC`, `TEXT`, `REAL`, `BLOB`). Key differences:
+
+- No `CREATE DATABASE` (file-based)
+- No `COMMENT` syntax
+- No `ENGINE`/`CHARSET` options
+- `AUTOINCREMENT` only works with `INTEGER PRIMARY KEY`
+- Limited `ALTER TABLE` (no `MODIFY COLUMN`, `DROP COLUMN` requires SQLite 3.35+)
+- Enum types become `TEXT` + `CHECK` constraint
 
 **Q: What if a field name ends with `_at`/`_on`/`_id` but isn't a timestamp/foreign key?**
 Use an explicit type to override suffix inference. For example, `point_at s32` → varchar(32).

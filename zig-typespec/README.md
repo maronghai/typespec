@@ -33,7 +33,7 @@ typespec <command> [options]
 |--------|-------------|
 | `-o <file>` | Write output to file instead of stdout |
 | `-t` | Show compilation trace / extract templates (reverse) |
-| `-d, --dialect <dialect>` | Target SQL dialect: `mysql` (default), `pg`, `postgres` |
+| `-d, --dialect <dialect>` | Target SQL dialect: `mysql` (default), `pg`, `postgres`, `sqlite` |
 
 ### Pipe Mode
 
@@ -361,8 +361,10 @@ src/
 ### Golden-file tests (compile)
 
 ```bash
-bash tests/test.sh           # Run all
+bash tests/test.sh           # Run all (MySQL)
 bash tests/test.sh template  # Filter by name
+bash tests/test_postgres.sh  # PostgreSQL tests
+bash tests/test_sqlite.sh    # SQLite tests
 ```
 
 Each test compiles a `.tps` file and diffs the output against `tests/expected/<name>.sql`.
