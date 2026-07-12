@@ -2,6 +2,7 @@ const std = @import("std");
 const sem = @import("semantic.zig");
 const ast_mod = @import("ast.zig");
 const type_map = @import("type_map.zig");
+const dialect_enum = @import("dialect_enum.zig");
 const Writer = std.Io.Writer;
 const Field = ast_mod.Field;
 const TypeInfo = ast_mod.TypeInfo;
@@ -13,7 +14,7 @@ const FkAction = ast_mod.FkAction;
 const IndexDecl = ast_mod.IndexDecl;
 const IndexType = ast_mod.IndexType;
 const SqlComment = ast_mod.SqlComment;
-const Dialect = type_map.Dialect;
+const Dialect = dialect_enum.Dialect;
 
 // ─── TypedAst: Dialect-agnostic IR between Semantic and Codegen ─
 //

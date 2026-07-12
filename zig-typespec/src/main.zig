@@ -257,60 +257,46 @@ fn compilePipeline(io: std.Io, alloc: std.mem.Allocator, file_data: []const u8) 
     return try sa.analyze(tree);
 }
 
+// ─── Trace Helpers (re-run pipeline stages for diagnostic output) ─
+
+fn traceTokenize(io: std.Io, alloc: std.mem.Allocator, file_data: []const u8) ![]tokenizer.Line {
+    _ = io;
+    var lines = try std.ArrayList([]const u8).initCapacity(alloc, 256);
+    var line_it = std.mem.splitScalar(u8, file_data, '\n');
+    while (line_it.next()) |line| {
+        try lines.append(alloc, std.mem.trimEnd(u8, line, "\r"));
+    }
+    const tok = tokenizer.Tokenizer.init(try lines.toOwnedSlice(alloc));
+    return try tok.tokenizeAll(alloc);
+}
+
+fn traceParse(io: std.Io, alloc: std.mem.Allocator, file_data: []const u8) !ast_mod.Ast {
+    const tokenized = try traceTokenize(io, alloc, file_data);
+    var p = parser.Parser.init(alloc);
+    return try p.parse(tokenized);
+}
+
 // ─── Command Handlers ──────────────────────────────────────────
 
 fn handleCompile(io: std.Io, alloc: std.mem.Allocator, file_data: []const u8, input_name: []const u8, output_path: ?[]const u8, trace: bool, dialect: codegen.Dialect) !void {
     _ = input_name;
 
-    // For trace mode, run pipeline stages individually to emit diagnostics
+    const resolved = try compilePipeline(io, alloc, file_data);
+
+    var tr = typed_ast.TypeResolver.init(alloc);
+    const typed = try tr.resolve(resolved, dialect);
+
+    var cg = codegen.Codegen.init(alloc, dialect);
+    const sql = try cg.generateFromTypedAst(typed);
+
     if (trace) {
-        var lines = try std.ArrayList([]const u8).initCapacity(alloc, 256);
-        var line_it = std.mem.splitScalar(u8, file_data, '\n');
-        while (line_it.next()) |line| {
-            try lines.append(alloc, std.mem.trimEnd(u8, line, "\r"));
-        }
-        const tok = tokenizer.Tokenizer.init(try lines.toOwnedSlice(alloc));
-        const tokenized = try tok.tokenizeAll(alloc);
-        tokenizer.Tokenizer.diagnosticTrace(tokenized);
-
-        var p = parser.Parser.init(alloc);
-        const tree = p.parse(tokenized) catch |err| {
-            if (err == error.EmptyField) {
-                diag.printDiagnostic(.{
-                    .severity = .@"error",
-                    .line_no = 0,
-                    .message = "empty field declaration inside block",
-                    .expected = "field name followed by optional type and modifiers",
-                    .actual = "(empty line)",
-                });
-            }
-            return err;
-        };
-        parser.diagnosticTrace(tree);
-
-        var sa = semantic.SemanticAnalyzer.init(alloc);
-        const resolved = try sa.analyze(tree);
+        tokenizer.Tokenizer.diagnosticTrace(try traceTokenize(io, alloc, file_data));
+        parser.diagnosticTrace(try traceParse(io, alloc, file_data));
         semantic.diagnosticTrace(resolved);
-
-        var tr = typed_ast.TypeResolver.init(alloc);
-        const typed = try tr.resolve(resolved, dialect);
-
-        var cg = codegen.Codegen.init(alloc, dialect);
-        const sql = try cg.generateFromTypedAst(typed);
         codegen.diagnosticTrace(sql);
-
-        try writeOutput(io, sql, output_path);
-    } else {
-        const resolved = try compilePipeline(io, alloc, file_data);
-
-        var tr = typed_ast.TypeResolver.init(alloc);
-        const typed = try tr.resolve(resolved, dialect);
-
-        var cg = codegen.Codegen.init(alloc, dialect);
-        const sql = try cg.generateFromTypedAst(typed);
-
-        try writeOutput(io, sql, output_path);
     }
+
+    try writeOutput(io, sql, output_path);
 }
 
 fn compileToAst(io: std.Io, alloc: std.mem.Allocator, path: []const u8) !semantic.ResolvedAst {

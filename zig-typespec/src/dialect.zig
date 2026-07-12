@@ -1,10 +1,11 @@
 const std = @import("std");
 const ast_mod = @import("ast.zig");
 const type_map = @import("type_map.zig");
+const dialect_enum = @import("dialect_enum.zig");
 const Writer = std.Io.Writer;
 const IndexDecl = ast_mod.IndexDecl;
 const CheckConstraint = ast_mod.CheckConstraint;
-const Dialect = type_map.Dialect;
+const Dialect = dialect_enum.Dialect;
 
 // ─── DialectBackend: vtable for dialect-specific SQL generation ─
 //
@@ -351,7 +352,7 @@ fn mysqlNoopInlineColumnIndex(_: *Writer, _: []const u8, _: []const u8) anyerror
 
 fn pgSqliteEmitInlineColumnStandaloneIndex(w: *Writer, table_name: []const u8, col_name: []const u8) anyerror!void {
     try w.writeAll("CREATE INDEX ");
-    try pgSqliteQuoteIdent(w, try std.fmt.allocPrint(std.heap.page_allocator, "idx_{s}_{s}", .{ table_name, col_name }));
+    try w.print("\"idx_{s}_{s}\"", .{ table_name, col_name });
     try w.writeAll(" ON ");
     try pgSqliteQuoteIdent(w, table_name);
     try w.writeAll(" (");

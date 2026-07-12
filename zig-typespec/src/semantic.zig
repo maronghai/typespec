@@ -1,5 +1,6 @@
 const std = @import("std");
 const ast_mod = @import("ast.zig");
+const diag = @import("diagnostic.zig");
 const Ast = ast_mod.Ast;
 const Template = ast_mod.Template;
 const Table = ast_mod.Table;
@@ -38,6 +39,7 @@ pub const PassContext = struct {
     tables: *std.ArrayList(ResolvedTable),
     schema: ?ast_mod.Schema,
     templates: std.StringHashMap(*const Template) = undefined, // set by analyze()
+    diagnostics: *diag.DiagnosticCollector = undefined, // set by analyze()
 };
 
 /// A semantic analysis pass that transforms the tables in PassContext.
@@ -118,15 +120,20 @@ pub const SemanticAnalyzer = struct {
         }
 
         // Run registered passes (autofk, suffix_inference, validate, ...)
+        var diagnostics = diag.DiagnosticCollector.init(self.alloc);
         var ctx = PassContext{
             .alloc = self.alloc,
             .tables = &tables,
             .schema = tree.schema,
             .templates = tmpl_map,
+            .diagnostics = &diagnostics,
         };
         for (DEFAULT_PASSES) |pass| {
             try pass.run(&ctx);
         }
+
+        // Print collected diagnostics (warnings + errors from validation pass)
+        diagnostics.printAll();
 
         return .{
             .schema_name = if (tree.schema) |s| s.name else null,
@@ -380,11 +387,12 @@ fn runValidate(ctx: *PassContext) !void {
         defer field_names.deinit();
         for (table.fields, 0..) |field, fi| {
             if (std.mem.eql(u8, field.name, "...")) continue;
-            if (field_names.get(field.name)) |prev_idx| {
-                // Duplicate field name — emit warning via stderr
-                // (previous field at prev_idx, duplicate at fi)
-                _ = prev_idx;
-                std.debug.print("warning: duplicate field '{s}' in table '{s}' (later definition overrides earlier)\n", .{ field.name, table.name });
+            if (field_names.get(field.name)) |_| {
+                ctx.diagnostics.push(.{
+                    .severity = .warning,
+                    .line_no = field.line_no,
+                    .message = try std.fmt.allocPrint(ctx.alloc, "duplicate field '{s}' in table '{s}'", .{ field.name, table.name }),
+                });
             }
             try field_names.put(field.name, fi);
         }
@@ -392,7 +400,6 @@ fn runValidate(ctx: *PassContext) !void {
         // Validate FK references
         for (table.fks) |fk| {
             for (fk.fields) |fk_field| {
-                // Check that the FK field exists in this table
                 var found = false;
                 for (table.fields) |field| {
                     if (std.mem.eql(u8, field.name, fk_field)) {
@@ -401,12 +408,19 @@ fn runValidate(ctx: *PassContext) !void {
                     }
                 }
                 if (!found) {
-                    std.debug.print("error: FK field '{s}' not found in table '{s}'\n", .{ fk_field, table.name });
+                    ctx.diagnostics.push(.{
+                        .severity = .@"error",
+                        .line_no = table.line_no,
+                        .message = try std.fmt.allocPrint(ctx.alloc, "FK field '{s}' not found in table '{s}'", .{ fk_field, table.name }),
+                    });
                 }
             }
-            // Check that the referenced table exists
             if (fk.ref_table.len > 0 and !table_names.contains(fk.ref_table)) {
-                std.debug.print("error: FK references non-existent table '{s}' in table '{s}'\n", .{ fk.ref_table, table.name });
+                ctx.diagnostics.push(.{
+                    .severity = .@"error",
+                    .line_no = table.line_no,
+                    .message = try std.fmt.allocPrint(ctx.alloc, "FK references non-existent table '{s}' in table '{s}'", .{ fk.ref_table, table.name }),
+                });
             }
         }
 
@@ -414,7 +428,7 @@ fn runValidate(ctx: *PassContext) !void {
         for (table.fields) |field| {
             if (field.fk) |fk| {
                 for (fk.fields) |fk_field| {
-                    if (!std.mem.eql(u8, fk_field, field.name)) continue; // skip inferred fields
+                    if (!std.mem.eql(u8, fk_field, field.name)) continue;
                     var found = false;
                     for (table.fields) |f| {
                         if (std.mem.eql(u8, f.name, fk_field)) {
@@ -423,20 +437,23 @@ fn runValidate(ctx: *PassContext) !void {
                         }
                     }
                     if (!found) {
-                        std.debug.print("error: inline FK field '{s}' not found in table '{s}'\n", .{ fk_field, table.name });
+                        ctx.diagnostics.push(.{
+                            .severity = .@"error",
+                            .line_no = table.line_no,
+                            .message = try std.fmt.allocPrint(ctx.alloc, "inline FK field '{s}' not found in table '{s}'", .{ fk_field, table.name }),
+                        });
                     }
                 }
                 if (fk.ref_table.len > 0 and !table_names.contains(fk.ref_table)) {
-                    std.debug.print("error: inline FK references non-existent table '{s}' in table '{s}'\n", .{ fk.ref_table, table.name });
+                    ctx.diagnostics.push(.{
+                        .severity = .@"error",
+                        .line_no = table.line_no,
+                        .message = try std.fmt.allocPrint(ctx.alloc, "inline FK references non-existent table '{s}' in table '{s}'", .{ fk.ref_table, table.name }),
+                    });
                 }
             }
         }
     }
-
-    // 3. Validate template references in tables (via templates map)
-    // Note: template references are already resolved by the semantic analyzer,
-    // so we validate against the original templates map if available.
-    // This check is informational — unresolved templates silently produce empty tables.
 }
 
 // ─── Diagnostic ──────────────────────────────────────────────
@@ -691,4 +708,284 @@ test "template application: fields merged in order" {
     try testing.expectEqualStrings("id", result.tables[0].fields[0].name);
     try testing.expectEqualStrings("name", result.tables[0].fields[1].name);
     try testing.expectEqualStrings("status", result.tables[0].fields[2].name);
+}
+
+// ─── Additional template/semantic tests ──────────────────────
+
+test "template: slot at start" {
+    const alloc = testing.allocator;
+
+    // Template: ... (slot at 0), then id, status
+    const tmpl_fields = try alloc.alloc(Field, 3);
+    tmpl_fields[0] = makeTestField("...", .none);
+    tmpl_fields[1] = makeTestField("id", .{ .simple = "n" });
+    tmpl_fields[2] = makeTestField("status", .{ .simple = "1" });
+
+    const tmpl = ast_mod.Template{
+        .name = "base",
+        .parents = &.{},
+        .fields = tmpl_fields,
+        .slot_index = 0,
+    };
+
+    const table_fields = try alloc.alloc(Field, 1);
+    table_fields[0] = makeTestField("name", .{ .varchar_explicit = 32 });
+
+    const table = ast_mod.Table{
+        .name = "user",
+        .template_ref = "base",
+        .comment = null,
+        .engine = null,
+        .fields = table_fields,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
+    };
+
+    const ast = makeTestAst(alloc, try alloc.dupe(ast_mod.Table, &.{table}), try alloc.dupe(ast_mod.Template, &.{tmpl}));
+    var sa = SemanticAnalyzer.init(alloc);
+    const result = try sa.analyze(ast);
+
+    // Concrete fields come first (slot at 0), then template fields after slot
+    try testing.expectEqual(@as(usize, 3), result.tables[0].fields.len);
+    try testing.expectEqualStrings("name", result.tables[0].fields[0].name);
+    try testing.expectEqualStrings("id", result.tables[0].fields[1].name);
+    try testing.expectEqualStrings("status", result.tables[0].fields[2].name);
+}
+
+test "template: slot at end" {
+    const alloc = testing.allocator;
+
+    // Template: id, status, ...
+    const tmpl_fields = try alloc.alloc(Field, 3);
+    tmpl_fields[0] = makeTestField("id", .{ .simple = "n" });
+    tmpl_fields[1] = makeTestField("status", .{ .simple = "1" });
+    tmpl_fields[2] = makeTestField("...", .none);
+
+    const tmpl = ast_mod.Template{
+        .name = "base",
+        .parents = &.{},
+        .fields = tmpl_fields,
+        .slot_index = 2,
+    };
+
+    const table_fields = try alloc.alloc(Field, 1);
+    table_fields[0] = makeTestField("name", .{ .varchar_explicit = 32 });
+
+    const table = ast_mod.Table{
+        .name = "user",
+        .template_ref = "base",
+        .comment = null,
+        .engine = null,
+        .fields = table_fields,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
+    };
+
+    const ast = makeTestAst(alloc, try alloc.dupe(ast_mod.Table, &.{table}), try alloc.dupe(ast_mod.Template, &.{tmpl}));
+    var sa = SemanticAnalyzer.init(alloc);
+    const result = try sa.analyze(ast);
+
+    // Template fields before slot, then concrete, then nothing after
+    try testing.expectEqual(@as(usize, 3), result.tables[0].fields.len);
+    try testing.expectEqualStrings("id", result.tables[0].fields[0].name);
+    try testing.expectEqualStrings("status", result.tables[0].fields[1].name);
+    try testing.expectEqualStrings("name", result.tables[0].fields[2].name);
+}
+
+test "template: child overrides parent field with same name" {
+    const alloc = testing.allocator;
+
+    // Parent template: id, status
+    const parent_fields = try alloc.alloc(Field, 2);
+    parent_fields[0] = makeTestField("id", .{ .simple = "n" });
+    parent_fields[1] = makeTestField("status", .{ .simple = "1" });
+
+    const parent_tmpl = ast_mod.Template{
+        .name = "base",
+        .parents = &.{},
+        .fields = parent_fields,
+        .slot_index = null,
+    };
+
+    // Child template inherits base, overrides status
+    const child_fields = try alloc.alloc(Field, 2);
+    child_fields[0] = makeTestField("status", .{ .simple = "2" });
+    child_fields[1] = makeTestField("name", .{ .simple = "s" });
+
+    const child_tmpl = ast_mod.Template{
+        .name = "audit",
+        .parents = &.{ "base" },
+        .fields = child_fields,
+        .slot_index = null,
+    };
+
+    const table = ast_mod.Table{
+        .name = "user",
+        .template_ref = "audit",
+        .comment = null,
+        .engine = null,
+        .fields = &.{},
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
+    };
+
+    const ast = makeTestAst(alloc, try alloc.dupe(ast_mod.Table, &.{table}), try alloc.dupe(ast_mod.Template, &.{ parent_tmpl, child_tmpl }));
+    var sa = SemanticAnalyzer.init(alloc);
+    const result = try sa.analyze(ast);
+
+    // id from parent, status from child (override), name from child
+    try testing.expectEqual(@as(usize, 3), result.tables[0].fields.len);
+    try testing.expectEqualStrings("id", result.tables[0].fields[0].name);
+    try testing.expectEqualStrings("status", result.tables[0].fields[1].name);
+    try testing.expectEqualStrings("2", result.tables[0].fields[1].type_info.simple);
+    try testing.expectEqualStrings("name", result.tables[0].fields[2].name);
+}
+
+test "template: 3-level inheritance" {
+    const alloc = testing.allocator;
+
+    // grandparent: id
+    const gp_fields = try alloc.alloc(Field, 1);
+    gp_fields[0] = makeTestField("id", .{ .simple = "n" });
+
+    const gp_tmpl = ast_mod.Template{
+        .name = "gp",
+        .parents = &.{},
+        .fields = gp_fields,
+        .slot_index = null,
+    };
+
+    // parent: inherits gp, adds status
+    const p_fields = try alloc.alloc(Field, 1);
+    p_fields[0] = makeTestField("status", .{ .simple = "1" });
+
+    const p_tmpl = ast_mod.Template{
+        .name = "p",
+        .parents = &.{ "gp" },
+        .fields = p_fields,
+        .slot_index = null,
+    };
+
+    // child: inherits p, adds name
+    const c_fields = try alloc.alloc(Field, 1);
+    c_fields[0] = makeTestField("name", .{ .simple = "s" });
+
+    const c_tmpl = ast_mod.Template{
+        .name = "c",
+        .parents = &.{ "p" },
+        .fields = c_fields,
+        .slot_index = null,
+    };
+
+    const table = ast_mod.Table{
+        .name = "t",
+        .template_ref = "c",
+        .comment = null,
+        .engine = null,
+        .fields = &.{},
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
+    };
+
+    const ast = makeTestAst(alloc, try alloc.dupe(ast_mod.Table, &.{table}), try alloc.dupe(ast_mod.Template, &.{ gp_tmpl, p_tmpl, c_tmpl }));
+    var sa = SemanticAnalyzer.init(alloc);
+    const result = try sa.analyze(ast);
+
+    // id from grandparent, status from parent, name from child
+    try testing.expectEqual(@as(usize, 3), result.tables[0].fields.len);
+    try testing.expectEqualStrings("id", result.tables[0].fields[0].name);
+    try testing.expectEqualStrings("status", result.tables[0].fields[1].name);
+    try testing.expectEqualStrings("name", result.tables[0].fields[2].name);
+}
+
+test "template: empty fields template" {
+    const alloc = testing.allocator;
+
+    const tmpl = ast_mod.Template{
+        .name = "empty",
+        .parents = &.{},
+        .fields = &.{},
+        .slot_index = null,
+    };
+
+    const table_fields = try alloc.alloc(Field, 2);
+    table_fields[0] = makeTestField("id", .{ .simple = "n" });
+    table_fields[1] = makeTestField("name", .{ .simple = "s" });
+
+    const table = ast_mod.Table{
+        .name = "t",
+        .template_ref = "empty",
+        .comment = null,
+        .engine = null,
+        .fields = table_fields,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
+    };
+
+    const ast = makeTestAst(alloc, try alloc.dupe(ast_mod.Table, &.{table}), try alloc.dupe(ast_mod.Template, &.{tmpl}));
+    var sa = SemanticAnalyzer.init(alloc);
+    const result = try sa.analyze(ast);
+
+    // Table keeps its own fields even with empty template
+    try testing.expectEqual(@as(usize, 2), result.tables[0].fields.len);
+    try testing.expectEqualStrings("id", result.tables[0].fields[0].name);
+    try testing.expectEqualStrings("name", result.tables[0].fields[1].name);
+}
+
+test "template: multiple mixins" {
+    const alloc = testing.allocator;
+
+    // mixin1: created_at
+    const m1_fields = try alloc.alloc(Field, 1);
+    m1_fields[0] = makeTestField("created_at", .none);
+    const m1 = ast_mod.Template{
+        .name = "timestamps",
+        .parents = &.{},
+        .fields = m1_fields,
+        .slot_index = null,
+    };
+
+    // mixin2: deleted_at
+    const m2_fields = try alloc.alloc(Field, 1);
+    m2_fields[0] = makeTestField("deleted_at", .none);
+    const m2 = ast_mod.Template{
+        .name = "softdel",
+        .parents = &.{},
+        .fields = m2_fields,
+        .slot_index = null,
+    };
+
+    // audit inherits both mixins
+    const audit_fields = try alloc.alloc(Field, 0);
+    const audit = ast_mod.Template{
+        .name = "audit",
+        .parents = &.{ "timestamps", "softdel" },
+        .fields = audit_fields,
+        .slot_index = null,
+    };
+
+    const table = ast_mod.Table{
+        .name = "t",
+        .template_ref = "audit",
+        .comment = null,
+        .engine = null,
+        .fields = &.{},
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
+    };
+
+    const ast = makeTestAst(alloc, try alloc.dupe(ast_mod.Table, &.{table}), try alloc.dupe(ast_mod.Template, &.{ m1, m2, audit }));
+    var sa = SemanticAnalyzer.init(alloc);
+    const result = try sa.analyze(ast);
+
+    // Both mixin fields should be present
+    try testing.expectEqual(@as(usize, 2), result.tables[0].fields.len);
+    try testing.expectEqualStrings("created_at", result.tables[0].fields[0].name);
+    try testing.expectEqualStrings("deleted_at", result.tables[0].fields[1].name);
 }

@@ -1,75 +1,21 @@
 const std = @import("std");
+const common = @import("sql_parser_common.zig");
 const ast_mod = @import("ast.zig");
-const type_map = @import("type_map.zig");
-pub const Dialect = type_map.Dialect;
-pub const IndexKind = ast_mod.IndexType;
-pub const FkActionType = ast_mod.FkActionType;
-pub const FkActionTrigger = ast_mod.FkActionTrigger;
-pub const FkAction = ast_mod.FkAction;
 
-// ─── SQL IR Types ────────────────────────────────────────────────
-
-pub const SqlColumn = struct {
-    name: []const u8,
-    type_sql: []const u8,
-    nullable: bool,
-    unsigned: bool,
-    auto_increment: bool,
-    primary_key: bool,
-    on_update_current_timestamp: bool,
-    default_val: ?[]const u8,
-    check_expr: ?[]const u8,
-    comment: ?[]const u8,
-};
-
-pub const SqlIndex = struct {
-    kind: IndexKind,
-    name: []const u8,
-    fields: []const []const u8,
-    descending: []const bool,
-};
-
-pub const SqlForeignKey = struct {
-    fields: []const []const u8,
-    ref_table: []const u8,
-    ref_fields: []const []const u8,
-    actions: []const FkAction,
-};
-
-pub const SqlCheck = struct {
-    field_name: []const u8,
-    expr: []const u8,
-};
-
-pub const SqlTable = struct {
-    name: []const u8,
-    engine: ?[]const u8,
-    charset: ?[]const u8,
-    comment: ?[]const u8,
-    columns: []SqlColumn,
-    indexes: []const SqlIndex,
-    foreign_keys: []const SqlForeignKey,
-    checks: []const SqlCheck,
-};
-
-pub const SqlSchema = struct {
-    name: ?[]const u8,
-    charset: ?[]const u8,
-    tables: []const SqlTable,
-};
-
-pub const SqlDiagnostic = struct {
-    severity: enum { warning, @"error" },
-    line_no: usize,
-    col: usize,
-    message: []const u8,
-    context: ?[]const u8 = null,
-};
-
-pub const SqlParseResult = struct {
-    schema: SqlSchema,
-    diagnostics: []const SqlDiagnostic,
-};
+// Re-export common types for backward compatibility
+pub const Dialect = common.Dialect;
+pub const IndexKind = common.IndexKind;
+pub const FkActionType = common.FkActionType;
+pub const FkActionTrigger = common.FkActionTrigger;
+pub const FkAction = common.FkAction;
+pub const SqlColumn = common.SqlColumn;
+pub const SqlIndex = common.SqlIndex;
+pub const SqlForeignKey = common.SqlForeignKey;
+pub const SqlCheck = common.SqlCheck;
+pub const SqlTable = common.SqlTable;
+pub const SqlSchema = common.SqlSchema;
+pub const SqlDiagnostic = common.SqlDiagnostic;
+pub const SqlParseResult = common.SqlParseResult;
 
 // ─── SQL DDL Parser ──────────────────────────────────────────────
 

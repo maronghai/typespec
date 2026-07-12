@@ -1,13 +1,15 @@
 const std = @import("std");
 const ast_mod = @import("ast.zig");
 const TypeInfo = ast_mod.TypeInfo;
+const dialect_enum = @import("dialect_enum.zig");
+const sqlite_hints = @import("sqlite_hints.zig");
 
 // ─── Unified Type Mapping ────────────────────────────────────
 //
 // Single source of truth for tps ↔ SQL type mappings.
 // Used by codegen (forward), reverse_codegen (reverse), and migrate.
 
-pub const Dialect = enum { mysql, postgres, sqlite };
+pub const Dialect = dialect_enum.Dialect;
 
 pub const TypeMapping = struct {
     tps: []const u8,
@@ -315,68 +317,10 @@ fn reverseLookupSqlite(t: []const u8, col_name: []const u8, is_auto_inc: bool, i
 }
 
 // ─── SQLite column name heuristics ───────────────────────────
-
-fn isBooleanColumnName(name: []const u8) bool {
-    return std.mem.startsWith(u8, name, "is_") or
-        std.mem.startsWith(u8, name, "has_") or
-        std.mem.startsWith(u8, name, "can_") or
-        std.mem.startsWith(u8, name, "should_") or
-        std.mem.startsWith(u8, name, "was_") or
-        std.mem.startsWith(u8, name, "did_") or
-        std.mem.startsWith(u8, name, "enable") or
-        std.mem.startsWith(u8, name, "active") or
-        std.mem.eql(u8, name, "deleted") or
-        std.mem.eql(u8, name, "is_deleted") or
-        std.mem.eql(u8, name, "is_removed") or
-        std.mem.eql(u8, name, "is_enabled") or
-        std.mem.eql(u8, name, "is_active") or
-        std.mem.eql(u8, name, "is_valid") or
-        std.mem.eql(u8, name, "is_deleted");
-}
-
-fn isJsonColumnName(name: []const u8) bool {
-    return std.mem.eql(u8, name, "settings") or
-        std.mem.eql(u8, name, "data") or
-        std.mem.eql(u8, name, "metadata") or
-        std.mem.eql(u8, name, "config") or
-        std.mem.eql(u8, name, "extra") or
-        std.mem.eql(u8, name, "params") or
-        std.mem.eql(u8, name, "options") or
-        std.mem.eql(u8, name, "json") or
-        std.mem.eql(u8, name, "props") or
-        std.mem.eql(u8, name, "attrs") or
-        std.mem.eql(u8, name, "properties") or
-        std.mem.endsWith(u8, name, "_json") or
-        std.mem.endsWith(u8, name, "_data") or
-        std.mem.endsWith(u8, name, "_meta") or
-        std.mem.endsWith(u8, name, "_config") or
-        std.mem.endsWith(u8, name, "_settings") or
-        std.mem.endsWith(u8, name, "_extra") or
-        std.mem.endsWith(u8, name, "_options");
-}
-
-fn isTextColumnName(name: []const u8) bool {
-    return std.mem.eql(u8, name, "description") or
-        std.mem.eql(u8, name, "content") or
-        std.mem.eql(u8, name, "note") or
-        std.mem.eql(u8, name, "notes") or
-        std.mem.eql(u8, name, "bio") or
-        std.mem.eql(u8, name, "summary") or
-        std.mem.eql(u8, name, "body") or
-        std.mem.eql(u8, name, "text") or
-        std.mem.eql(u8, name, "detail") or
-        std.mem.eql(u8, name, "remark") or
-        std.mem.eql(u8, name, "remarks") or
-        std.mem.eql(u8, name, "message") or
-        std.mem.eql(u8, name, "memo") or
-        std.mem.eql(u8, name, "address") or
-        std.mem.endsWith(u8, name, "_desc") or
-        std.mem.endsWith(u8, name, "_text") or
-        std.mem.endsWith(u8, name, "_content") or
-        std.mem.endsWith(u8, name, "_note") or
-        std.mem.endsWith(u8, name, "_body") or
-        std.mem.endsWith(u8, name, "_remark");
-}
+// Delegated to sqlite_hints.zig for single-responsibility.
+const isBooleanColumnName = sqlite_hints.isBooleanColumnName;
+const isJsonColumnName = sqlite_hints.isJsonColumnName;
+const isTextColumnName = sqlite_hints.isTextColumnName;
 
 // ─── Helper: can omit type symbol in .tps output ─────────────
 
@@ -392,16 +336,8 @@ pub fn canOmitType(col_name: []const u8, tps_symbol: []const u8, is_auto_inc: bo
 
 // ─── Helper: classify SQL type strings ───────────────────────
 
-pub fn isDatetimeSqlType(sql_type: []const u8) bool {
-    const t = std.mem.trim(u8, sql_type, " \t");
-    return std.mem.eql(u8, t, "datetime") or std.mem.eql(u8, t, "timestamp") or
-        std.mem.eql(u8, t, "timestamp without time zone") or
-        std.mem.eql(u8, t, "timestamp with time zone");
-}
-
-pub fn isCurrentTimestamp(dv: []const u8) bool {
-    return std.mem.eql(u8, dv, "CURRENT_TIMESTAMP") or std.mem.eql(u8, dv, "now()");
-}
+pub const isDatetimeSqlType = sqlite_hints.isDatetimeSqlType;
+pub const isCurrentTimestamp = sqlite_hints.isCurrentTimestamp;
 
 // ─── Helper: classify TPS type symbols ───────────────────────
 

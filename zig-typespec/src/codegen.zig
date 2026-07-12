@@ -2,11 +2,12 @@ const std = @import("std");
 const ast_mod = @import("ast.zig");
 const type_map = @import("type_map.zig");
 const dialect_mod = @import("dialect.zig");
+const dialect_enum = @import("dialect_enum.zig");
 const typed_ast_mod = @import("typed_ast.zig");
 const CheckConstraint = ast_mod.CheckConstraint;
 const Writer = std.Io.Writer;
 
-pub const Dialect = type_map.Dialect;
+pub const Dialect = dialect_enum.Dialect;
 
 pub const Codegen = struct {
     alloc: std.mem.Allocator,
@@ -411,4 +412,197 @@ test "codegen: emitColumnDef PG omits UNSIGNED" {
 
     try testing.expect(std.mem.indexOf(u8, result, "UNSIGNED") == null);
     try testing.expect(std.mem.indexOf(u8, result, "\"count\"") != null);
+}
+
+// ─── Additional codegen dialect tests ────────────────────────────
+
+test "codegen: SQLite AUTOINCREMENT in PRIMARY KEY" {
+    const alloc = testing.allocator;
+    const cols = try alloc.alloc(typed_ast_mod.TypedColumn, 1);
+    cols[0] = makeTestColumn("id", "INTEGER");
+    cols[0].primary_key = true;
+    cols[0].auto_increment = true;
+
+    const table = typed_ast_mod.TypedTable{
+        .name = "item",
+        .comment = null,
+        .engine = null,
+        .columns = cols,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
+    };
+
+    const tables = try alloc.dupe(typed_ast_mod.TypedTable, &.{table});
+    const typed = typed_ast_mod.TypedAst{
+        .schema_name = null,
+        .schema_charset = null,
+        .tables = tables,
+        .sql_comments = &.{},
+    };
+
+    var cg = Codegen.init(alloc, .sqlite);
+    const sql = try cg.generateFromTypedAst(typed);
+
+    try testing.expect(std.mem.indexOf(u8, sql, "PRIMARY KEY AUTOINCREMENT") != null);
+    try testing.expect(std.mem.indexOf(u8, sql, "\"item\"") != null);
+}
+
+test "codegen: PG standalone COMMENT ON TABLE" {
+    const alloc = testing.allocator;
+    const cols = try alloc.alloc(typed_ast_mod.TypedColumn, 1);
+    cols[0] = makeTestColumn("id", "integer");
+    cols[0].primary_key = true;
+
+    const table = typed_ast_mod.TypedTable{
+        .name = "users",
+        .comment = "User accounts",
+        .engine = null,
+        .columns = cols,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
+    };
+
+    const tables = try alloc.dupe(typed_ast_mod.TypedTable, &.{table});
+    const typed = typed_ast_mod.TypedAst{
+        .schema_name = null,
+        .schema_charset = null,
+        .tables = tables,
+        .sql_comments = &.{},
+    };
+
+    var cg = Codegen.init(alloc, .postgres);
+    const sql = try cg.generateFromTypedAst(typed);
+
+    try testing.expect(std.mem.indexOf(u8, sql, "COMMENT ON TABLE") != null);
+    try testing.expect(std.mem.indexOf(u8, sql, "'User accounts'") != null);
+}
+
+test "codegen: SQLite COMMENT uses -- style" {
+    const alloc = testing.allocator;
+    const cols = try alloc.alloc(typed_ast_mod.TypedColumn, 1);
+    cols[0] = makeTestColumn("id", "INTEGER");
+    cols[0].primary_key = true;
+
+    const table = typed_ast_mod.TypedTable{
+        .name = "logs",
+        .comment = "Log entries",
+        .engine = null,
+        .columns = cols,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
+    };
+
+    const tables = try alloc.dupe(typed_ast_mod.TypedTable, &.{table});
+    const typed = typed_ast_mod.TypedAst{
+        .schema_name = null,
+        .schema_charset = null,
+        .tables = tables,
+        .sql_comments = &.{},
+    };
+
+    var cg = Codegen.init(alloc, .sqlite);
+    const sql = try cg.generateFromTypedAst(typed);
+
+    try testing.expect(std.mem.indexOf(u8, sql, "-- Log entries") != null);
+    // SQLite should NOT have COMMENT ON
+    try testing.expect(std.mem.indexOf(u8, sql, "COMMENT ON") == null);
+}
+
+test "codegen: check expression BETWEEN" {
+    const alloc = testing.allocator;
+    var aw = std.Io.Writer.Allocating.init(alloc);
+    const w = &aw.writer;
+
+    var cg = Codegen.init(alloc, .mysql);
+    try cg.emitCheckExpr(w, "age", .{ .kind = .range, .expr = "0,150", .line_no = 1 });
+    try w.flush();
+
+    var out = aw.toArrayList();
+    const result = try out.toOwnedSlice(alloc);
+
+    try testing.expect(std.mem.indexOf(u8, result, "age BETWEEN 0 AND 150") != null);
+}
+
+test "codegen: check expression IN list" {
+    const alloc = testing.allocator;
+    var aw = std.Io.Writer.Allocating.init(alloc);
+    const w = &aw.writer;
+
+    var cg = Codegen.init(alloc, .mysql);
+    try cg.emitCheckExpr(w, "status", .{ .kind = .in_list, .expr = "'active','inactive','banned'", .line_no = 1 });
+    try w.flush();
+
+    var out = aw.toArrayList();
+    const result = try out.toOwnedSlice(alloc);
+
+    try testing.expect(std.mem.indexOf(u8, result, "status IN (") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "'active'") != null);
+}
+
+test "codegen: PG uses double quotes, no backticks" {
+    const alloc = testing.allocator;
+    const cols = try alloc.alloc(typed_ast_mod.TypedColumn, 2);
+    cols[0] = makeTestColumn("id", "serial");
+    cols[0].primary_key = true;
+    cols[1] = makeTestColumn("order", "text");
+
+    const table = typed_ast_mod.TypedTable{
+        .name = "items",
+        .comment = null,
+        .engine = null,
+        .columns = cols,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
+    };
+
+    const tables = try alloc.dupe(typed_ast_mod.TypedTable, &.{table});
+    const typed = typed_ast_mod.TypedAst{
+        .schema_name = null,
+        .schema_charset = null,
+        .tables = tables,
+        .sql_comments = &.{},
+    };
+
+    var cg = Codegen.init(alloc, .postgres);
+    const sql = try cg.generateFromTypedAst(typed);
+
+    try testing.expect(std.mem.indexOf(u8, sql, "\"items\"") != null);
+    try testing.expect(std.mem.indexOf(u8, sql, "\"order\"") != null);
+    // No backticks in PG output
+    try testing.expect(std.mem.indexOf(u8, sql, "`") == null);
+}
+
+test "codegen: MySQL ENGINE in table footer" {
+    const alloc = testing.allocator;
+    const cols = try alloc.alloc(typed_ast_mod.TypedColumn, 1);
+    cols[0] = makeTestColumn("id", "int");
+    cols[0].primary_key = true;
+
+    const table = typed_ast_mod.TypedTable{
+        .name = "t",
+        .comment = null,
+        .engine = "MyISAM",
+        .columns = cols,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
+    };
+
+    const tables = try alloc.dupe(typed_ast_mod.TypedTable, &.{table});
+    const typed = typed_ast_mod.TypedAst{
+        .schema_name = null,
+        .schema_charset = null,
+        .tables = tables,
+        .sql_comments = &.{},
+    };
+
+    var cg = Codegen.init(alloc, .mysql);
+    const sql = try cg.generateFromTypedAst(typed);
+
+    try testing.expect(std.mem.indexOf(u8, sql, "ENGINE=MyISAM") != null);
+    try testing.expect(std.mem.indexOf(u8, sql, "DEFAULT CHARSET=utf8mb4") != null);
 }

@@ -110,7 +110,7 @@ pub const DiagnosticCollector = struct {
 
     pub fn init(alloc: std.mem.Allocator) DiagnosticCollector {
         return .{
-            .diagnostics = std.ArrayList(Diagnostic).init(alloc),
+            .diagnostics = std.ArrayList(Diagnostic).initCapacity(alloc, 8) catch unreachable,
             .alloc = alloc,
         };
     }
