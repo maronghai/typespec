@@ -123,12 +123,10 @@ pub fn toSqlType(w: anytype, dialect: Dialect, type_info: TypeInfo) !void {
             try w.print("{s}({d}, {d})", .{ type_name, ds.precision, ds.scale });
         },
         .varchar_explicit => |n| {
-            if (dialect == .sqlite) {
-                try w.writeAll("TEXT");
-            } else if (n > 0) {
+            if (n > 0) {
                 try w.print("varchar({d})", .{n});
             } else {
-                try w.writeAll("varchar(255)");
+                try w.writeAll("TEXT");
             }
         },
         .enum_type => |vals| {
@@ -239,6 +237,20 @@ fn reverseLookupSqlite(t: []const u8, col_name: []const u8, is_auto_inc: bool, i
         break :blk upper_buf[0..t.len];
     } else t;
 
+    // Parameterized types: varchar(N) → sN, numeric(P,S) → P,S
+    if (std.mem.startsWith(u8, upper_t, "VARCHAR(") and std.mem.endsWith(u8, upper_t, ")")) {
+        const inner = std.mem.trim(u8, t[8 .. t.len - 1], " ");
+        if (std.mem.eql(u8, inner, "255"))
+            return .{ .tps = "s", .omit = canOmitType(col_name, "s", is_auto_inc, is_default_ts) };
+        var sbuf: [16]u8 = undefined;
+        sbuf[0] = 's';
+        for (inner, 0..) |ch, i| sbuf[i + 1] = ch;
+        return .{ .tps = sbuf[0 .. 1 + inner.len], .omit = false };
+    }
+    if (std.mem.startsWith(u8, upper_t, "NUMERIC(") and std.mem.endsWith(u8, upper_t, ")")) {
+        return .{ .tps = t[8 .. t.len - 1], .omit = false };
+    }
+
     // Check against TYPE_TABLE SQLite entries (including single-char TPS entries)
     // Collect all matching TPS candidates
     var found_tps: ?[]const u8 = null;
@@ -305,7 +317,14 @@ fn isBooleanColumnName(name: []const u8) bool {
         std.mem.startsWith(u8, name, "was_") or
         std.mem.startsWith(u8, name, "did_") or
         std.mem.startsWith(u8, name, "enable") or
-        std.mem.startsWith(u8, name, "active");
+        std.mem.startsWith(u8, name, "active") or
+        std.mem.eql(u8, name, "deleted") or
+        std.mem.eql(u8, name, "is_deleted") or
+        std.mem.eql(u8, name, "is_removed") or
+        std.mem.eql(u8, name, "is_enabled") or
+        std.mem.eql(u8, name, "is_active") or
+        std.mem.eql(u8, name, "is_valid") or
+        std.mem.eql(u8, name, "is_deleted");
 }
 
 fn isJsonColumnName(name: []const u8) bool {
@@ -326,7 +345,6 @@ fn isJsonColumnName(name: []const u8) bool {
         std.mem.endsWith(u8, name, "_config") or
         std.mem.endsWith(u8, name, "_settings") or
         std.mem.endsWith(u8, name, "_extra") or
-        std.mem.endsWith(u8, name, "_params") or
         std.mem.endsWith(u8, name, "_options");
 }
 
@@ -530,7 +548,7 @@ test "forward: varchar_explicit(0) maps to varchar(255)" {
     try std.testing.expectEqualStrings("varchar(255)", result);
 }
 
-test "forward: varchar_explicit maps to TEXT in SQLite" {
+test "forward: varchar_explicit maps to varchar(N) in SQLite" {
     var aw = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer aw.deinit();
     try toSqlType(&aw.writer, .sqlite, .{ .varchar_explicit = 128 });
@@ -538,7 +556,7 @@ test "forward: varchar_explicit maps to TEXT in SQLite" {
     const out = aw.toArrayList();
     const result = try out.toOwnedSlice(std.testing.allocator);
     defer std.testing.allocator.free(result);
-    try std.testing.expectEqualStrings("TEXT", result);
+    try std.testing.expectEqualStrings("varchar(128)", result);
 }
 
 test "forward: enum_type maps to ENUM in MySQL" {

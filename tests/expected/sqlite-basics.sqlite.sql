@@ -2,8 +2,8 @@
 
 CREATE TABLE "user" (
   "id" INTEGER PRIMARY KEY AUTOINCREMENT,
-  "name" TEXT NOT NULL,
-  "email" TEXT NOT NULL,
+  "name" varchar(32) NOT NULL,
+  "email" varchar(128) NOT NULL,
   "balance" NUMERIC DEFAULT 0,
   "status" integer DEFAULT 0,
   "create_at" TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -13,7 +13,7 @@ CREATE TABLE "user" (
 
 CREATE TABLE "order" (
   "id" INTEGER PRIMARY KEY AUTOINCREMENT,
-  "order_no" TEXT NOT NULL,
+  "order_no" varchar(64) NOT NULL,
   "user_id" INTEGER,
   "amount" NUMERIC NOT NULL,
   "status" integer DEFAULT 0,

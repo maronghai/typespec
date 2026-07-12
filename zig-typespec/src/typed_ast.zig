@@ -143,13 +143,11 @@ pub const TypeResolver = struct {
                 break :blk try self.alloc.dupe(u8, result);
             },
             .varchar_explicit => |n| blk: {
-                if (dialect == .sqlite) {
-                    break :blk try self.alloc.dupe(u8, "TEXT");
-                } else if (n > 0) {
+                if (n > 0) {
                     const result = try std.fmt.bufPrint(&type_buf, "varchar({d})", .{n});
                     break :blk try self.alloc.dupe(u8, result);
                 } else {
-                    break :blk try self.alloc.dupe(u8, "varchar(255)");
+                    break :blk try self.alloc.dupe(u8, "TEXT");
                 }
             },
             .enum_type => |vals| blk: {

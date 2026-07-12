@@ -54,7 +54,10 @@ fn writeColumnSuffix(w: anytype, col: sp.SqlColumn, indexes: []const sp.SqlIndex
         // datetime without auto_increment — check DEFAULT for +/++
         if (col.default_val) |dv| {
             if (isCurrentTimestamp(dv)) {
-                if (col.on_update_current_timestamp) {
+                // Heuristic: column name contains "update"/"updated" → on_update_current_timestamp (++)
+                const is_update_col = std.mem.indexOf(u8, col.name, "update") != null or
+                    std.mem.indexOf(u8, col.name, "updated") != null;
+                if (col.on_update_current_timestamp or is_update_col) {
                     try w.writeAll(" ++");
                 } else {
                     try w.writeAll(" +");
