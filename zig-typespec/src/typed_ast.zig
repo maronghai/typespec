@@ -108,8 +108,8 @@ pub const TypeResolver = struct {
             .none => try self.alloc.dupe(u8, "varchar(255)"),
             .simple => |s| blk: {
                 if (s.len == 1) {
-                    for (type_map.TYPE_TABLE) |m| {
-                        if (m.tps.len == 1 and m.tps[0] == s[0]) {
+                    for (type_map.FORWARD_MAP) |m| {
+                        if (m.tps[0] == s[0]) {
                             const sql = switch (dialect) {
                                 .mysql => m.mysql,
                                 .postgres => m.pg,

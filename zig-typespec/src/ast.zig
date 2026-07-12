@@ -145,6 +145,25 @@ pub const Ast = struct {
     sql_comments: []const SqlComment,
 };
 
+// ─── Resolved AST (post-semantic analysis) ──────────────────────
+
+pub const ResolvedTable = struct {
+    name: []const u8,
+    comment: ?[]const u8,
+    engine: ?[]const u8,
+    fields: []const Field,
+    fks: []const FkDecl,
+    indexes: []const IndexDecl,
+    line_no: usize,
+};
+
+pub const ResolvedAst = struct {
+    schema_name: ?[]const u8,
+    schema_charset: ?[]const u8,
+    tables: []const ResolvedTable,
+    sql_comments: []const SqlComment,
+};
+
 // ─── Diagnostic helpers for AST types ────────────────────────
 
 pub fn fmtTypeInfo(ti: TypeInfo) void {

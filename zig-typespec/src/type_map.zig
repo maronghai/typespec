@@ -8,24 +8,60 @@ const sqlite_hints = @import("sqlite_hints.zig");
 //
 // Single source of truth for tps ↔ SQL type mappings.
 // Used by codegen (forward), reverse_codegen (reverse), and migrate.
+//
+// Two separate maps for clarity:
+//   FORWARD_MAP — TPS single-char symbol → SQL type (used by toSqlType, typed_ast)
+//   REVERSE_MAP — SQL type → TPS symbol (used by reverseLookup, reverse_codegen)
+// Each entry self-documents its purpose; no need for len-() hacks.
 
 pub const Dialect = dialect_enum.Dialect;
 
-pub const TypeMapping = struct {
+// ─── Forward Mapping: TPS → SQL ──────────────────────────────
+//
+// Only single-char TPS symbols. These are the core type vocabulary
+// that users write in .tps files.
+
+pub const ForwardMapping = struct {
     tps: []const u8,
     mysql: []const u8,
     pg: []const u8,
     sqlite: []const u8,
-    /// Reverse-match priority: lower = preferred when multiple SQL types map to same TPS.
-    /// Higher-priority entries (lower number) are checked first.
+};
+
+pub const FORWARD_MAP = [_]ForwardMapping{
+    .{ .tps = "n", .mysql = "int", .pg = "integer", .sqlite = "INTEGER" },
+    .{ .tps = "N", .mysql = "bigint", .pg = "bigint", .sqlite = "INTEGER" },
+    .{ .tps = "m", .mysql = "decimal(16, 2)", .pg = "numeric(16, 2)", .sqlite = "NUMERIC" },
+    .{ .tps = "M", .mysql = "decimal(20, 6)", .pg = "numeric(20, 6)", .sqlite = "NUMERIC" },
+    .{ .tps = "S", .mysql = "text", .pg = "text", .sqlite = "TEXT" },
+    .{ .tps = "b", .mysql = "boolean", .pg = "boolean", .sqlite = "INTEGER" },
+    .{ .tps = "B", .mysql = "blob", .pg = "bytea", .sqlite = "BLOB" },
+    .{ .tps = "j", .mysql = "json", .pg = "json", .sqlite = "TEXT" },
+    .{ .tps = "d", .mysql = "date", .pg = "date", .sqlite = "TEXT" },
+    .{ .tps = "t", .mysql = "datetime", .pg = "timestamp", .sqlite = "TEXT" },
+};
+
+// ─── Reverse Mapping: SQL → TPS ──────────────────────────────
+//
+// All entries that reverse codegen may encounter. Includes:
+//   - Core single-char entries (for SQLite which has lossy type affinity)
+//   - MySQL/PG variant types (tinyint, serial, jsonb, etc.)
+//   - Passthrough types (uuid, real, float4, float8)
+//
+// Priority ordering: lower number = preferred when multiple SQL types
+// map to the same TPS symbol. Checked top-to-bottom; first match wins.
+
+pub const ReverseMapping = struct {
+    tps: []const u8,
+    mysql: []const u8,
+    pg: []const u8,
+    sqlite: []const u8,
+    /// Reverse-match priority: lower = preferred.
     rev_priority: u32 = 0,
 };
 
-/// All single-char and known multi-char type mappings.
-/// Single-char entries (len(tps)==1) are the primary forward mappings.
-/// Multi-char entries (e.g. "tinyint", "bytea") are reverse-only (not emitted by forward path).
-pub const TYPE_TABLE = [_]TypeMapping{
-    // ─── Core single-char symbols (forward + reverse) ───
+pub const REVERSE_MAP = [_]ReverseMapping{
+    // ─── Core single-char symbols (used by SQLite reverse) ───
     .{ .tps = "n", .mysql = "int", .pg = "integer", .sqlite = "INTEGER", .rev_priority = 10 },
     .{ .tps = "N", .mysql = "bigint", .pg = "bigint", .sqlite = "INTEGER", .rev_priority = 10 },
     .{ .tps = "m", .mysql = "decimal(16, 2)", .pg = "numeric(16, 2)", .sqlite = "NUMERIC", .rev_priority = 10 },
@@ -78,6 +114,22 @@ pub const TYPE_TABLE = [_]TypeMapping{
     .{ .tps = "s", .mysql = "character", .pg = "character", .sqlite = "TEXT" },
 };
 
+// ─── Backward-compatible TYPE_TABLE ──────────────────────────
+// Combines both maps for any code that still references it directly.
+// Prefer using FORWARD_MAP or REVERSE_MAP in new code.
+
+pub const TypeMapping = ReverseMapping;
+pub const TYPE_TABLE: [FORWARD_MAP.len + REVERSE_MAP.len]TypeMapping = blk: {
+    var result: [FORWARD_MAP.len + REVERSE_MAP.len]TypeMapping = undefined;
+    for (FORWARD_MAP, 0..) |f, i| {
+        result[i] = .{ .tps = f.tps, .mysql = f.mysql, .pg = f.pg, .sqlite = f.sqlite };
+    }
+    for (REVERSE_MAP, 0..) |r, i| {
+        result[FORWARD_MAP.len + i] = .{ .tps = r.tps, .mysql = r.mysql, .pg = r.pg, .sqlite = r.sqlite, .rev_priority = r.rev_priority };
+    }
+    break :blk result;
+};
+
 // ─── Forward Mapping: TPS → SQL ──────────────────────────────
 
 pub fn toSqlType(w: anytype, dialect: Dialect, type_info: TypeInfo) !void {
@@ -86,9 +138,9 @@ pub fn toSqlType(w: anytype, dialect: Dialect, type_info: TypeInfo) !void {
         .simple => {
             const s = type_info.simple;
             if (s.len == 1) {
-                // Single-char: lookup in TYPE_TABLE
-                for (TYPE_TABLE) |m| {
-                    if (m.tps.len == 1 and m.tps[0] == s[0]) {
+                // Single-char: lookup in FORWARD_MAP
+                for (FORWARD_MAP) |m| {
+                    if (m.tps[0] == s[0]) {
                         const sql_type = switch (dialect) {
                             .mysql => m.mysql,
                             .postgres => m.pg,
@@ -158,13 +210,13 @@ pub const ReverseResult = struct {
 };
 
 pub const Confidence = enum {
-    high, // exact match from TYPE_TABLE or parameterized type
+    high, // exact match from REVERSE_MAP or parameterized type
     medium, // suffix-based inference (_id, _at, _on) or known column name pattern
     low, // heuristic guess (SQLite type ambiguity)
 };
 
 /// Reverse-lookup a SQL type string to its TPS symbol.
-/// Handles exact match from TYPE_TABLE + parameterized types (int(N), decimal(P,S), varchar(N)).
+/// Handles exact match from REVERSE_MAP + parameterized types (int(N), decimal(P,S), varchar(N)).
 pub fn reverseLookup(sql_type: []const u8, col_name: []const u8, is_auto_inc: bool, is_default_ts: bool, dialect: Dialect) ReverseResult {
     const t = std.mem.trim(u8, sql_type, " \t");
 
@@ -173,10 +225,10 @@ pub fn reverseLookup(sql_type: []const u8, col_name: []const u8, is_auto_inc: bo
         return reverseLookupSqlite(t, col_name, is_auto_inc, is_default_ts);
     }
 
-    // MySQL/PG: exact match from TYPE_TABLE (skip single-char TPS entries — those are forward-only)
+    // MySQL/PG: exact match from REVERSE_MAP (skip single-char TPS entries — forward-only for MySQL/PG)
     var best_match: ?ReverseResult = null;
     var best_priority: u32 = std.math.maxInt(u32);
-    for (TYPE_TABLE) |m| {
+    for (REVERSE_MAP) |m| {
         if (m.tps.len <= 1) continue; // skip single-char forward entries (handled by parameterized below)
         if (std.mem.eql(u8, t, m.mysql) or std.mem.eql(u8, t, m.pg)) {
             if (m.rev_priority < best_priority) {
@@ -260,13 +312,12 @@ fn reverseLookupSqlite(t: []const u8, col_name: []const u8, is_auto_inc: bool, i
         return .{ .tps = t[8 .. t.len - 1], .omit = false, .confidence = .high };
     }
 
-    // Check against TYPE_TABLE SQLite entries (including single-char TPS entries)
-    // Collect all matching TPS candidates
+    // Check against REVERSE_MAP SQLite entries
     var found_tps: ?[]const u8 = null;
-    for (TYPE_TABLE) |m| {
+    for (REVERSE_MAP) |m| {
         if (std.mem.eql(u8, upper_t, m.sqlite)) {
             found_tps = m.tps;
-            break; // first match is sufficient for disambiguation below
+            break;
         }
     }
 
@@ -283,7 +334,6 @@ fn reverseLookupSqlite(t: []const u8, col_name: []const u8, is_auto_inc: bool, i
             if (is_auto_inc) return .{ .tps = "n", .omit = false, .confidence = .high };
             if (col_name.len > 3 and std.mem.endsWith(u8, col_name, "_id"))
                 return .{ .tps = "n", .omit = canOmitType(col_name, "n", is_auto_inc, is_default_ts), .confidence = .high };
-            // Boolean heuristic: is_*, has_*, can_*, should_*, was_*, did_* prefixes
             if (isBooleanColumnName(col_name))
                 return .{ .tps = "b", .omit = canOmitType(col_name, "b", is_auto_inc, is_default_ts), .confidence = .medium };
             return .{ .tps = "n", .omit = canOmitType(col_name, "n", is_auto_inc, is_default_ts), .confidence = .low };
@@ -302,10 +352,8 @@ fn reverseLookupSqlite(t: []const u8, col_name: []const u8, is_auto_inc: bool, i
                 return .{ .tps = "d", .omit = canOmitType(col_name, "d", is_auto_inc, is_default_ts), .confidence = .high };
             if (is_default_ts)
                 return .{ .tps = "t", .omit = canOmitType(col_name, "t", is_auto_inc, is_default_ts), .confidence = .high };
-            // JSON heuristic: settings, data, metadata, config, extra, params, options, etc.
             if (isJsonColumnName(col_name))
                 return .{ .tps = "j", .omit = canOmitType(col_name, "j", is_auto_inc, is_default_ts), .confidence = .medium };
-            // Long text heuristic: description, content, note, bio, summary, body, etc.
             if (isTextColumnName(col_name))
                 return .{ .tps = "S", .omit = canOmitType(col_name, "S", is_auto_inc, is_default_ts), .confidence = .medium };
             return .{ .tps = "s", .omit = canOmitType(col_name, "s", is_auto_inc, is_default_ts), .confidence = .low };
@@ -317,7 +365,7 @@ fn reverseLookupSqlite(t: []const u8, col_name: []const u8, is_auto_inc: bool, i
 }
 
 // ─── SQLite column name heuristics ───────────────────────────
-// Delegated to sqlite_hints.zig for single-responsibility.
+
 const isBooleanColumnName = sqlite_hints.isBooleanColumnName;
 const isJsonColumnName = sqlite_hints.isJsonColumnName;
 const isTextColumnName = sqlite_hints.isTextColumnName;
@@ -529,7 +577,6 @@ test "forward: enum_type maps to TEXT in PostgreSQL" {
 test "reverse: int maps to n" {
     const r = reverseLookup("int", "col", false, false, .mysql);
     try std.testing.expectEqualStrings("int", r.tps);
-    // "int" is a multi-char entry, should match
 }
 
 test "reverse: varchar(255) maps to s" {
@@ -686,7 +733,7 @@ test "reverse sqlite: TEXT + _on suffix maps to d with omit" {
 test "reverse sqlite: TEXT + is_default_ts maps to t" {
     const r = reverseLookup("TEXT", "created_at", false, true, .sqlite);
     try std.testing.expectEqualStrings("t", r.tps);
-    try std.testing.expect(!r.omit); // is_default_ts prevents omission
+    try std.testing.expect(!r.omit);
 }
 
 test "reverse sqlite: TEXT bare maps to s with omit" {
