@@ -5,19 +5,11 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-TEST_DIR="$SCRIPT_DIR/reverse"
-COMPILER="$PROJECT_DIR/zig-typespec/zig-out/bin/typespec.exe"
+source "$(cd "$(dirname "$0")" && pwd)/lib.sh"
 
-if [ ! -f "$COMPILER" ]; then
-  echo "ERROR: Compiler not found at $COMPILER"
-  exit 1
-fi
+TEST_DIR="$SCRIPT_DIR/reverse"
 
 FILTER="${1:-}"
-PASS=0
-FAIL=0
 
 for sql_file in "$TEST_DIR"/*.sql; do
   [ -f "$sql_file" ] || continue
@@ -27,7 +19,6 @@ for sql_file in "$TEST_DIR"/*.sql; do
     continue
   fi
 
-  # Check for dialect-specific golden files (.mysql.tps, .pg.tps, .sqlite.tps)
   for dialect_suffix in mysql pg sqlite; do
     expected_file="$TEST_DIR/$base.$dialect_suffix.tps"
     if [ ! -f "$expected_file" ]; then
@@ -44,30 +35,21 @@ for sql_file in "$TEST_DIR"/*.sql; do
     trap "rm -f '$tmp_file'" EXIT
 
     if ! "$COMPILER" reverse "$sql_file" -d "$dialect" -o "$tmp_file" 2>/dev/null; then
-      echo "ERROR $base ($dialect)  (compiler failed)"
-      FAIL=$((FAIL + 1))
+      fail "$base ($dialect)" "compiler failed"
       rm -f "$tmp_file"
       continue
     fi
 
     if diff -u "$expected_file" "$tmp_file" > /dev/null 2>&1; then
-      echo "PASS  $base ($dialect)"
-      PASS=$((PASS + 1))
+      pass "$base ($dialect)"
     else
-      echo "FAIL  $base ($dialect)"
-      diff -u "$expected_file" "$tmp_file" 2>&1 | head -20 || true
-      echo ""
-      FAIL=$((FAIL + 1))
+      diff_output=$(diff -u "$expected_file" "$tmp_file" 2>&1 | head -20)
+      fail "$base ($dialect)" "$diff_output"
     fi
 
     rm -f "$tmp_file"
   done
 done
 
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-TOTAL=$((PASS + FAIL))
-echo "Reverse tests: $PASS/$TOTAL passed, $FAIL failed"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-
+summary "Reverse"
 [ "$FAIL" -eq 0 ] && exit 0 || exit 1
