@@ -81,6 +81,7 @@ pub const SemanticAnalyzer = struct {
         return .{
             .schema_name = if (tree.schema) |s| s.name else null,
             .schema_charset = if (tree.schema) |s| s.charset orelse "utf8mb4" else null,
+            .custom_types = if (tree.schema) |s| s.custom_types else &.{},
             .tables = try tables.toOwnedSlice(self.alloc),
             .sql_comments = tree.sql_comments,
         };

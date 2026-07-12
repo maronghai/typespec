@@ -233,6 +233,39 @@ TypeSpec uses two separate mapping tables in `type_map.zig`:
 4. **Arena allocation**: All modules take `std.mem.Allocator`. Arena-style usage for command-lifetime memory.
 5. **Parser module extraction**: `parse_field.zig`, `parse_fk.zig`, `parse_check.zig`, `parse_index.zig` serve as standalone reference implementations.
 6. **Template/Semantic separation**: Template resolution (inheritance, slot merging) is independent of semantic passes (autofk, suffix_inference, validation). Each can be modified without affecting the other.
+7. **Custom type system**: Users can define named type aliases via `@type` directives in the schema block. Custom types support dialect-specific overrides and are resolved during type resolution (not parsing).
+
+## Custom Type System
+
+Users can define custom type aliases in the schema block:
+
+```
+$ mydb
+  @type uuid = s36
+  @type email = s128
+  @type ip_addr mysql=s45 postgres=inet sqlite=s45
+
+# user
+uuid uuid *
+email email *
+ip ip_addr
+```
+
+### How it works
+
+1. **Tokenizer**: Lines starting with `@type` are classified as `TypeDef` (not `Index`)
+2. **Parser**: `parseTypeDef()` extracts name, base type, and dialect overrides
+3. **Schema**: Custom types are stored in `Schema.custom_types` and passed through `ResolvedAst`
+4. **Type resolver**: When resolving a field type, checks custom types first (multi-char names only)
+5. **Dialect overrides**: Use `raw_sql` TypeInfo variant to prevent infinite recursion
+
+### Adding a new custom type
+
+No code changes needed — users define types in `.tps` files. For built-in support of a new type:
+
+1. Add to `FORWARD_MAP` in `type_map.zig` (for single-char symbols)
+2. Add to `REVERSE_MAP` for reverse engineering support
+3. Add unit tests and golden file tests
 
 ## Adding a New SQL Dialect
 
@@ -248,9 +281,9 @@ No changes needed in `codegen.zig` — it is fully dialect-agnostic.
 
 | Layer | Files | Count | Coverage |
 |-------|-------|-------|----------|
-| Unit tests | `type_map.zig`, `tokenizer.zig`, `parser.zig`, `diff.zig`, `semantic.zig`, `template.zig` | ~100 | Core logic |
-| MySQL golden | `tests/test.sh` | 81 | Full pipeline |
-| PG golden | `tests/test_postgres.sh` | 93 | Full pipeline |
+| Unit tests | `type_map.zig`, `tokenizer.zig`, `parser.zig`, `diff.zig`, `semantic.zig`, `template.zig` | ~120 | Core logic |
+| MySQL golden | `tests/test.sh` | 82 | Full pipeline |
+| PG golden | `tests/test_postgres.sh` | 82 | Full pipeline |
 | SQLite golden | `tests/test_sqlite.sh` | 16 | Full pipeline |
 | Migrate golden | `tests/test_migrate.sh` | 10 | Diff + migration SQL |
 | Reverse golden | `tests/test_reverse.sh` | 15 | SQL → .tps |

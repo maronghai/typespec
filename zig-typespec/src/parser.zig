@@ -54,6 +54,7 @@ pub const Parser = struct {
         var templates = try std.ArrayList(Template).initCapacity(self.alloc, 8);
         var tables = try std.ArrayList(Table).initCapacity(self.alloc, 8);
         var sql_comments = try std.ArrayList(SqlComment).initCapacity(self.alloc, 8);
+        var custom_types = try std.ArrayList(ast_mod.CustomType).initCapacity(self.alloc, 8);
 
         // Current block being parsed (template or table)
         var cur_name: ?[]const u8 = null;
@@ -89,9 +90,17 @@ pub const Parser = struct {
                             .name = try self.alloc.dupe(u8, line.tokens[1]),
                             .charset = charset,
                             .autofk = autofk,
+                            .custom_types = &.{},
                             .line_no = line.line_no,
                             .loc = Parser.locFromLine(line, line.tokens[0]),
                         };
+                    }
+                },
+                .TypeDef => {
+                    if (schema != null and line.tokens.len >= 3) {
+                        // @type name = base_type  OR  @type name dialect1=type1 dialect2=type2
+                        const ct = try self.parseTypeDef(line);
+                        try custom_types.append(self.alloc, ct);
                     }
                 },
                 .Template => {
@@ -325,8 +334,30 @@ pub const Parser = struct {
             try self.flushTable(&tables, cur_name, cur_comment, cur_template_ref, cur_engine, &cur_fields, &cur_fks, &cur_indexes, cur_line_no, cur_loc);
         }
 
+        // Merge custom_types into schema
+        const final_schema = if (schema) |s| blk: {
+            if (custom_types.items.len > 0) {
+                break :blk ast_mod.Schema{
+                    .name = s.name,
+                    .charset = s.charset,
+                    .autofk = s.autofk,
+                    .custom_types = try custom_types.toOwnedSlice(self.alloc),
+                    .line_no = s.line_no,
+                    .loc = s.loc,
+                };
+            }
+            break :blk ast_mod.Schema{
+                .name = s.name,
+                .charset = s.charset,
+                .autofk = s.autofk,
+                .custom_types = &.{},
+                .line_no = s.line_no,
+                .loc = s.loc,
+            };
+        } else null;
+
         return .{
-            .schema = schema,
+            .schema = final_schema,
             .templates = try templates.toOwnedSlice(self.alloc),
             .tables = try tables.toOwnedSlice(self.alloc),
             .sql_comments = try sql_comments.toOwnedSlice(self.alloc),
@@ -469,6 +500,52 @@ pub const Parser = struct {
             .comment = comment,
             .line_no = line.line_no,
             .loc = Parser.locFromLine(line, line.tokens[0]),
+        };
+    }
+
+    fn parseTypeDef(self: *Parser, line: tk.Line) !ast_mod.CustomType {
+        // tokens: ["@", "type", "name", ...]
+        // After @type: "name" "=" base_type  OR  "name" "dialect=type" ...
+        const name = try self.alloc.dupe(u8, line.tokens[2]);
+
+        // Find the = sign or first dialect=type token
+        var base: TypeInfo = .none;
+        var overrides = try std.ArrayList(ast_mod.DialectOverride).initCapacity(self.alloc, 4);
+
+        var i: usize = 3;
+        // Skip = if present
+        if (i < line.tokens.len and std.mem.eql(u8, line.tokens[i], "=")) {
+            i += 1;
+        }
+        // Parse base type (first non-dialect token after =)
+        if (i < line.tokens.len) {
+            const tok = line.tokens[i];
+            // Check if this is a dialect=type pair
+            if (std.mem.indexOfScalar(u8, tok, '=') != null) {
+                // dialect=type format — no base type, only overrides
+                // Back up, we'll parse all as overrides
+            } else {
+                base = parse_field.tryParseType(tok) orelse .{ .simple = try self.alloc.dupe(u8, tok) };
+                i += 1;
+            }
+        }
+        // Parse dialect overrides: dialect=type pairs
+        while (i < line.tokens.len) : (i += 1) {
+            const tok = line.tokens[i];
+            if (std.mem.indexOfScalar(u8, tok, '=')) |eq_pos| {
+                const dialect = try self.alloc.dupe(u8, tok[0..eq_pos]);
+                const type_str = try self.alloc.dupe(u8, tok[eq_pos + 1 ..]);
+                // Dialect overrides are raw SQL types — use raw_sql to prevent custom type re-resolution
+                const type_info: TypeInfo = parse_field.tryParseType(type_str) orelse .{ .raw_sql = type_str };
+                try overrides.append(self.alloc, .{ .dialect = dialect, .type_info = type_info });
+            }
+        }
+
+        return .{
+            .name = name,
+            .base = base,
+            .dialect_overrides = try overrides.toOwnedSlice(self.alloc),
+            .line_no = line.line_no,
         };
     }
 

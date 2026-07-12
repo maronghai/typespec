@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v1
+        with:
+          version: 0.16.0
+
+      - name: Check formatting
+        run: zig fmt --check zig-typespec/src/
+
+      - name: Build
+        run: cd zig-typespec && zig build -Doptimize=ReleaseSafe
+
+      - name: Unit tests
+        run: cd zig-typespec && zig build test
+
+      - name: MySQL golden tests
+        run: bash tests/test.sh
+
+      - name: PostgreSQL golden tests
+        run: bash tests/test_postgres.sh
+
+      - name: SQLite golden tests
+        run: bash tests/test_sqlite.sh
+
+      - name: Migration tests
+        run: bash tests/test_migrate.sh
+
+      - name: Reverse engineering tests
+        run: bash tests/test_reverse.sh
+
+      - name: Diff tests
+        run: bash tests/test_diff.sh

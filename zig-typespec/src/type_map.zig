@@ -183,6 +183,7 @@ pub fn toSqlType(w: anytype, dialect: Dialect, type_info: TypeInfo) !void {
                 try w.writeAll("TEXT");
             }
         },
+        .raw_sql => |sql| try w.writeAll(sql),
         .enum_type => |vals| {
             switch (dialect) {
                 .mysql => {
@@ -402,6 +403,36 @@ pub fn isDatetimeTpsType(ti: TypeInfo) bool {
         .simple => |s| return std.mem.eql(u8, s, "t") or std.mem.eql(u8, s, "d"),
         else => return false,
     }
+}
+
+// ─── Custom Type Lookup ──────────────────────────────────────
+
+/// Look up a custom type by name in the schema's custom_types list.
+/// Returns the resolved TypeInfo for the given dialect, checking dialect-specific
+/// overrides first, then falling back to the base type.
+pub fn lookupCustomType(
+    custom_types: []const ast_mod.CustomType,
+    type_name: []const u8,
+    dialect: Dialect,
+) ?TypeInfo {
+    for (custom_types) |ct| {
+        if (std.mem.eql(u8, ct.name, type_name)) {
+            // Check dialect-specific overrides first
+            for (ct.dialect_overrides) |ov| {
+                const dname = switch (dialect) {
+                    .mysql => "mysql",
+                    .postgres => "postgres",
+                    .sqlite => "sqlite",
+                };
+                if (std.mem.eql(u8, ov.dialect, dname)) {
+                    return ov.type_info;
+                }
+            }
+            // Fall back to base type
+            return ct.base;
+        }
+    }
+    return null;
 }
 
 // ─── Tests ────────────────────────────────────────────────────

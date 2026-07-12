@@ -14,6 +14,17 @@ zig build
 
 Output binary: `zig-out/bin/typespec`
 
+## Code Formatting
+
+All source code must pass `zig fmt` before committing:
+
+```bash
+cd zig-typespec
+zig fmt src/
+```
+
+CI enforces formatting — PRs with unformatted code will fail.
+
 ## Run Tests
 
 ```bash

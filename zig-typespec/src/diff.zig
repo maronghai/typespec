@@ -323,6 +323,7 @@ pub fn typeInfoEqual(a: TypeInfo, b: TypeInfo) bool {
     return switch (a) {
         .none => true,
         .simple => |s| std.mem.eql(u8, s, b.simple),
+        .raw_sql => |s| std.mem.eql(u8, s, b.raw_sql),
         .int_explicit => |n| n == b.int_explicit,
         .decimal_explicit => |ds| ds.precision == b.decimal_explicit.precision and ds.scale == b.decimal_explicit.scale,
         .varchar_explicit => |n| n == b.varchar_explicit,

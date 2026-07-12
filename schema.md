@@ -28,6 +28,26 @@ $ schema_name [charset] [autofk]    ; charset default utf8mb4, one $ per file
 #base table_name  : comment          ; table using template
 ```
 
+### Custom Types
+
+Define type aliases in the schema block using `@type`:
+
+```asm
+$ mydb
+  @type uuid = s36                    ; varchar(36) everywhere
+  @type email = s128                  ; varchar(128) everywhere
+  @type ip_addr mysql=s45 postgres=inet sqlite=s45  ; dialect-specific
+```
+
+Custom types can be used as field types:
+
+```asm
+# user
+uuid uuid *                          ; resolves to varchar(36)
+email email *                        ; resolves to varchar(128)
+ip ip_addr                           ; MySQL: varchar(45), PG: inet
+```
+
 `autofk` auto-generates FK + INDEX for `_id` suffix fields if the referenced table exists.
 
 ### Engine

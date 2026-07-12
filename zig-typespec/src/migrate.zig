@@ -49,6 +49,7 @@ pub fn generateFromDiff(
                     const single_resolved = sem.ResolvedAst{
                         .schema_name = new_ast.schema_name,
                         .schema_charset = new_ast.schema_charset,
+                        .custom_types = new_ast.custom_types,
                         .tables = try single_tables.toOwnedSlice(alloc),
                         .sql_comments = &.{},
                     };
@@ -77,7 +78,7 @@ pub fn generateFromDiff(
                                 if (sub_needs_comma) try w.writeAll(",\n");
                                 sub_needs_comma = true;
                                 try w.writeAll("ADD COLUMN ");
-                                const typed_col = try tr.resolveColumn(nf, dialect);
+                                const typed_col = try tr.resolveColumn(nf, dialect, new_ast.custom_types);
                                 try cg.emitColumnDef(w, typed_col);
                             }
                         },
@@ -110,7 +111,7 @@ pub fn generateFromDiff(
                                 if (sub_needs_comma) try w.writeAll(",\n");
                                 sub_needs_comma = true;
                                 try w.writeAll("MODIFY COLUMN ");
-                                const typed_col = try tr.resolveColumn(nf, dialect);
+                                const typed_col = try tr.resolveColumn(nf, dialect, new_ast.custom_types);
                                 try cg.emitColumnDef(w, typed_col);
                             }
                         },
@@ -128,7 +129,7 @@ pub fn generateFromDiff(
                                         try dialect_mod.getBackend(dialect).quoteIdent(w, old_name);
                                         try w.writeAll(" ");
                                         if (fd.new_field) |nf| {
-                                            const typed_col = try tr.resolveColumn(nf, dialect);
+                                            const typed_col = try tr.resolveColumn(nf, dialect, new_ast.custom_types);
                                             try cg.emitColumnDef(w, typed_col);
                                         }
                                     },

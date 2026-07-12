@@ -79,7 +79,7 @@ pub const TypeResolver = struct {
             for (table.fks) |fk| try all_fks.append(self.alloc, fk);
             for (table.fields) |field| {
                 if (std.mem.eql(u8, field.name, "...")) continue;
-                const col = try self.resolveColumn(field, dialect);
+                const col = try self.resolveColumn(field, dialect, resolved.custom_types);
                 try columns.append(self.alloc, col);
                 if (field.fk) |fk| try all_fks.append(self.alloc, fk);
             }
@@ -101,12 +101,30 @@ pub const TypeResolver = struct {
         };
     }
 
-    pub fn resolveColumn(self: *TypeResolver, field: Field, dialect: Dialect) !TypedColumn {
+    pub fn resolveColumn(self: *TypeResolver, field: Field, dialect: Dialect, custom_types: []const ast_mod.CustomType) !TypedColumn {
         // Resolve SQL type string using std.fmt.bufPrint
         var type_buf: [64]u8 = undefined;
         const sql_type = switch (field.type_info) {
             .none => try self.alloc.dupe(u8, "varchar(255)"),
+            .raw_sql => |sql| try self.alloc.dupe(u8, sql),
             .simple => |s| blk: {
+                // Check custom types first (multi-char names only)
+                if (s.len > 1) {
+                    if (type_map.lookupCustomType(custom_types, s, dialect)) |ct_info| {
+                        // Recursively resolve the custom type's base info
+                        const ct_col = try self.resolveColumn(ast_mod.Field{
+                            .name = field.name,
+                            .type_info = ct_info,
+                            .modifiers = field.modifiers,
+                            .default_val = field.default_val,
+                            .check = field.check,
+                            .fk = field.fk,
+                            .comment = field.comment,
+                            .line_no = field.line_no,
+                        }, dialect, custom_types);
+                        return ct_col;
+                    }
+                }
                 if (s.len == 1) {
                     for (type_map.FORWARD_MAP) |m| {
                         if (m.tps[0] == s[0]) {

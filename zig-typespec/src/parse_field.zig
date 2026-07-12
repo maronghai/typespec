@@ -12,6 +12,19 @@ const DefaultVal = ast_mod.DefaultVal;
 const CheckConstraint = ast_mod.CheckConstraint;
 const FkDecl = ast_mod.FkDecl;
 
+/// Check if a token is an alphanumeric identifier (potential custom type name).
+/// Must start with a letter, contain only alphanumeric chars and underscores.
+fn isAlphaIdent(tok: []const u8) bool {
+    if (tok.len == 0) return false;
+    if (!std.ascii.isAlphabetic(tok[0]) and tok[0] != '_') return false;
+    for (tok[1..]) |ch| {
+        if (!std.ascii.isAlphanumeric(ch) and ch != '_') return false;
+    }
+    // Exclude known modifier tokens that are single chars
+    if (tok.len == 1) return false;
+    return true;
+}
+
 pub const FusedTypeResult = struct {
     type_info: ?TypeInfo = null,
     modifier: ?Modifier = null,
@@ -321,7 +334,14 @@ pub fn parseField(alloc: std.mem.Allocator, line: tk.Line) !Field {
         // 9. Skip stray closing brackets
         if (std.mem.eql(u8, tok, "]") or std.mem.eql(u8, tok, "}")) { i += 1; continue; }
 
-        // 10. Unrecognized token warning
+        // 10. Potential custom type name (alphanumeric identifier, not a modifier)
+        if (type_info == .none and tok.len > 0 and isAlphaIdent(tok)) {
+            type_info = .{ .simple = try alloc.dupe(u8, tok) };
+            i += 1;
+            continue;
+        }
+
+        // 11. Unrecognized token warning
         diag.printDiagnostic(.{
             .severity = .warning,
             .line_no = line.line_no,

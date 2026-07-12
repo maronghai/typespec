@@ -17,6 +17,9 @@ pub const TypeInfo = union(enum) {
     decimal_explicit: struct { precision: usize, scale: usize },
     varchar_explicit: usize,
     enum_type: []const []const u8,
+    /// Raw SQL type string — passed through directly, no further resolution.
+    /// Used by dialect-specific custom type overrides.
+    raw_sql: []const u8,
 };
 
 pub const ModifierType = enum {
@@ -125,10 +128,26 @@ pub const Table = struct {
     loc: ?SourceLocation = null,
 };
 
+/// Custom type definition: @type name = base_type [dialect=type ...]
+pub const CustomType = struct {
+    name: []const u8,
+    base: TypeInfo,
+    /// Dialect-specific overrides: key is dialect name ("mysql", "postgres", "sqlite")
+    dialect_overrides: []const DialectOverride,
+    line_no: usize,
+};
+
+pub const DialectOverride = struct {
+    dialect: []const u8,
+    type_info: TypeInfo,
+};
+
 pub const Schema = struct {
     name: []const u8,
     charset: ?[]const u8,
     autofk: bool,
+    /// User-defined type aliases via @type directive
+    custom_types: []const CustomType,
     line_no: usize,
     loc: ?SourceLocation = null,
 };
@@ -160,6 +179,8 @@ pub const ResolvedTable = struct {
 pub const ResolvedAst = struct {
     schema_name: ?[]const u8,
     schema_charset: ?[]const u8,
+    /// Custom type definitions from @type directives
+    custom_types: []const CustomType,
     tables: []const ResolvedTable,
     sql_comments: []const SqlComment,
 };
@@ -170,6 +191,7 @@ pub fn fmtTypeInfo(ti: TypeInfo) void {
     switch (ti) {
         .none => std.debug.print("--", .{}),
         .simple => |s| std.debug.print("{s}", .{s}),
+        .raw_sql => |s| std.debug.print("{s}", .{s}),
         .int_explicit => |n| std.debug.print("int({d})", .{n}),
         .decimal_explicit => |ds| std.debug.print("decimal({d},{d})", .{ ds.precision, ds.scale }),
         .varchar_explicit => |n| {

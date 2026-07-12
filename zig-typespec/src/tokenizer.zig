@@ -10,6 +10,7 @@ pub const LineType = enum {
     Slot,
     CompositePK,
     Engine,
+    TypeDef,
     SQLComment,
     SpecComment,
     Empty,
@@ -63,9 +64,10 @@ pub const Tokenizer = struct {
         if (line[0] == '#') return .Table;
         if (line[0] == '>') return .FK;
         if (line[0] == '!' and (line.len == 1 or line[1] == ' ')) return .CompositePK;
-        if (line[0] == '@') return .Index;
         if (line[0] == '^') return .Engine;
         if (line.len >= 3 and line[0] == '.' and line[1] == '.' and line[2] == '.') return .Slot;
+        if (line.len >= 5 and line[0] == '@' and line[1] == 't' and line[2] == 'y' and line[3] == 'p' and line[4] == 'e' and (line.len == 5 or line[5] == ' ')) return .TypeDef;
+        if (line[0] == '@') return .Index;
         return .Field;
     }
 
