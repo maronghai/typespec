@@ -152,6 +152,13 @@ pub fn toSqlType(w: anytype, dialect: Dialect, type_info: TypeInfo) !void {
 pub const ReverseResult = struct {
     tps: []const u8,
     omit: bool,
+    confidence: Confidence = .high,
+};
+
+pub const Confidence = enum {
+    high, // exact match from TYPE_TABLE or parameterized type
+    medium, // suffix-based inference (_id, _at, _on) or known column name pattern
+    low, // heuristic guess (SQLite type ambiguity)
 };
 
 /// Reverse-lookup a SQL type string to its TPS symbol.
@@ -241,14 +248,14 @@ fn reverseLookupSqlite(t: []const u8, col_name: []const u8, is_auto_inc: bool, i
     if (std.mem.startsWith(u8, upper_t, "VARCHAR(") and std.mem.endsWith(u8, upper_t, ")")) {
         const inner = std.mem.trim(u8, t[8 .. t.len - 1], " ");
         if (std.mem.eql(u8, inner, "255"))
-            return .{ .tps = "s", .omit = canOmitType(col_name, "s", is_auto_inc, is_default_ts) };
+            return .{ .tps = "s", .omit = canOmitType(col_name, "s", is_auto_inc, is_default_ts), .confidence = .high };
         var sbuf: [16]u8 = undefined;
         sbuf[0] = 's';
         for (inner, 0..) |ch, i| sbuf[i + 1] = ch;
-        return .{ .tps = sbuf[0 .. 1 + inner.len], .omit = false };
+        return .{ .tps = sbuf[0 .. 1 + inner.len], .omit = false, .confidence = .high };
     }
     if (std.mem.startsWith(u8, upper_t, "NUMERIC(") and std.mem.endsWith(u8, upper_t, ")")) {
-        return .{ .tps = t[8 .. t.len - 1], .omit = false };
+        return .{ .tps = t[8 .. t.len - 1], .omit = false, .confidence = .high };
     }
 
     // Check against TYPE_TABLE SQLite entries (including single-char TPS entries)
@@ -266,45 +273,45 @@ fn reverseLookupSqlite(t: []const u8, col_name: []const u8, is_auto_inc: bool, i
         if (std.mem.eql(u8, tps, "B") or std.mem.eql(u8, tps, "real") or
             std.mem.eql(u8, tps, "float4") or std.mem.eql(u8, tps, "float8"))
         {
-            return .{ .tps = tps, .omit = canOmitType(col_name, tps, is_auto_inc, is_default_ts) };
+            return .{ .tps = tps, .omit = canOmitType(col_name, tps, is_auto_inc, is_default_ts), .confidence = .high };
         }
 
         // INTEGER group (n, N, b) — disambiguate with heuristics
         if (std.mem.eql(u8, upper_t, "INTEGER")) {
-            if (is_auto_inc) return .{ .tps = "n", .omit = false };
+            if (is_auto_inc) return .{ .tps = "n", .omit = false, .confidence = .high };
             if (col_name.len > 3 and std.mem.endsWith(u8, col_name, "_id"))
-                return .{ .tps = "n", .omit = canOmitType(col_name, "n", is_auto_inc, is_default_ts) };
+                return .{ .tps = "n", .omit = canOmitType(col_name, "n", is_auto_inc, is_default_ts), .confidence = .high };
             // Boolean heuristic: is_*, has_*, can_*, should_*, was_*, did_* prefixes
             if (isBooleanColumnName(col_name))
-                return .{ .tps = "b", .omit = canOmitType(col_name, "b", is_auto_inc, is_default_ts) };
-            return .{ .tps = "n", .omit = canOmitType(col_name, "n", is_auto_inc, is_default_ts) };
+                return .{ .tps = "b", .omit = canOmitType(col_name, "b", is_auto_inc, is_default_ts), .confidence = .medium };
+            return .{ .tps = "n", .omit = canOmitType(col_name, "n", is_auto_inc, is_default_ts), .confidence = .low };
         }
 
         // NUMERIC group (m, M) — m is most common
         if (std.mem.eql(u8, upper_t, "NUMERIC")) {
-            return .{ .tps = "m", .omit = canOmitType(col_name, "m", is_auto_inc, is_default_ts) };
+            return .{ .tps = "m", .omit = canOmitType(col_name, "m", is_auto_inc, is_default_ts), .confidence = .high };
         }
 
         // TEXT group (s, S, j, d, t) — disambiguate with heuristics
         if (std.mem.eql(u8, upper_t, "TEXT")) {
             if (col_name.len > 3 and std.mem.endsWith(u8, col_name, "_at"))
-                return .{ .tps = "t", .omit = canOmitType(col_name, "t", is_auto_inc, is_default_ts) };
+                return .{ .tps = "t", .omit = canOmitType(col_name, "t", is_auto_inc, is_default_ts), .confidence = .high };
             if (col_name.len > 3 and std.mem.endsWith(u8, col_name, "_on"))
-                return .{ .tps = "d", .omit = canOmitType(col_name, "d", is_auto_inc, is_default_ts) };
+                return .{ .tps = "d", .omit = canOmitType(col_name, "d", is_auto_inc, is_default_ts), .confidence = .high };
             if (is_default_ts)
-                return .{ .tps = "t", .omit = canOmitType(col_name, "t", is_auto_inc, is_default_ts) };
+                return .{ .tps = "t", .omit = canOmitType(col_name, "t", is_auto_inc, is_default_ts), .confidence = .high };
             // JSON heuristic: settings, data, metadata, config, extra, params, options, etc.
             if (isJsonColumnName(col_name))
-                return .{ .tps = "j", .omit = canOmitType(col_name, "j", is_auto_inc, is_default_ts) };
+                return .{ .tps = "j", .omit = canOmitType(col_name, "j", is_auto_inc, is_default_ts), .confidence = .medium };
             // Long text heuristic: description, content, note, bio, summary, body, etc.
             if (isTextColumnName(col_name))
-                return .{ .tps = "S", .omit = canOmitType(col_name, "S", is_auto_inc, is_default_ts) };
-            return .{ .tps = "s", .omit = canOmitType(col_name, "s", is_auto_inc, is_default_ts) };
+                return .{ .tps = "S", .omit = canOmitType(col_name, "S", is_auto_inc, is_default_ts), .confidence = .medium };
+            return .{ .tps = "s", .omit = canOmitType(col_name, "s", is_auto_inc, is_default_ts), .confidence = .low };
         }
     }
 
     // Fallback: return as-is (unknown type)
-    return .{ .tps = t, .omit = false };
+    return .{ .tps = t, .omit = false, .confidence = .low };
 }
 
 // ─── SQLite column name heuristics ───────────────────────────

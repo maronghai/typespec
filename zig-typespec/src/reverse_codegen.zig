@@ -7,10 +7,14 @@ const Dialect = sp.Dialect;
 
 fn reverseType(sql_type: []const u8, col_name: []const u8, is_auto_inc: bool, is_default_ts: bool, dialect: Dialect) TypeResult {
     const r = type_map.reverseLookup(sql_type, col_name, is_auto_inc, is_default_ts, dialect);
-    return .{ .tps = r.tps, .omit = r.omit };
+    return .{ .tps = r.tps, .omit = r.omit, .confidence = r.confidence };
 }
 
-const TypeResult = struct { tps: []const u8, omit: bool };
+const TypeResult = struct {
+    tps: []const u8,
+    omit: bool,
+    confidence: type_map.Confidence = .high,
+};
 
 fn isDatetime(sql_type: []const u8) bool {
     return type_map.isDatetimeSqlType(sql_type);
@@ -125,6 +129,19 @@ fn writeColumnSuffix(w: anytype, col: sp.SqlColumn, indexes: []const sp.SqlIndex
         if (c.len > 0) {
             try w.writeAll(" : ");
             try w.writeAll(c);
+        }
+    }
+
+    // 8. Confidence comment for SQLite (only when not high)
+    if (dialect == .sqlite and tr.confidence != .high) {
+        // Only emit confidence comment if there's no existing comment
+        if (col.comment == null or (col.comment != null and (col.comment.?.len == 0))) {
+            const conf_str: []const u8 = switch (tr.confidence) {
+                .high => unreachable,
+                .medium => "MEDIUM",
+                .low => "LOW",
+            };
+            try w.print(" -- [{s}]", .{conf_str});
         }
     }
 }

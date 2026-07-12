@@ -1,5 +1,13 @@
 const std = @import("std");
 
+// ─── Source Location ─────────────────────────────────────────
+
+pub const SourceLocation = struct {
+    line: usize, // 1-based line number
+    col: usize, // 1-based column number
+    offset: usize, // 0-based byte offset from start of file
+};
+
 // ─── AST Types ───────────────────────────────────────────────
 
 pub const TypeInfo = union(enum) {
@@ -55,6 +63,7 @@ pub const Field = struct {
     fk: ?FkDecl,
     comment: ?[]const u8,
     line_no: usize,
+    loc: ?SourceLocation = null,
 };
 
 pub const FkActionType = enum {
@@ -101,6 +110,7 @@ pub const Template = struct {
     fields: []const Field,
     slot_index: ?usize,
     line_no: usize,
+    loc: ?SourceLocation = null,
 };
 
 pub const Table = struct {
@@ -112,6 +122,7 @@ pub const Table = struct {
     fks: []const FkDecl,
     indexes: []const IndexDecl,
     line_no: usize,
+    loc: ?SourceLocation = null,
 };
 
 pub const Schema = struct {
@@ -119,6 +130,7 @@ pub const Schema = struct {
     charset: ?[]const u8,
     autofk: bool,
     line_no: usize,
+    loc: ?SourceLocation = null,
 };
 
 pub const SqlComment = struct {

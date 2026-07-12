@@ -21,6 +21,7 @@ pub const Line = struct {
     raw: []const u8,
     trimmed: []const u8,
     line_no: usize,
+    offset: usize = 0, // 0-based byte offset from start of input
 };
 
 pub const Tokenizer = struct {
@@ -32,23 +33,26 @@ pub const Tokenizer = struct {
 
     pub fn tokenizeAll(self: Tokenizer, alloc: std.mem.Allocator) ![]Line {
         var result = try std.ArrayList(Line).initCapacity(alloc, self.lines.len);
+        var byte_offset: usize = 0;
         for (self.lines, 0..) |line, i| {
+            const line_offset = byte_offset;
+            byte_offset += line.len + 1; // +1 for '\n'
             const trimmed = std.mem.trim(u8, line, " \t");
             if (trimmed.len == 0) {
-                try result.append(alloc, .{ .line_type = .Empty, .tokens = &.{}, .raw = line, .trimmed = line, .line_no = i + 1 });
+                try result.append(alloc, .{ .line_type = .Empty, .tokens = &.{}, .raw = line, .trimmed = line, .line_no = i + 1, .offset = line_offset });
                 continue;
             }
             if (trimmed[0] == ';') {
-                try result.append(alloc, .{ .line_type = .SpecComment, .tokens = &.{}, .raw = line, .trimmed = trimmed, .line_no = i + 1 });
+                try result.append(alloc, .{ .line_type = .SpecComment, .tokens = &.{}, .raw = line, .trimmed = trimmed, .line_no = i + 1, .offset = line_offset });
                 continue;
             }
             if (trimmed.len >= 2 and trimmed[0] == '-' and trimmed[1] == '-') {
-                try result.append(alloc, .{ .line_type = .SQLComment, .tokens = &.{}, .raw = line, .trimmed = trimmed, .line_no = i + 1 });
+                try result.append(alloc, .{ .line_type = .SQLComment, .tokens = &.{}, .raw = line, .trimmed = trimmed, .line_no = i + 1, .offset = line_offset });
                 continue;
             }
             const lt = classifyLine(trimmed);
             const toks = try tokenizeLine(alloc, trimmed);
-            try result.append(alloc, .{ .line_type = lt, .tokens = toks, .raw = line, .trimmed = trimmed, .line_no = i + 1 });
+            try result.append(alloc, .{ .line_type = lt, .tokens = toks, .raw = line, .trimmed = trimmed, .line_no = i + 1, .offset = line_offset });
         }
         return try result.toOwnedSlice(alloc);
     }

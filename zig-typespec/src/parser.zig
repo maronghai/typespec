@@ -19,6 +19,7 @@ const IndexDecl = ast_mod.IndexDecl;
 const IndexType = ast_mod.IndexType;
 const Schema = ast_mod.Schema;
 const SqlComment = ast_mod.SqlComment;
+const SourceLocation = ast_mod.SourceLocation;
 
 // ─── Parser ──────────────────────────────────────────────────
 
@@ -32,6 +33,16 @@ pub const Parser = struct {
 
     pub fn initWithDiagnostics(alloc: std.mem.Allocator, diagnostics: *diag.DiagnosticCollector) Parser {
         return .{ .alloc = alloc, .diagnostics = diagnostics };
+    }
+
+    /// Compute SourceLocation from a tokenized line and a token within it.
+    fn locFromLine(line: tk.Line, tok: []const u8) SourceLocation {
+        const col = diag.tokenColumn(tok, line.raw);
+        return .{
+            .line = line.line_no,
+            .col = col,
+            .offset = line.offset + col - 1,
+        };
     }
 
     pub fn parse(self: *Parser, lines: []const tk.Line) !Ast {
@@ -50,6 +61,7 @@ pub const Parser = struct {
         var cur_fks = try std.ArrayList(FkDecl).initCapacity(self.alloc, 4);
         var cur_indexes = try std.ArrayList(IndexDecl).initCapacity(self.alloc, 4);
         var cur_line_no: usize = 0;
+        var cur_loc: ?SourceLocation = null;
         var cur_engine: ?[]const u8 = null;
         var in_block: enum { none, template, table } = .none;
 
@@ -74,19 +86,20 @@ pub const Parser = struct {
                             .charset = charset,
                             .autofk = autofk,
                             .line_no = line.line_no,
+                            .loc = Parser.locFromLine(line, line.tokens[0]),
                         };
                     }
                 },
                 .Template => {
                     // Flush previous template
                     if (in_block == .template) {
-                        try self.flushTemplate(&templates, cur_name, cur_parents_buf, cur_parents_len, &cur_fields, cur_line_no);
+                        try self.flushTemplate(&templates, cur_name, cur_parents_buf, cur_parents_len, &cur_fields, cur_line_no, cur_loc);
                         // Re-init for next template
                         cur_fields = try std.ArrayList(Field).initCapacity(self.alloc, 16);
                         cur_parents_buf = try self.alloc.alloc([]const u8, 4);
                         cur_parents_len = 0;
                     } else if (in_block == .table) {
-                        try self.flushTable(&tables, cur_name, cur_comment, cur_template_ref, cur_engine, &cur_fields, &cur_fks, &cur_indexes, cur_line_no);
+                        try self.flushTable(&tables, cur_name, cur_comment, cur_template_ref, cur_engine, &cur_fields, &cur_fks, &cur_indexes, cur_line_no, cur_loc);
                     }
 
                     // Parse new template header
@@ -103,6 +116,7 @@ pub const Parser = struct {
                     cur_template_ref = null;
                     cur_comment = null;
                     cur_line_no = tmpl.line_no;
+                    cur_loc = tmpl.loc;
                     cur_fields.clearRetainingCapacity();
                     cur_fks.clearRetainingCapacity();
                     cur_indexes.clearRetainingCapacity();
@@ -111,12 +125,12 @@ pub const Parser = struct {
                 .Table => {
                     // Flush previous block
                     if (in_block == .template) {
-                        try self.flushTemplate(&templates, cur_name, cur_parents_buf, cur_parents_len, &cur_fields, cur_line_no);
+                        try self.flushTemplate(&templates, cur_name, cur_parents_buf, cur_parents_len, &cur_fields, cur_line_no, cur_loc);
                         cur_fields = try std.ArrayList(Field).initCapacity(self.alloc, 16);
                         cur_parents_buf = try self.alloc.alloc([]const u8, 4);
                         cur_parents_len = 0;
                     } else if (in_block == .table) {
-                        try self.flushTable(&tables, cur_name, cur_comment, cur_template_ref, cur_engine, &cur_fields, &cur_fks, &cur_indexes, cur_line_no);
+                        try self.flushTable(&tables, cur_name, cur_comment, cur_template_ref, cur_engine, &cur_fields, &cur_fks, &cur_indexes, cur_line_no, cur_loc);
                     }
 
                     // Strip ^ tokens from line before parsing header
@@ -155,6 +169,7 @@ pub const Parser = struct {
                     cur_comment = hdr.comment;
                     cur_template_ref = hdr.template_ref;
                     cur_line_no = hdr.line_no;
+                    cur_loc = hdr.loc;
                     cur_fields.clearRetainingCapacity();
                     cur_fks.clearRetainingCapacity();
                     cur_indexes.clearRetainingCapacity();
@@ -191,6 +206,7 @@ pub const Parser = struct {
                             .fk = null,
                             .comment = null,
                             .line_no = line.line_no,
+                            .loc = if (line.tokens.len > 0) Parser.locFromLine(line, line.tokens[0]) else null,
                         });
                     }
                 },
@@ -300,9 +316,9 @@ pub const Parser = struct {
 
         // Flush last block
         if (in_block == .template) {
-            try self.flushTemplate(&templates, cur_name, cur_parents_buf, cur_parents_len, &cur_fields, cur_line_no);
+            try self.flushTemplate(&templates, cur_name, cur_parents_buf, cur_parents_len, &cur_fields, cur_line_no, cur_loc);
         } else if (in_block == .table) {
-            try self.flushTable(&tables, cur_name, cur_comment, cur_template_ref, cur_engine, &cur_fields, &cur_fks, &cur_indexes, cur_line_no);
+            try self.flushTable(&tables, cur_name, cur_comment, cur_template_ref, cur_engine, &cur_fields, &cur_fks, &cur_indexes, cur_line_no, cur_loc);
         }
 
         return .{
@@ -324,6 +340,7 @@ pub const Parser = struct {
         fks: *std.ArrayList(FkDecl),
         indexes: *std.ArrayList(IndexDecl),
         line_no: usize,
+        loc: ?SourceLocation,
     ) !void {
         try tables.append(self.alloc, .{
             .template_ref = template_ref,
@@ -334,6 +351,7 @@ pub const Parser = struct {
             .fks = try fks.toOwnedSlice(self.alloc),
             .indexes = try indexes.toOwnedSlice(self.alloc),
             .line_no = line_no,
+            .loc = loc,
         });
     }
 
@@ -352,6 +370,7 @@ pub const Parser = struct {
         parents_len: usize,
         fields: *std.ArrayList(Field),
         line_no: usize,
+        loc: ?SourceLocation,
     ) !void {
         const slot_idx = findSlot(fields.items);
         try templates.append(self.alloc, .{
@@ -360,6 +379,7 @@ pub const Parser = struct {
             .fields = try fields.toOwnedSlice(self.alloc),
             .slot_index = slot_idx,
             .line_no = line_no,
+            .loc = loc,
         });
     }
 
@@ -402,6 +422,7 @@ pub const Parser = struct {
             .fields = &.{},
             .slot_index = null,
             .line_no = line.line_no,
+            .loc = Parser.locFromLine(line, line.tokens[0]),
         };
     }
 
@@ -410,6 +431,7 @@ pub const Parser = struct {
         name: []const u8,
         comment: ?[]const u8,
         line_no: usize,
+        loc: ?SourceLocation,
     };
 
     fn parseTableHeader(self: *Parser, line: tk.Line) !TableHeader {
@@ -442,6 +464,7 @@ pub const Parser = struct {
             .name = table_name,
             .comment = comment,
             .line_no = line.line_no,
+            .loc = Parser.locFromLine(line, line.tokens[0]),
         };
     }
 
@@ -900,6 +923,7 @@ pub const Parser = struct {
             .fk = inline_fk,
             .comment = comment,
             .line_no = line.line_no,
+            .loc = Parser.locFromLine(line, line.tokens[0]),
         };
     }
 

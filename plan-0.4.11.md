@@ -1,0 +1,275 @@
+# Plan: v0.4.11 — Architecture Hardening
+
+> 基于深度架构分析（0.4.11 评审），聚焦可扩展性、鲁棒性和未来 IDE 集成基础。
+
+## 背景
+
+当前架构优点：
+- 5 级流水线 + IR 边界严格（Tokenizer → Parser → Semantic → TypeResolver → Codegen）
+- DialectBackend vtable 14 方法，codegen 完全方言无关
+- Pass Manager 模式可扩展
+- 267+ 测试，golden file 覆盖
+
+当前瓶颈：
+- AST 缺乏 Span 信息（只有 `line_no`），限制 LSP 集成和精确错误报告
+- 无语义验证（FK 引用不存在的表、模板名不存在、字段名重复等）
+- Parser 过大（1511 行），承担过多职责
+- Diagnostic 框架存在但 Parser 未充分利用 error recovery
+- TypeInfo 硬编码 tagged union，新类型需改动面太广
+
+---
+
+## P0: 给 AST 加 SourceLocation
+
+### 问题
+
+`Field`、`Table`、`Template` 等只记录 `line_no: usize`，没有 column 和 offset。限制：
+- 错误报告只能指向行，不能精确到 token 位置
+- LSP 集成需要字符偏移做 hover / definition / goto
+- AST 变换后丢失原始位置信息
+
+### 方案
+
+在 `ast.zig` 新增 `SourceLocation` 结构体，所有 AST 节点携带位置信息：
+
+```zig
+pub const SourceLocation = struct {
+    line: usize,       // 1-based 行号
+    col: usize,        // 1-based 列号
+    offset: usize,     // 0-based 字符偏移（从文件头）
+};
+```
+
+修改范围：
+1. `ast.zig` — 所有含 `line_no` 的结构体加 `loc: ?SourceLocation = null`（可选，向后兼容）
+2. `tokenizer.zig` — `Line` 结构体加 `offset: usize`（该行在原文中的起始偏移）
+3. `parser.zig` — 填充 `loc` 字段（利用 tokenizer 提供的行偏移 + `tokenColumn` 计算列号）
+4. `diagnostic.zig` — `Diagnostic` 已有 `col: ?usize`，改为直接使用 AST 节点的 `loc`
+
+### 向后兼容
+
+`loc` 是 `?SourceLocation`，默认 `null`，现有代码不传也编译通过。
+
+### 测试验证
+
+- 现有 267+ 测试全过（`line_no` 行为不变）
+- 新增单元测试：验证 parser 输出的 `loc` 字段正确
+- 新增边界测试：空文件、单行、Unicode 行的 offset 计算
+
+---
+
+## P1: 语义验证 Pass
+
+### 问题
+
+编译器不检查语义正确性：
+- FK 引用不存在的表 → 编译通过，运行时 SQL 报错
+- 模板名不存在 → 静默忽略（template_ref 指向空）
+- 字段名重复 → 后者覆盖前者，无 warning
+- FK 字段不存在 → 静默忽略
+
+### 方案
+
+新增 `validate` 语义 pass，注册到 `DEFAULT_PASSES`：
+
+```zig
+pub const DEFAULT_PASSES = [_]SemanticPass{
+    .{ .name = "autofk", .run = runAutoFk },
+    .{ .name = "suffix_inference", .run = runSuffixInference },
+    .{ .name = "validate", .run = runValidate },  // 新增
+};
+```
+
+验证规则（每个产出 diagnostic，不中断编译）：
+
+| 规则 | 严重级别 | 说明 |
+|------|----------|------|
+| FK 引用不存在的表 | error | `> user_id user.id` 中 `user` 表不存在 |
+| FK 引用不存在的字段 | error | `> user_id user.nonexistent` 中 `nonexistent` 字段不存在 |
+| 模板名不存在 | error | `#base user` 中模板 `base` 未定义 |
+| 字段名重复 | warning | 同一表中两个同名字段（后者覆盖前者） |
+| 模板循环继承 | error | A → B → A 循环 |
+| 自引用 FK 无索引 | note | `> parent_id category.id` 但 category 没有 index on id |
+
+### 实现细节
+
+`PassContext` 已包含 `tables: *ArrayList(ResolvedTable)` 和 `schema`。validate pass 需要额外访问 templates（当前 `PassContext` 不含 templates）。方案：
+
+```zig
+pub const PassContext = struct {
+    alloc: std.mem.Allocator,
+    tables: *std.ArrayList(ResolvedTable),
+    schema: ?ast_mod.Schema,
+    templates: *std.StringHashMap([]const Field),  // 新增
+};
+```
+
+### 测试验证
+
+- 新增 `tests/semantic-validate/` 目录
+- 新增验证测试：无效 FK、不存在模板、字段名重复
+- 现有 267+ 测试全过（无语义错误的输入不受影响）
+- 新增 `-Wno-validate` CLI 选项（可选，抑制 validate 警告）
+
+---
+
+## P2: 拆分 Parser
+
+### 问题
+
+`parser.zig` 1511 行，职责混杂：核心结构解析 + 类型解析 + FK + CHECK + Index。
+
+### 方案
+
+拆为 3 个模块，`parser.zig` 作为协调层：
+
+| 新模块 | 职责 | 预估行数 |
+|--------|------|----------|
+| `parse_struct.zig` | Schema / Template / Table 结构解析（块状态机） | ~400 |
+| `parse_field.zig` | 类型 + 修饰符融合、Default、CHECK 约束 | ~400 |
+| `parse_rel.zig` | FK 声明、Index 声明、FK action 解析 | ~350 |
+
+`parser.zig` 保留：
+- `Parser` struct 定义 + `parse()` 入口
+- 顶层状态机（行类型分发）
+- 诊断上下文传递
+
+各模块函数签名统一：
+
+```zig
+pub fn parseField(alloc: Allocator, tokens: []const []const u8, line_no: usize, diag: ?*DiagnosticCollector) !Field;
+pub fn parseFk(alloc: Allocator, tokens: []const []const u8, line_no: usize, diag: ?*DiagnosticCollector) !FkDecl;
+pub fn parseIndex(alloc: Allocator, tokens: []const []const u8, line_no: usize, diag: ?*DiagnosticCollector) !IndexDecl;
+```
+
+### 为什么不直接用 plan-0.4.8 的 B 方案
+
+plan-0.4.8 选择 A（删除 4 个提取模块）是正确的，因为那 4 个模块是 `parser.zig` 的**重复副本**。本次是**按职责拆分 parser.zig 自身**，方向不同。
+
+### 测试验证
+
+- 267+ 测试全过（行为不变，只是文件组织变化）
+- 每个新模块可独立添加单元测试
+
+---
+
+## P3: Parser Error Recovery
+
+### 问题
+
+`Parser.parse()` 遇到第一个错误就 `return error.ParseError`。对于大型 schema，用户修一个错误要重跑一次。
+
+### 方案
+
+Parser 改为收集错误继续解析：
+
+1. `Parser.parse()` 返回 `!Ast`，改为返回 `struct { ast: Ast, has_errors: bool }`
+2. 错误时不清空已解析的 AST，继续解析到下一个 block 边界
+3. Block 边界识别：`#` / `%` / `$` / `>` 行开头
+4. 最后通过 `DiagnosticCollector` 输出所有错误
+
+```zig
+pub const ParseResult = struct {
+    ast: Ast,
+    has_errors: bool,
+};
+
+pub fn parse(self: *Parser, lines: []const tk.Line) !ParseResult {
+    // ... 现有逻辑 ...
+    // 遇到错误时：
+    //   1. 记录 diagnostic
+    //   //   2. 跳到下一个 block 边界
+    //   3. 继续解析
+    //   返回 ParseResult { .ast = partial_ast, .has_errors = true }
+}
+```
+
+### 风险
+
+- Parser 复杂度增加 ~20%
+- 需要仔细测试 partial AST 的语义分析行为
+
+### 测试验证
+
+- 新增测试：多错误输入，验证所有错误都被报告
+- 新增测试：单错误输入，验证 partial AST 中正确的部分不受影响
+- 现有 267+ 测试全过（无错误输入行为不变）
+
+---
+
+## P4: SQLite 反向映射置信度
+
+### 问题
+
+SQLite 类型系统只有 INTEGER / NUMERIC / TEXT / BLOB，反向映射依赖列名启发式（`is_*` 前缀 → boolean）。但输出的 .tps 和 MySQL/PG 一样是确定性的，隐藏了信息损失。
+
+### 方案
+
+在 `reverse_codegen.zig` 的 SQLite 路径输出置信度注释：
+
+```sql
+-- Generated by zig-typespec (reverse)
+-- Confidence: LOW — SQLite type system is limited
+
+$ ecommerce
+
+# user
+id n++        -- [HIGH] INTEGER + _id suffix
+name s        -- [MEDIUM] TEXT, no name pattern
+is_active b   -- [HIGH] INTEGER + is_ prefix
+settings j    -- [LOW] TEXT, heuristic guess
+```
+
+实现：
+1. `type_map.zig` 的 `reverseLookupSqlite` 返回 `struct { tps: []const u8, confidence: enum { high, medium, low } }`
+2. `reverse_codegen.zig` 在 `confidence == low` 时追加 `-- [LOW]` 注释
+3. 添加 CLI 选项 `--no-confidence` 抑制置信度注释
+
+### 测试验证
+
+- 更新 SQLite reverse golden files（加置信度注释）
+- 新增测试：验证 high/medium/low 分配正确
+- `--no-confidence` 输出与现有 golden files 一致
+
+---
+
+## 执行顺序
+
+```
+P0（AST Span）→ P1（语义验证）→ P2（Parser 拆分）→ P3（Error Recovery）→ P4（SQLite 置信度）
+```
+
+依赖关系：
+- P0 → P1：validate pass 需要 `SourceLocation` 生成精确错误位置
+- P1 → P3：error recovery 需要 validate pass 已注册
+- P2 可与 P0/P1 并行（纯重构）
+- P4 独立
+
+## 预估工作量
+
+| 阶段 | 预估时间 | 风险 | 收益 |
+|------|----------|------|------|
+| P0 | 30-45 分钟 | 低 | LSP 集成基础、精确错误报告 |
+| P1 | 45-60 分钟 | 中 | 语义正确性保障，减少运行时 SQL 错误 |
+| P2 | 30-45 分钟 | 低 | Parser 可维护性、可独立测试 |
+| P3 | 45-60 分钟 | 高 | 多错误报告，提升开发体验 |
+| P4 | 20-30 分钟 | 低 | SQLite 反向工程透明度 |
+| **总计** | **~3-4 小时** | | |
+
+## 建议分两个版本
+
+**v0.4.11**（本次）：P0 + P1 + P4（低风险高收益）
+**v0.4.12**（后续）：P2 + P3（Parser 重构 + error recovery，高复杂度）
+
+---
+
+## 质量保障
+
+每个阶段完成后必须：
+1. `zig build test` — 内联单元测试
+2. `tests/test.sh` — MySQL 81+ 项
+3. `tests/test_postgres.sh` — PG 93+ 项
+4. `tests/test_sqlite.sh` — SQLite
+5. `tests/test_migrate.sh` — Migration 9 项
+6. `tests/test_reverse.sh` — Reverse 8 项
+7. `tests/test_diff.sh` — Diff 2 项
