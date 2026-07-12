@@ -934,3 +934,85 @@ test "diff: no changes on identical tables" {
     try testing.expectEqual(@as(usize, 0), result.table_diffs.len);
     try testing.expectEqual(@as(usize, 0), result.dropped_tables.len);
 }
+
+test "diff: field added and dropped simultaneously" {
+    const alloc = testing.allocator;
+
+    const old_fields = try alloc.alloc(Field, 2);
+    old_fields[0] = makeField(alloc, "id", .{ .simple = "n" });
+    old_fields[1] = makeField(alloc, "old_col", .{ .simple = "s" });
+
+    const new_fields = try alloc.alloc(Field, 2);
+    new_fields[0] = makeField(alloc, "id", .{ .simple = "n" });
+    new_fields[1] = makeField(alloc, "new_col", .{ .simple = "n" });
+
+    const old_table = try alloc.dupe(sem.ResolvedTable, &.{.{
+        .name = "t", .comment = null, .engine = null,
+        .fields = old_fields, .fks = &.{}, .indexes = &.{}, .line_no = 1,
+    }});
+    const new_table = try alloc.dupe(sem.ResolvedTable, &.{.{
+        .name = "t", .comment = null, .engine = null,
+        .fields = new_fields, .fks = &.{}, .indexes = &.{}, .line_no = 1,
+    }});
+
+    const result = try diff(makeResolvedAst(alloc, old_table), makeResolvedAst(alloc, new_table), alloc);
+    try testing.expectEqual(@as(usize, 1), result.table_diffs.len);
+    // Should detect both add and drop
+    try testing.expectEqual(@as(usize, 2), result.table_diffs[0].field_diffs.len);
+}
+
+test "diff: FK change detected" {
+    const alloc = testing.allocator;
+
+    const fields = try alloc.alloc(Field, 1);
+    fields[0] = makeField(alloc, "id", .{ .simple = "n" });
+
+    const fk1 = try alloc.dupe(ast_mod.FkDecl, &.{.{
+        .fields = &.{"user_id"},
+        .ref_table = "users",
+        .ref_fields = &.{"id"},
+        .on_delete = .cascade,
+        .on_update = .no_action,
+    }});
+    const fk2 = try alloc.dupe(ast_mod.FkDecl, &.{.{
+        .fields = &.{"user_id"},
+        .ref_table = "users",
+        .ref_fields = &.{"id"},
+        .on_delete = .set_null,
+        .on_update = .no_action,
+    }});
+
+    const old_table = try alloc.dupe(sem.ResolvedTable, &.{.{
+        .name = "order", .comment = null, .engine = null,
+        .fields = fields, .fks = fk1, .indexes = &.{}, .line_no = 1,
+    }});
+    const new_table = try alloc.dupe(sem.ResolvedTable, &.{.{
+        .name = "order", .comment = null, .engine = null,
+        .fields = fields, .fks = fk2, .indexes = &.{}, .line_no = 1,
+    }});
+
+    const result = try diff(makeResolvedAst(alloc, old_table), makeResolvedAst(alloc, new_table), alloc);
+    try testing.expectEqual(@as(usize, 1), result.table_diffs.len);
+    try testing.expectEqual(@as(usize, 1), result.table_diffs[0].fk_diffs.len);
+}
+
+test "diff: table comment change detected" {
+    const alloc = testing.allocator;
+
+    const fields = try alloc.alloc(Field, 1);
+    fields[0] = makeField(alloc, "id", .{ .simple = "n" });
+
+    const old_table = try alloc.dupe(sem.ResolvedTable, &.{.{
+        .name = "t", .comment = "old comment", .engine = null,
+        .fields = fields, .fks = &.{}, .indexes = &.{}, .line_no = 1,
+    }});
+    const new_table = try alloc.dupe(sem.ResolvedTable, &.{.{
+        .name = "t", .comment = "new comment", .engine = null,
+        .fields = fields, .fks = &.{}, .indexes = &.{}, .line_no = 1,
+    }});
+
+    const result = try diff(makeResolvedAst(alloc, old_table), makeResolvedAst(alloc, new_table), alloc);
+    try testing.expectEqual(@as(usize, 1), result.table_diffs.len);
+    // Comment change should be detected as a modify
+    try testing.expectEqual(@as(usize, 1), result.table_diffs[0].field_diffs.len);
+}

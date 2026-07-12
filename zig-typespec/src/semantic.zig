@@ -989,3 +989,152 @@ test "template: multiple mixins" {
     try testing.expectEqualStrings("created_at", result.tables[0].fields[0].name);
     try testing.expectEqualStrings("deleted_at", result.tables[0].fields[1].name);
 }
+
+test "template: slot in middle position" {
+    const alloc = testing.allocator;
+
+    // parent: id, ..., name (slot at index 1)
+    const parent_fields = try alloc.alloc(Field, 3);
+    parent_fields[0] = makeTestField("id", .{ .simple = "n" });
+    parent_fields[1] = makeTestField("...", .none); // slot
+    parent_fields[2] = makeTestField("name", .{ .simple = "s" });
+    const parent = ast_mod.Template{
+        .name = "base",
+        .parents = &.{},
+        .fields = parent_fields,
+        .slot_index = 1,
+    };
+
+    // child inserts email at slot
+    const child_fields = try alloc.alloc(Field, 1);
+    child_fields[0] = makeTestField("email", .{ .simple = "s" });
+    const child = ast_mod.Template{
+        .name = "with_email",
+        .parents = &.{"base"},
+        .fields = child_fields,
+        .slot_index = null,
+    };
+
+    const table = ast_mod.Table{
+        .name = "t",
+        .template_ref = "with_email",
+        .comment = null,
+        .engine = null,
+        .fields = &.{},
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
+    };
+
+    const ast = makeTestAst(alloc, try alloc.dupe(ast_mod.Table, &.{table}), try alloc.dupe(ast_mod.Template, &.{ parent, child }));
+    var sa = SemanticAnalyzer.init(alloc);
+    const result = try sa.analyze(ast);
+
+    // Fields should be: id, email (inserted at slot), name
+    try testing.expectEqual(@as(usize, 3), result.tables[0].fields.len);
+    try testing.expectEqualStrings("id", result.tables[0].fields[0].name);
+    try testing.expectEqualStrings("email", result.tables[0].fields[1].name);
+    try testing.expectEqualStrings("name", result.tables[0].fields[2].name);
+}
+
+test "template: child field type overrides parent" {
+    const alloc = testing.allocator;
+
+    // parent: id as int
+    const parent_fields = try alloc.alloc(Field, 1);
+    parent_fields[0] = makeTestField("id", .{ .simple = "n" });
+    const parent = ast_mod.Template{
+        .name = "base",
+        .parents = &.{},
+        .fields = parent_fields,
+        .slot_index = null,
+    };
+
+    // child overrides id to bigint
+    const child_fields = try alloc.alloc(Field, 1);
+    child_fields[0] = makeTestField("id", .{ .simple = "N" });
+    const child = ast_mod.Template{
+        .name = "big_base",
+        .parents = &.{"base"},
+        .fields = child_fields,
+        .slot_index = null,
+    };
+
+    const table = ast_mod.Table{
+        .name = "t",
+        .template_ref = "big_base",
+        .comment = null,
+        .engine = null,
+        .fields = &.{},
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
+    };
+
+    const ast = makeTestAst(alloc, try alloc.dupe(ast_mod.Table, &.{table}), try alloc.dupe(ast_mod.Template, &.{ parent, child }));
+    var sa = SemanticAnalyzer.init(alloc);
+    const result = try sa.analyze(ast);
+
+    // Child's "N" (bigint) should override parent's "n" (int)
+    try testing.expectEqual(@as(usize, 1), result.tables[0].fields.len);
+    try testing.expectEqualStrings("N", result.tables[0].fields[0].type_info.simple);
+}
+
+test "template: table own fields merged after template fields" {
+    const alloc = testing.allocator;
+
+    const parent_fields = try alloc.alloc(Field, 1);
+    parent_fields[0] = makeTestField("id", .{ .simple = "n" });
+    const parent = ast_mod.Template{
+        .name = "base",
+        .parents = &.{},
+        .fields = parent_fields,
+        .slot_index = null,
+    };
+
+    // Table has its own field "extra" plus template "base"
+    const table_fields = try alloc.alloc(Field, 1);
+    table_fields[0] = makeTestField("extra", .{ .simple = "s" });
+    const table = ast_mod.Table{
+        .name = "t",
+        .template_ref = "base",
+        .comment = null,
+        .engine = null,
+        .fields = table_fields,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
+    };
+
+    const ast = makeTestAst(alloc, try alloc.dupe(ast_mod.Table, &.{table}), try alloc.dupe(ast_mod.Template, &.{parent}));
+    var sa = SemanticAnalyzer.init(alloc);
+    const result = try sa.analyze(ast);
+
+    // Template field first, then table's own field
+    try testing.expectEqual(@as(usize, 2), result.tables[0].fields.len);
+    try testing.expectEqualStrings("id", result.tables[0].fields[0].name);
+    try testing.expectEqualStrings("extra", result.tables[0].fields[1].name);
+}
+
+test "suffix inference: no suffix keeps explicit type" {
+    const alloc = testing.allocator;
+    const fields = try alloc.alloc(Field, 1);
+    fields[0] = makeTestField("data", .{ .simple = "b" }); // explicit boolean
+
+    const ast = makeTestAst(alloc, try alloc.dupe(ast_mod.Table, &.{.{
+        .name = "t",
+        .template_ref = null,
+        .comment = null,
+        .engine = null,
+        .fields = fields,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
+    }}), &.{});
+
+    var sa = SemanticAnalyzer.init(alloc);
+    const result = try sa.analyze(ast);
+
+    // Explicit type is not overridden by suffix inference
+    try testing.expectEqualStrings("b", result.tables[0].fields[0].type_info.simple);
+}

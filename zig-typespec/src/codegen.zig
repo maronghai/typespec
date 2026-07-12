@@ -606,3 +606,131 @@ test "codegen: MySQL ENGINE in table footer" {
     try testing.expect(std.mem.indexOf(u8, sql, "ENGINE=MyISAM") != null);
     try testing.expect(std.mem.indexOf(u8, sql, "DEFAULT CHARSET=utf8mb4") != null);
 }
+
+test "codegen: MySQL UNSIGNED column" {
+    const alloc = testing.allocator;
+    const cols = try alloc.alloc(typed_ast_mod.TypedColumn, 1);
+    cols[0] = makeTestColumn("amount", "int");
+    cols[0].unsigned = true;
+
+    const table = typed_ast_mod.TypedTable{
+        .name = "t",
+        .comment = null,
+        .engine = null,
+        .columns = cols,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
+    };
+
+    const tables = try alloc.dupe(typed_ast_mod.TypedTable, &.{table});
+    const typed = typed_ast_mod.TypedAst{
+        .schema_name = null,
+        .schema_charset = null,
+        .tables = tables,
+        .sql_comments = &.{},
+    };
+
+    var cg = Codegen.init(alloc, .mysql);
+    const sql = try cg.generateFromTypedAst(typed);
+    try testing.expect(std.mem.indexOf(u8, sql, "UNSIGNED") != null);
+
+    // PG should NOT have UNSIGNED
+    var cg_pg = Codegen.init(alloc, .postgres);
+    const sql_pg = try cg_pg.generateFromTypedAst(typed);
+    try testing.expect(std.mem.indexOf(u8, sql_pg, "UNSIGNED") == null);
+}
+
+test "codegen: PG COMMENT ON TABLE and COLUMN" {
+    const alloc = testing.allocator;
+    const cols = try alloc.alloc(typed_ast_mod.TypedColumn, 1);
+    cols[0] = makeTestColumn("id", "integer");
+    cols[0].comment = "primary identifier";
+
+    const table = typed_ast_mod.TypedTable{
+        .name = "items",
+        .comment = "all items",
+        .engine = null,
+        .columns = cols,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
+    };
+
+    const tables = try alloc.dupe(typed_ast_mod.TypedTable, &.{table});
+    const typed = typed_ast_mod.TypedAst{
+        .schema_name = null,
+        .schema_charset = null,
+        .tables = tables,
+        .sql_comments = &.{},
+    };
+
+    var cg = Codegen.init(alloc, .postgres);
+    const sql = try cg.generateFromTypedAst(typed);
+    try testing.expect(std.mem.indexOf(u8, sql, "COMMENT ON TABLE") != null);
+    try testing.expect(std.mem.indexOf(u8, sql, "COMMENT ON COLUMN") != null);
+}
+
+test "codegen: SQLite uses -- comments" {
+    const alloc = testing.allocator;
+    const cols = try alloc.alloc(typed_ast_mod.TypedColumn, 1);
+    cols[0] = makeTestColumn("id", "INTEGER");
+    cols[0].primary_key = true;
+
+    const table = typed_ast_mod.TypedTable{
+        .name = "t",
+        .comment = "test table",
+        .engine = null,
+        .columns = cols,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
+    };
+
+    const tables = try alloc.dupe(typed_ast_mod.TypedTable, &.{table});
+    const typed = typed_ast_mod.TypedAst{
+        .schema_name = null,
+        .schema_charset = null,
+        .tables = tables,
+        .sql_comments = &.{},
+    };
+
+    var cg = Codegen.init(alloc, .sqlite);
+    const sql = try cg.generateFromTypedAst(typed);
+    try testing.expect(std.mem.indexOf(u8, sql, "-- test table") != null);
+    // SQLite should not have ENGINE or CHARSET
+    try testing.expect(std.mem.indexOf(u8, sql, "ENGINE") == null);
+    try testing.expect(std.mem.indexOf(u8, sql, "CHARSET") == null);
+}
+
+test "codegen: multiple tables separated by blank line" {
+    const alloc = testing.allocator;
+    const cols = try alloc.alloc(typed_ast_mod.TypedColumn, 1);
+    cols[0] = makeTestColumn("id", "int");
+    cols[0].primary_key = true;
+
+    const t1 = typed_ast_mod.TypedTable{
+        .name = "a", .comment = null, .engine = null,
+        .columns = cols, .fks = &.{}, .indexes = &.{}, .line_no = 1,
+    };
+    const t2 = typed_ast_mod.TypedTable{
+        .name = "b", .comment = null, .engine = null,
+        .columns = cols, .fks = &.{}, .indexes = &.{}, .line_no = 5,
+    };
+
+    const tables = try alloc.dupe(typed_ast_mod.TypedTable, &.{ t1, t2 });
+    const typed = typed_ast_mod.TypedAst{
+        .schema_name = null, .schema_charset = null,
+        .tables = tables, .sql_comments = &.{},
+    };
+
+    var cg = Codegen.init(alloc, .mysql);
+    const sql = try cg.generateFromTypedAst(typed);
+    // Both tables should be present
+    try testing.expect(std.mem.indexOf(u8, sql, "`a`") != null);
+    try testing.expect(std.mem.indexOf(u8, sql, "`b`") != null);
+    // Tables should be separated
+    const pos_a = std.mem.indexOf(u8, sql, "`a`").?;
+    const pos_b = std.mem.indexOf(u8, sql, "`b`").?;
+    try testing.expect(pos_b > pos_a);
+}
