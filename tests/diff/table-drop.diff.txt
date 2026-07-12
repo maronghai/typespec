@@ -1,0 +1,4 @@
+-- DROP TABLE `t`
+-- CREATE TABLE `t2`
+  + id
+  + val

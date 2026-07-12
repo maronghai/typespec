@@ -1,0 +1,2 @@
+-- ALTER TABLE `t`
+  - @uk_email (drop index)

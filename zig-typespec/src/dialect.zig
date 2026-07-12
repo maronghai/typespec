@@ -33,6 +33,7 @@ pub const DialectBackend = struct {
     emitStandaloneIndex: *const fn (w: *Writer, table_name: []const u8, idx: IndexDecl) anyerror!void,
     emitInlineColumnComment: *const fn (w: *Writer, comment: []const u8) anyerror!void,
     emitEnumTypeCheck: *const fn (w: *Writer, col_name: []const u8, enum_values: []const []const u8) anyerror!void,
+    emitInlineColumnStandaloneIndex: *const fn (w: *Writer, table_name: []const u8, col_name: []const u8) anyerror!void,
 };
 
 pub fn getBackend(dialect: Dialect) DialectBackend {
@@ -157,6 +158,7 @@ const mysql_backend = DialectBackend{
     .emitStandaloneIndex = mysqlEmitStandaloneIndex,
     .emitInlineColumnComment = mysqlEmitInlineColumnComment,
     .emitEnumTypeCheck = mysqlEmitEnumTypeCheck,
+    .emitInlineColumnStandaloneIndex = mysqlNoopInlineColumnIndex,
 };
 
 // ─── Shared PG/SQLite Backend ──────────────────────────────────
@@ -316,6 +318,7 @@ const pg_backend = DialectBackend{
     .emitStandaloneIndex = pgSqliteEmitStandaloneIndexPG,
     .emitInlineColumnComment = pgSqliteEmitInlineColumnCommentPG,
     .emitEnumTypeCheck = pgSqliteEmitEnumTypeCheck,
+    .emitInlineColumnStandaloneIndex = pgSqliteEmitInlineColumnStandaloneIndex,
 };
 
 // ─── SQLite Backend ────────────────────────────────────────────
@@ -337,7 +340,24 @@ const sqlite_backend = DialectBackend{
     .emitStandaloneIndex = pgSqliteEmitStandaloneIndexPG,
     .emitInlineColumnComment = pgSqliteEmitInlineColumnCommentSQLite,
     .emitEnumTypeCheck = pgSqliteEmitEnumTypeCheck,
+    .emitInlineColumnStandaloneIndex = pgSqliteEmitInlineColumnStandaloneIndex,
 };
+
+// ─── Inline column standalone index (PG/SQLite vs MySQL) ─────
+
+fn mysqlNoopInlineColumnIndex(_: *Writer, _: []const u8, _: []const u8) anyerror!void {
+    // MySQL handles inline indexes via emitInlineIndex — no standalone needed
+}
+
+fn pgSqliteEmitInlineColumnStandaloneIndex(w: *Writer, table_name: []const u8, col_name: []const u8) anyerror!void {
+    try w.writeAll("CREATE INDEX ");
+    try pgSqliteQuoteIdent(w, try std.fmt.allocPrint(std.heap.page_allocator, "idx_{s}_{s}", .{ table_name, col_name }));
+    try w.writeAll(" ON ");
+    try pgSqliteQuoteIdent(w, table_name);
+    try w.writeAll(" (");
+    try pgSqliteQuoteIdent(w, col_name);
+    try w.writeAll(");\n");
+}
 
 // ─── Shared helpers (dialect-independent) ──────────────────────
 

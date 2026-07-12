@@ -322,7 +322,8 @@ fn handleDiff(io: std.Io, alloc: std.mem.Allocator, old_path: []const u8, new_pa
     const old_ast = try compileToAst(io, alloc, old_path);
     const new_ast = try compileToAst(io, alloc, new_path);
     const schema_diff = try diff.diff(old_ast, new_ast, alloc);
-    diff.printDiff(schema_diff);
+    const diff_text = try diff.formatDiff(alloc, schema_diff);
+    try writeOutput(io, diff_text, null);
 }
 
 fn handleMigrate(io: std.Io, alloc: std.mem.Allocator, old_path: []const u8, new_path: []const u8, output_path: ?[]const u8, dialect: codegen.Dialect) !void {

@@ -516,7 +516,92 @@ fn createAllFkDiffs(alloc: std.mem.Allocator, old_fks: []const FkDecl, new_fks: 
 
 // ─── Diff Printer (for `typespec diff` command) ────────────
 
+pub fn formatDiff(alloc: std.mem.Allocator, d: SchemaDiff) ![]const u8 {
+    var aw = std.Io.Writer.Allocating.init(alloc);
+    const w = &aw.writer;
+
+    var has_changes = false;
+
+    for (d.dropped_tables) |tname| {
+        try w.print("-- DROP TABLE `{s}`\n", .{tname});
+        has_changes = true;
+    }
+
+    for (d.table_diffs) |td| {
+        if (td.action == .create) {
+            try w.print("-- CREATE TABLE `{s}`\n", .{td.name});
+            has_changes = true;
+            for (td.field_diffs) |fd| {
+                try w.print("  + {s}\n", .{fd.name});
+            }
+            for (td.index_diffs) |idx| {
+                try w.print("  + @{s}\n", .{idx.name});
+            }
+            for (td.fk_diffs) |fk| {
+                if (fk.new_fk) |nfk| {
+                    try w.print("  + FK → {s}\n", .{nfk.ref_table});
+                }
+            }
+            continue;
+        }
+
+        // alter
+        var table_has_changes = false;
+        for (td.field_diffs) |fd| {
+            if (!table_has_changes) {
+                try w.print("-- ALTER TABLE `{s}`\n", .{td.name});
+                table_has_changes = true;
+            }
+            switch (fd.action) {
+                .add => try w.print("  + {s} (add)\n", .{fd.name}),
+                .drop => try w.print("  - {s} (drop)\n", .{fd.name}),
+                .modify => try w.print("  ~ {s} (modify)\n", .{fd.name}),
+                .rename => try w.print("  ~ {s} → {s} (rename)\n", .{ fd.rename_from.?, fd.name }),
+            }
+        }
+        for (td.index_diffs) |idx| {
+            if (!table_has_changes) {
+                try w.print("-- ALTER TABLE `{s}`\n", .{td.name});
+                table_has_changes = true;
+            }
+            switch (idx.action) {
+                .add => try w.print("  + @{s} (add index)\n", .{idx.name}),
+                .drop => try w.print("  - @{s} (drop index)\n", .{idx.name}),
+                .modify => try w.print("  ~ @{s} (modify index)\n", .{idx.name}),
+            }
+        }
+        for (td.fk_diffs) |fk| {
+            if (!table_has_changes) {
+                try w.print("-- ALTER TABLE `{s}`\n", .{td.name});
+                table_has_changes = true;
+            }
+            switch (fk.action) {
+                .add => {
+                    if (fk.new_fk) |nfk| {
+                        try w.print("  + FK → {s} (add)\n", .{nfk.ref_table});
+                    }
+                },
+                .drop => {
+                    if (fk.old_fk) |ofk| {
+                        try w.print("  - FK → {s} (drop)\n", .{ofk.ref_table});
+                    }
+                },
+            }
+        }
+        if (table_has_changes) has_changes = true;
+    }
+
+    if (!has_changes) {
+        // Empty output for no differences
+    }
+
+    try w.flush();
+    var out = aw.toArrayList();
+    return try out.toOwnedSlice(alloc);
+}
+
 pub fn printDiff(d: SchemaDiff) void {
+    // Legacy stderr path — used only by diagnostic trace
     var has_changes = false;
 
     for (d.dropped_tables) |tname| {

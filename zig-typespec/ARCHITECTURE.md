@@ -118,7 +118,7 @@ Input (SQL DDL text)
 
 ## DialectBackend Vtable
 
-11 function pointers for dialect-specific SQL generation:
+15 function pointers for dialect-specific SQL generation:
 
 ```zig
 DialectBackend = struct {
@@ -138,6 +138,8 @@ DialectBackend = struct {
     emitStandaloneIndex:    fn(w, table_name, idx) -> !void,
     emitInlineColumnComment: fn(w, comment) -> !void,
     emitEnumTypeCheck:      fn(w, col_name, enum_values) -> !void,
+    // v0.4.14: final dialect switch elimination
+    emitInlineColumnStandaloneIndex: fn(w, table_name, col_name) -> !void,
 };
 ```
 
@@ -157,6 +159,7 @@ DialectBackend = struct {
 | `emitStandaloneIndex` | no-op (inline) | `CREATE INDEX` | `CREATE INDEX` |
 | `emitInlineColumnComment` | `COMMENT '...'` | no-op (standalone) | no-op (standalone) |
 | `emitEnumTypeCheck` | no-op (native ENUM) | `CHECK (... IN (...))` | `CHECK (... IN (...))` |
+| `emitInlineColumnStandaloneIndex` | no-op (inline) | `CREATE INDEX` | `CREATE INDEX` |
 
 PG and SQLite share 4/5 method implementations. `emitCheckExpr` is a shared standalone function (all dialects use identical CHECK syntax).
 
@@ -174,7 +177,7 @@ New passes can be added by:
 ## Key Design Decisions
 
 1. **TypedAst IR layer**: Separates type resolution from code generation. Codegen only outputs strings — no type inference logic.
-2. **DialectBackend vtable**: 5 function pointers cover all dialect differences. Adding a new dialect requires < 50 lines.
+2. **DialectBackend vtable**: 15 function pointers cover all dialect differences. Adding a new dialect requires < 60 lines. codegen.zig is fully dialect-agnostic (zero `switch(dialect)` in production code).
 3. **AST-level diff**: Semantic comparison, not text diff. Detects renames by signature matching.
 4. **Arena allocation**: All modules take `std.mem.Allocator`. Arena-style usage for command-lifetime memory.
 5. **Parser module extraction**: `parse_field.zig`, `parse_fk.zig`, `parse_check.zig`, `parse_index.zig` serve as standalone reference implementations.
@@ -183,7 +186,7 @@ New passes can be added by:
 
 1. Add variant to `Dialect` enum in `type_map.zig`
 2. Add type mappings to `TYPE_TABLE` in `type_map.zig`
-3. Create `DialectBackend` instance in `dialect.zig` (implement all 11 methods)
+3. Create `DialectBackend` instance in `dialect.zig` (implement all 15 methods)
 4. Register in `getBackend()` switch
 5. Add golden file tests in `tests/`
 
@@ -196,8 +199,8 @@ No changes needed in `codegen.zig` — it is fully dialect-agnostic.
 | Unit tests | `type_map.zig`, `tokenizer.zig`, `parser.zig`, `diff.zig`, `semantic.zig` | ~96 | Core logic |
 | MySQL golden | `tests/test.sh` | 81 | Full pipeline |
 | PG golden | `tests/test_postgres.sh` | 93 | Full pipeline |
-| SQLite golden | `tests/test_sqlite.sh` | 1 | Full pipeline |
-| Migrate golden | `tests/test_migrate.sh` | 9 | Diff + migration SQL |
-| Reverse golden | `tests/test_reverse.sh` | 8 | SQL → .tps |
-| Diff golden | `tests/test_diff.sh` | 2 | Schema comparison |
-| **Total** | | **~298** | |
+| SQLite golden | `tests/test_sqlite.sh` | 16 | Full pipeline |
+| Migrate golden | `tests/test_migrate.sh` | 10 | Diff + migration SQL |
+| Reverse golden | `tests/test_reverse.sh` | 15 | SQL → .tps |
+| Diff golden | `tests/test_diff.sh` | 8 | Schema comparison |
+| **Total** | | **~223+** | |

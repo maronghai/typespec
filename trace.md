@@ -66,13 +66,86 @@
 
 ---
 
+## Phase 9: v0.4.14 — Architecture Hardening + Test Expansion
+
+### Phase 9.1: SQLite Test Completion (Priority: HIGH) ✅
+
+| # | Item | Status | Notes |
+|---|------|--------|-------|
+| T-1 | sqlite-autoincrement.tps | ✅ | INTEGER PRIMARY KEY AUTOINCREMENT |
+| T-2 | sqlite-boolean.tps | ✅ | boolean → INTEGER (0/1) |
+| T-3 | sqlite-datetime-json.tps | ✅ | datetime → TEXT, json → TEXT |
+| T-4 | sqlite-decimal.tps | ✅ | DECIMAL → NUMERIC |
+| T-5 | sqlite-composite-pk.tps | ✅ | composite PRIMARY KEY without autoincrement |
+| T-6 | sqlite-blob.tps | ✅ | blob → BLOB |
+| T-7 | sqlite-index.tps | ✅ | standalone CREATE INDEX |
+| T-8 | sqlite-fk.tps | ✅ | foreign key with actions |
+| T-9 | sqlite-check.tps | ✅ | CHECK constraints (BETWEEN, IN, comparison) |
+| T-10 | sqlite-text.tps | ✅ | text types (S, s64) |
+| T-11 | sqlite-template.tps | ✅ | template inheritance |
+| T-12 | sqlite-explicit-types.tps | ✅ | explicit types (128, 10,2, s64, N, 20,6) |
+| T-13 | sqlite-enum.tps | ✅ | enum → TEXT + CHECK |
+| T-14 | sqlite-comment.tps | ✅ | table comment via -- style |
+| T-15 | sqlite-multi-table.tps | ✅ | multiple tables with FKs |
+
+### Phase 9.2: Diff Output Fix + Test Expansion (Priority: MEDIUM) ✅
+
+| # | Item | Status | Notes |
+|---|------|--------|-------|
+| D-1 | printDiff → formatDiff (stdout) | ✅ | diff.zig: 新增 `formatDiff()` 返回字符串; main.zig: handleDiff 用 writeOutput 输出到 stdout |
+| D-2 | add-column.golden 更新 | ✅ | 旧 golden 为空（stderr bug），已生成正确 golden |
+| D-3 | type-change.diff.txt | ✅ | 字段类型变更检测 |
+| D-4 | index-change.diff.txt | ✅ | 索引删除检测 |
+| D-5 | fk-change.diff.txt | ✅ | FK 删除检测 |
+| D-6 | table-drop.diff.txt | ✅ | 表删除 + 新表创建 |
+| D-7 | no-change.diff.txt | ✅ | 空 diff（无变更） |
+| D-8 | add-field.diff.txt | ✅ | 字段新增检测 |
+
+### Phase 9.3: Migration Test Expansion (Priority: MEDIUM) ✅
+
+| # | Item | Status | Notes |
+|---|------|--------|-------|
+| M-1 | migrate-multi-col.golden | ✅ | 多列同时 ALTER TABLE |
+| M-2 | migrate-index.golden | ✅ | 索引新增/删除组合 |
+
+### Phase 9.4: Reverse Test Expansion (Priority: MEDIUM) ✅
+
+| # | Item | Status | Notes |
+|---|------|--------|-------|
+| R-1 | mysql-table | ✅ | MySQL 完整表（ENGINE, COMMENT, UNIQUE INDEX） |
+| R-2 | pg-table | ✅ | PG 完整表（GENERATED AS IDENTITY, COMMENT ON） |
+| R-3 | sqlite-table | ✅ | SQLite 完整表（FOREIGN KEY, INDEX, -- comment） |
+| R-4 | mysql-composite | ✅ | MySQL 复合 PK + 多 FK |
+| R-5 | pg-self-ref | ✅ | PG 自引用 FK（categories.parent_id） |
+| R-6 | sqlite-settings | ✅ | SQLite settings 表 |
+| R-7 | mysql-fk-enum | ✅ | MySQL FK + ENUM + ON UPDATE |
+
+### Phase 9.5: DialectBackend vtable 扩展到 15 方法 (Priority: MEDIUM) ✅
+
+| # | Item | Status | Notes |
+|---|------|--------|-------|
+| V-1 | emitInlineColumnStandaloneIndex 方法 | ✅ | MySQL=no-op, PG/SQLite=CREATE INDEX |
+| V-2 | codegen.zig 零方言引用 | ✅ | grep 确认：仅测试 setup 代码引用 dialect |
+| V-3 | ARCHITECTURE.md 更新 | ✅ | 15 方法，测试计数更新 |
+
+---
+
 ## Summary
 
 - **Started**: 2026-07-11
-- **Completed**: 2026-07-11
-- **Tests**: 298+ passing (81 MySQL + 93 PG + 1 SQLite + 9 Migrate + 8 Reverse + 2 Diff + ~96 Zig unit tests)
-- **Items completed**: 17/17（v0.4.7: 10/12 + v0.4.8: 7/7）
+- **v0.4.14 completed**: 2026-07-12
+- **Tests**: 223+ passing (81 MySQL + 93 PG + 16 SQLite + 10 Migrate + 15 Reverse + 8 Diff + ~96 Zig unit tests)
+- **Items completed**: 17/17（v0.4.7: 10/12 + v0.4.8: 7/7 + v0.4.14: 30/30）
 - **Items skipped**: 2/12（v0.4.7 P1-1/P1-2）
+- **v0.4.14 key changes**:
+  - SQLite 测试 1 → 16（16x 提升）
+  - Diff 测试 2 → 8（4x 提升）
+  - Migration 测试 9 → 10
+  - Reverse 测试 8 → 15（近 2x 提升）
+  - diff.zig: `formatDiff()` 输出到 stdout（修复 stderr bug）
+  - DialectBackend vtable 14 → 15 方法
+  - codegen.zig 100% 方言无关（零 switch(dialect)）
+  - ARCHITECTURE.md 全面更新
 - **v0.4.8 key changes**:
   - 删除 4 个重复 parser 模块（~829 行死代码）
   - DialectBackend vtable 5→11 方法
