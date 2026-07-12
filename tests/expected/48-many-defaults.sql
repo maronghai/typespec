@@ -4,10 +4,10 @@ CREATE DATABASE `demo` CHARACTER SET utf8mb4;
 
 CREATE TABLE `defaults_many` (
   `col_int` int DEFAULT 42,
-  `col_str` varchar(255) DEFAULT 'hello',
+  `col_str` TEXT DEFAULT 'hello',
   `col_zero` int DEFAULT 0,
   `col_one` int DEFAULT 1,
-  `col_empty` varchar(255) DEFAULT 0,
+  `col_empty` TEXT DEFAULT 0,
   `col_big` bigint DEFAULT 999999999,
   `col_m` decimal(16, 2) DEFAULT 0
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

@@ -6,5 +6,5 @@ CREATE TABLE "bare_fields" (
   "id" integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   "user_id" integer,
   "order_id" integer,
-  "name" varchar(255)
+  "name" TEXT
 );

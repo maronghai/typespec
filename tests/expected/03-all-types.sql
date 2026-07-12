@@ -4,7 +4,7 @@ CREATE DATABASE `demo` CHARACTER SET utf8mb4;
 
 CREATE TABLE `all_types` (
   `id` int AUTO_INCREMENT PRIMARY KEY,
-  `name` varchar(255),
+  `name` TEXT,
   `full` text,
   `price` decimal(16, 2),
   `big_p` decimal(20, 6),

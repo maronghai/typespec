@@ -4,7 +4,7 @@ CREATE DATABASE "demo" ENCODING 'UTF8';
 
 CREATE TABLE "all_types" (
   "id" integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-  "name" varchar(255),
+  "name" TEXT,
   "full" text,
   "price" numeric(16, 2),
   "big_p" numeric(20, 6),

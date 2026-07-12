@@ -15,3 +15,4 @@ CREATE TABLE "post" (
   "user_id" integer,
   FOREIGN KEY ("user_id") REFERENCES "user"("id")
 );
+CREATE INDEX "idx_post_user_id" ON "post" ("user_id");

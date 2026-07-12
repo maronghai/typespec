@@ -9,3 +9,4 @@ CREATE TABLE "user" (
   "phone" varchar(16),
   UNIQUE ("email")
 );
+CREATE INDEX "idx_user_name" ON "user" ("name");

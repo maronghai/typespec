@@ -6,5 +6,5 @@ CREATE TABLE `explicit` (
   `col_int` int(128),
   `col_dec` decimal(10, 2),
   `col_var` varchar(256),
-  `col_var0` varchar(255)
+  `col_var0` TEXT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
