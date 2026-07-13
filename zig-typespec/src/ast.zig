@@ -128,7 +128,7 @@ pub const Table = struct {
     loc: ?SourceLocation = null,
 };
 
-/// Custom type definition: @type name = base_type [dialect=type ...]
+/// Custom type definition: ~ name base_type [dialect=type ...]
 pub const CustomType = struct {
     name: []const u8,
     base: TypeInfo,
@@ -146,7 +146,7 @@ pub const Schema = struct {
     name: []const u8,
     charset: ?[]const u8,
     autofk: bool,
-    /// User-defined type aliases via @type directive
+    /// User-defined type aliases via ~ directive
     custom_types: []const CustomType,
     line_no: usize,
     loc: ?SourceLocation = null,
@@ -179,7 +179,7 @@ pub const ResolvedTable = struct {
 pub const ResolvedAst = struct {
     schema_name: ?[]const u8,
     schema_charset: ?[]const u8,
-    /// Custom type definitions from @type directives
+    /// Custom type definitions from ~ directives
     custom_types: []const CustomType,
     tables: []const ResolvedTable,
     sql_comments: []const SqlComment,

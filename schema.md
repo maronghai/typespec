@@ -30,13 +30,13 @@ $ schema_name [charset] [autofk]    ; charset default utf8mb4, one $ per file
 
 ### Custom Types
 
-Define type aliases in the schema block using `@type`:
+Define type aliases in the schema block using `~`:
 
 ```asm
 $ mydb
-  @type uuid = s36                    ; varchar(36) everywhere
-  @type email = s128                  ; varchar(128) everywhere
-  @type ip_addr mysql=s45 postgres=inet sqlite=s45  ; dialect-specific
+  ~ uuid s36                    ; varchar(36) everywhere
+  ~ email s128                  ; varchar(128) everywhere
+  ~ ip_addr mysql=s45 postgres=inet sqlite=s45  ; dialect-specific
 ```
 
 Custom types can be used as field types:

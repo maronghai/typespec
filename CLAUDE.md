@@ -62,7 +62,7 @@ Run a single golden test by filter: `bash tests/test.sh 01` (matches test name s
 
 - **Template Slot Merging** ([template.zig](zig-typespec/src/template.zig)): Template inheritance with `...` slot controls field insertion order. Merge formula: `parent_before + child_before + <concrete> + child_after + parent_after`. Max 4 parents via mixin syntax (`+`).
 
-- **Custom Type System**: `@type` directives in schema block define user-defined type aliases with optional dialect overrides. Resolved during type resolution, not parsing.
+- **Custom Type System**: `~` directives in schema block define user-defined type aliases with optional dialect overrides. Resolved during type resolution, not parsing.
 
 ### Module Roles (by size, largest first)
 
@@ -75,7 +75,7 @@ Run a single golden test by filter: `bash tests/test.sh 01` (matches test name s
 | `diff_fks.zig` | FK diffing |
 | `type_map.zig` | Single source of truth for TPS↔SQL type mappings (FORWARD_MAP + REVERSE_MAP) |
 | `parser.zig` | Token-level `.tps` parser → AST (delegates to parse_*.zig modules) |
-| `parse_typedef.zig` | `@type` directive parsing (delegated from parser.zig) |
+| `parse_typedef.zig` | `~` directive parsing (delegated from parser.zig) |
 | `parse_field.zig` | Field declaration parsing (type, modifiers, default, inline FK) |
 | `parse_fk.zig` | Foreign key parsing (standalone FKs, actions) |
 | `parse_check.zig` | CHECK constraint classification |

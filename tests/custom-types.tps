@@ -1,8 +1,8 @@
 $ test_custom_types
 
-@type uuid = s36
-@type email = s128
-@type ip_addr mysql=s45 postgres=inet sqlite=s45
+~ uuid s36
+~ email s128
+~ ip_addr mysql=s45 postgres=inet sqlite=s45
 
 # user
 id n++

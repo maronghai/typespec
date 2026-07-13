@@ -105,7 +105,7 @@ pub const Parser = struct {
                                     .severity = .@"error",
                                     .line_no = line.line_no,
                                     .col = if (line.tokens.len > 0) diag.tokenColumn(line.tokens[0], line.raw) else null,
-                                    .message = "failed to parse @type directive",
+                                    .message = "failed to parse ~ (custom type) directive",
                                     .actual = @errorName(err),
                                     .source_line = line.raw,
                                 });

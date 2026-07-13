@@ -44,7 +44,7 @@ TypeSpec is a compiler that transforms `.tps` schema files into SQL DDL. It cons
 
 | Parent Module | Extracted Module | Responsibility |
 |--------------|-----------------|---------------|
-| `parser.zig` | `parse_typedef.zig` | `@type` directive parsing (name, base type, dialect overrides) |
+| `parser.zig` | `parse_typedef.zig` | `~` directive parsing (name, base type, dialect overrides) |
 | `parser.zig` | `parse_field.zig` | Field declaration parsing (name, type, modifiers, default, check) |
 | `parser.zig` | `parse_fk.zig` | Foreign key parsing (inline + standalone, actions) |
 | `parser.zig` | `parse_check.zig` | CHECK constraint classification (range, IN, comparison) |
@@ -246,7 +246,7 @@ TypeSpec uses two separate mapping tables in `type_map.zig`:
 4. **Arena allocation**: All modules take `std.mem.Allocator`. Arena-style usage for command-lifetime memory.
 5. **Parser module extraction**: `parse_field.zig`, `parse_fk.zig`, `parse_check.zig`, `parse_index.zig` serve as standalone reference implementations.
 6. **Template/Semantic separation**: Template resolution (inheritance, slot merging) is independent of semantic passes (autofk, suffix_inference, validation). Each can be modified without affecting the other.
-7. **Custom type system**: Users can define named type aliases via `@type` directives in the schema block. Custom types support dialect-specific overrides and are resolved during type resolution (not parsing).
+7. **Custom type system**: Users can define named type aliases via `~` directives in the schema block. Custom types support dialect-specific overrides and are resolved during type resolution (not parsing).
 
 ## Custom Type System
 
@@ -254,9 +254,9 @@ Users can define custom type aliases in the schema block:
 
 ```
 $ mydb
-  @type uuid = s36
-  @type email = s128
-  @type ip_addr mysql=s45 postgres=inet sqlite=s45
+  ~ uuid s36
+  ~ email s128
+  ~ ip_addr mysql=s45 postgres=inet sqlite=s45
 
 # user
 uuid uuid *
@@ -266,7 +266,7 @@ ip ip_addr
 
 ### How it works
 
-1. **Tokenizer**: Lines starting with `@type` are classified as `TypeDef` (not `Index`)
+1. **Tokenizer**: Lines starting with `~` are classified as `TypeDef` (not `Index`)
 2. **Parser**: `parseTypeDef()` extracts name, base type, and dialect overrides
 3. **Schema**: Custom types are stored in `Schema.custom_types` and passed through `ResolvedAst`
 4. **Type resolver**: When resolving a field type, checks custom types first (multi-char names only)

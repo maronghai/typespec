@@ -6,16 +6,16 @@ const TypeInfo = ast_mod.TypeInfo;
 
 // ─── TypeDef Parsing ───────────────────────────────────────
 // Extracted from parser.zig for single-responsibility.
-// Handles: @type name = base_type  OR  @type name dialect1=type1 dialect2=type2
+// Handles: ~ name base_type  OR  ~ name dialect1=type1 dialect2=type2
 
 pub fn parseTypeDef(alloc: std.mem.Allocator, line: tk.Line) !ast_mod.CustomType {
-    // tokens: ["@", "type", "name", ...]
-    const name = try alloc.dupe(u8, line.tokens[2]);
+    // tokens: ["~", "name", ...]
+    const name = try alloc.dupe(u8, line.tokens[1]);
 
     var base: TypeInfo = .none;
     var overrides = try std.ArrayList(ast_mod.DialectOverride).initCapacity(alloc, 4);
 
-    var i: usize = 3;
+    var i: usize = 2;
     // Skip = if present
     if (i < line.tokens.len and std.mem.eql(u8, line.tokens[i], "=")) {
         i += 1;

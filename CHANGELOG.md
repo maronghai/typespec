@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.4.21 (2026-07-13)
+
+### Changed
+- Custom type syntax: `@type name base_type` → `~ name base_type` (single `~` character replaces `@type`)
+- Tokenizer classifies `~` lines as `TypeDef`
+- `parse_typedef.zig` updated for `~` token layout (`["~", "name", ...]`)
+
 ## v0.4.20 (2026-07-13)
 
 ### Added

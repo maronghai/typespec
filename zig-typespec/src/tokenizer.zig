@@ -66,7 +66,7 @@ pub const Tokenizer = struct {
         if (line[0] == '!' and (line.len == 1 or line[1] == ' ')) return .CompositePK;
         if (line[0] == '^') return .Engine;
         if (line.len >= 3 and line[0] == '.' and line[1] == '.' and line[2] == '.') return .Slot;
-        if (line.len >= 5 and line[0] == '@' and line[1] == 't' and line[2] == 'y' and line[3] == 'p' and line[4] == 'e' and (line.len == 5 or line[5] == ' ')) return .TypeDef;
+        if (line[0] == '~') return .TypeDef;
         if (line[0] == '@') return .Index;
         return .Field;
     }
@@ -103,7 +103,7 @@ pub const Tokenizer = struct {
         }
 
         // Split leading structural markers: #base → #, base
-        if (tok.len > 1 and (tok[0] == '#' or tok[0] == '%' or tok[0] == '$' or tok[0] == '@' or tok[0] == '^')) {
+        if (tok.len > 1 and (tok[0] == '#' or tok[0] == '%' or tok[0] == '$' or tok[0] == '@' or tok[0] == '^' or tok[0] == '~')) {
             try tokens.append(alloc, tok[0..1]);
             try splitToken(alloc, tokens, tok[1..]);
             return;
