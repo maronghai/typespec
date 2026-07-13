@@ -881,11 +881,11 @@ pub const SqlParser = struct {
         while (end > start and (self.src[end - 1] == ' ' or self.src[end - 1] == '\t')) {
             end -= 1;
         }
-        // Strip double-quote characters from the raw result
+        // Strip double-quote and backtick characters from the raw result
         const raw = self.src[start..end];
         var stripped = try std.ArrayList(u8).initCapacity(self.alloc, raw.len);
         for (raw) |c| {
-            if (c != '"') {
+            if (c != '"' and c != '`') {
                 stripped.appendAssumeCapacity(c);
             }
         }

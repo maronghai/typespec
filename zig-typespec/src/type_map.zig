@@ -226,11 +226,10 @@ pub fn reverseLookup(sql_type: []const u8, col_name: []const u8, is_auto_inc: bo
         return reverseLookupSqlite(t, col_name, is_auto_inc, is_default_ts);
     }
 
-    // MySQL/PG: exact match from REVERSE_MAP (skip single-char TPS entries — forward-only for MySQL/PG)
+    // MySQL/PG: exact match from REVERSE_MAP
     var best_match: ?ReverseResult = null;
     var best_priority: u32 = std.math.maxInt(u32);
     for (REVERSE_MAP) |m| {
-        if (m.tps.len <= 1) continue; // skip single-char forward entries (handled by parameterized below)
         if (std.mem.eql(u8, t, m.mysql) or std.mem.eql(u8, t, m.pg)) {
             if (m.rev_priority < best_priority) {
                 best_priority = m.rev_priority;

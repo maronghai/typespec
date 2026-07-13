@@ -642,7 +642,7 @@ pub const ReverseCodegen = struct {
             }
             try w.writeAll(table.name);
             if (table.comment) |c| {
-                try w.print("  : {s}", .{c});
+                try w.print(" : {s}", .{c});
             }
             try w.writeAll("\n");
 
