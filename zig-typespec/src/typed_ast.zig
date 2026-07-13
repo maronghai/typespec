@@ -44,6 +44,7 @@ pub const TypedTable = struct {
 pub const TypedColumn = struct {
     name: []const u8,
     sql_type: []const u8,
+    tps_type: ?[]const u8 = null,
     nullable: bool,
     primary_key: bool,
     auto_increment: bool,
@@ -226,9 +227,27 @@ pub const TypeResolver = struct {
         const is_enum = field.type_info == .enum_type;
         const enum_vals = if (is_enum) field.type_info.enum_type else &[_][]const u8{};
 
+        // Compute original TPS type string for roundtrip preservation
+        const tps_type: ?[]const u8 = switch (field.type_info) {
+            .simple => |s| if (s.len == 1) s else null,
+            .varchar_explicit => |n| if (n > 0) blk: {
+                var tbuf: [16]u8 = undefined;
+                const result = try std.fmt.bufPrint(&tbuf, "s{d}", .{n});
+                break :blk try self.alloc.dupe(u8, result);
+            } else null,
+            .decimal_explicit => |ds| blk: {
+                var tbuf: [16]u8 = undefined;
+                const result = try std.fmt.bufPrint(&tbuf, "{d},{d}", .{ ds.precision, ds.scale });
+                break :blk try self.alloc.dupe(u8, result);
+            },
+            .none => "s",
+            else => null,
+        };
+
         return .{
             .name = field.name,
             .sql_type = sql_type,
+            .tps_type = tps_type,
             .nullable = !nn,
             .primary_key = pk,
             .auto_increment = ai,

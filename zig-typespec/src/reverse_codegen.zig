@@ -30,7 +30,10 @@ fn writeColumnSuffix(w: anytype, col: sp.SqlColumn, indexes: []const sp.SqlIndex
     // ---- type ----
     const is_ai = col.auto_increment;
     const is_ts = if (col.default_val) |dv| isCurrentTimestamp(dv) else false;
-    const tr = reverseType(col.type_sql, col.name, is_ai, is_ts, dialect);
+    const tr: TypeResult = if (col.tps_override) |tps|
+        .{ .tps = tps, .omit = false, .confidence = .high }
+    else
+        reverseType(col.type_sql, col.name, is_ai, is_ts, dialect);
     if (!tr.omit) {
         try w.writeAll(" ");
         try w.writeAll(tr.tps);
