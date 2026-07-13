@@ -89,7 +89,12 @@ pub const Codegen = struct {
                 var dominated = false;
                 for (table.indexes) |idx| {
                     if (idx.kind == .unique or idx.kind == .primary_key) {
-                        for (idx.fields) |f| { if (std.mem.eql(u8, f, col.name)) { dominated = true; break; } }
+                        for (idx.fields) |f| {
+                            if (std.mem.eql(u8, f, col.name)) {
+                                dominated = true;
+                                break;
+                            }
+                        }
                     }
                     if (dominated) break;
                 }
@@ -100,7 +105,12 @@ pub const Codegen = struct {
             if (col.inline_index) {
                 var dominated = false;
                 for (table.indexes) |idx| {
-                    for (idx.fields) |f| { if (std.mem.eql(u8, f, col.name)) { dominated = true; break; } }
+                    for (idx.fields) |f| {
+                        if (std.mem.eql(u8, f, col.name)) {
+                            dominated = true;
+                            break;
+                        }
+                    }
                     if (dominated) break;
                 }
                 if (!dominated) {
@@ -119,17 +129,29 @@ pub const Codegen = struct {
             if (needs_comma) try w.writeAll(",\n");
             needs_comma = true;
             try w.writeAll("  FOREIGN KEY (");
-            for (fk.fields, 0..) |f, fi| { if (fi > 0) try w.writeAll(", "); try self.backend.quoteIdent(w, f); }
+            for (fk.fields, 0..) |f, fi| {
+                if (fi > 0) try w.writeAll(", ");
+                try self.backend.quoteIdent(w, f);
+            }
             try w.writeAll(") REFERENCES ");
             try self.backend.quoteIdent(w, fk.ref_table);
             try w.writeAll("(");
-            for (fk.ref_fields, 0..) |f, fi| { if (fi > 0) try w.writeAll(", "); try self.backend.quoteIdent(w, f); }
+            for (fk.ref_fields, 0..) |f, fi| {
+                if (fi > 0) try w.writeAll(", ");
+                try self.backend.quoteIdent(w, f);
+            }
             try w.writeAll(")");
             for (fk.actions) |action| {
                 try w.writeAll(" ");
-                switch (action.trigger) { .on_delete => try w.writeAll("ON DELETE"), .on_update => try w.writeAll("ON UPDATE") }
+                switch (action.trigger) {
+                    .on_delete => try w.writeAll("ON DELETE"),
+                    .on_update => try w.writeAll("ON UPDATE"),
+                }
                 try w.writeAll(" ");
-                switch (action.action) { .cascade => try w.writeAll("CASCADE"), .set_null => try w.writeAll("SET NULL") }
+                switch (action.action) {
+                    .cascade => try w.writeAll("CASCADE"),
+                    .set_null => try w.writeAll("SET NULL"),
+                }
             }
         }
 
@@ -710,18 +732,30 @@ test "codegen: multiple tables separated by blank line" {
     cols[0].primary_key = true;
 
     const t1 = typed_ast_mod.TypedTable{
-        .name = "a", .comment = null, .engine = null,
-        .columns = cols, .fks = &.{}, .indexes = &.{}, .line_no = 1,
+        .name = "a",
+        .comment = null,
+        .engine = null,
+        .columns = cols,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
     };
     const t2 = typed_ast_mod.TypedTable{
-        .name = "b", .comment = null, .engine = null,
-        .columns = cols, .fks = &.{}, .indexes = &.{}, .line_no = 5,
+        .name = "b",
+        .comment = null,
+        .engine = null,
+        .columns = cols,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 5,
     };
 
     const tables = try alloc.dupe(typed_ast_mod.TypedTable, &.{ t1, t2 });
     const typed = typed_ast_mod.TypedAst{
-        .schema_name = null, .schema_charset = null,
-        .tables = tables, .sql_comments = &.{},
+        .schema_name = null,
+        .schema_charset = null,
+        .tables = tables,
+        .sql_comments = &.{},
     };
 
     var cg = Codegen.init(alloc, .mysql);

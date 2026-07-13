@@ -76,8 +76,10 @@ bash tests/test_migrate.sh add-column
 ### 3. Add a new semantic pass
 
 1. Write a function with signature `fn(*PassContext) !void`
-2. Add a `SemanticPass` entry to `DEFAULT_PASSES` in `src/semantic.zig`
+2. Add a `SemanticPass` entry to `DEFAULT_PASSES` in `src/semantic.zig` (order matters — runs sequentially)
 3. Add unit tests
+
+Current passes: `autofk` → `suffix_inference` → `validate` → `validate_type_modifiers`
 
 ### 4. Add a new CHECK constraint form
 

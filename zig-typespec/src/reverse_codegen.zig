@@ -459,7 +459,8 @@ fn findBestWithNewFields(alloc: std.mem.Allocator, covered: []const []const u8, 
                         var match = true;
                         for (candidate_slice, 0..) |col, ci| {
                             if (!std.mem.eql(u8, col.name, other.columns[os + ci].name) or
-                                !std.mem.eql(u8, col.type_sql, other.columns[os + ci].type_sql)) {
+                                !std.mem.eql(u8, col.type_sql, other.columns[os + ci].type_sql))
+                            {
                                 match = false;
                                 break;
                             }

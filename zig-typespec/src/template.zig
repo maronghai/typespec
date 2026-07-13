@@ -287,8 +287,14 @@ test "template: 3-level inheritance" {
     const c_tmpl = ast_mod.Template{ .name = "c", .parents = &.{"p"}, .fields = c_fields, .slot_index = null };
 
     const table = ast_mod.Table{
-        .name = "t", .template_ref = "c", .comment = null, .engine = null,
-        .fields = &.{}, .fks = &.{}, .indexes = &.{}, .line_no = 1,
+        .name = "t",
+        .template_ref = "c",
+        .comment = null,
+        .engine = null,
+        .fields = &.{},
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
     };
 
     const ast = makeTestAst(alloc, try alloc.dupe(ast_mod.Table, &.{table}), try alloc.dupe(ast_mod.Template, &.{ gp_tmpl, p_tmpl, c_tmpl }));
@@ -315,8 +321,14 @@ test "template: multiple mixins" {
     const audit = ast_mod.Template{ .name = "audit", .parents = &.{ "timestamps", "softdel" }, .fields = audit_fields, .slot_index = null };
 
     const table = ast_mod.Table{
-        .name = "t", .template_ref = "audit", .comment = null, .engine = null,
-        .fields = &.{}, .fks = &.{}, .indexes = &.{}, .line_no = 1,
+        .name = "t",
+        .template_ref = "audit",
+        .comment = null,
+        .engine = null,
+        .fields = &.{},
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
     };
 
     const ast = makeTestAst(alloc, try alloc.dupe(ast_mod.Table, &.{table}), try alloc.dupe(ast_mod.Template, &.{ m1, m2, audit }));
@@ -339,8 +351,14 @@ test "template: child field type overrides parent" {
     const child = ast_mod.Template{ .name = "big_base", .parents = &.{"base"}, .fields = child_fields, .slot_index = null };
 
     const table = ast_mod.Table{
-        .name = "t", .template_ref = "big_base", .comment = null, .engine = null,
-        .fields = &.{}, .fks = &.{}, .indexes = &.{}, .line_no = 1,
+        .name = "t",
+        .template_ref = "big_base",
+        .comment = null,
+        .engine = null,
+        .fields = &.{},
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
     };
 
     const ast = makeTestAst(alloc, try alloc.dupe(ast_mod.Table, &.{table}), try alloc.dupe(ast_mod.Template, &.{ parent, child }));

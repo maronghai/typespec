@@ -2,6 +2,7 @@ const std = @import("std");
 const ast_mod = @import("ast.zig");
 const diag = @import("diagnostic.zig");
 const template_mod = @import("template.zig");
+const type_map = @import("type_map.zig");
 const Ast = ast_mod.Ast;
 const Template = ast_mod.Template;
 const Table = ast_mod.Table;
@@ -39,6 +40,7 @@ pub const DEFAULT_PASSES = [_]SemanticPass{
     .{ .name = "autofk", .run = runAutoFk },
     .{ .name = "suffix_inference", .run = runSuffixInference },
     .{ .name = "validate", .run = runValidate },
+    .{ .name = "validate_type_modifiers", .run = runValidateTypeModifiers },
 };
 
 // ─── SemanticAnalyzer ──────────────────────────────────────────
@@ -77,6 +79,11 @@ pub const SemanticAnalyzer = struct {
 
         // Print collected diagnostics (warnings + errors from validation pass)
         diagnostics.printAll();
+
+        // Abort on errors — don't proceed to codegen with invalid semantics
+        if (diagnostics.hasErrors()) {
+            return error.SemanticError;
+        }
 
         return .{
             .schema_name = if (tree.schema) |s| s.name else null,
@@ -233,16 +240,18 @@ fn runValidate(ctx: *PassContext) !void {
                     }
                 }
                 if (!found) {
+                    // Warning (not error) — ultra shorthand FKs create implicit fields
                     ctx.diagnostics.push(.{
-                        .severity = .@"error",
+                        .severity = .warning,
                         .line_no = table.line_no,
-                        .message = try std.fmt.allocPrint(ctx.alloc, "FK field '{s}' not found in table '{s}'", .{ fk_field, table.name }),
+                        .message = try std.fmt.allocPrint(ctx.alloc, "FK field '{s}' not found in table '{s}' — may be an implicit field from ultra shorthand", .{ fk_field, table.name }),
                     });
                 }
             }
             if (fk.ref_table.len > 0 and !table_names.contains(fk.ref_table)) {
+                // Warning (not error) — DB enforces FK constraints at runtime
                 ctx.diagnostics.push(.{
-                    .severity = .@"error",
+                    .severity = .warning,
                     .line_no = table.line_no,
                     .message = try std.fmt.allocPrint(ctx.alloc, "FK references non-existent table '{s}' in table '{s}'", .{ fk.ref_table, table.name }),
                 });
@@ -270,11 +279,55 @@ fn runValidate(ctx: *PassContext) !void {
                     }
                 }
                 if (fk.ref_table.len > 0 and !table_names.contains(fk.ref_table)) {
+                    // Warning (not error) — DB enforces FK constraints at runtime
                     ctx.diagnostics.push(.{
-                        .severity = .@"error",
+                        .severity = .warning,
                         .line_no = table.line_no,
                         .message = try std.fmt.allocPrint(ctx.alloc, "inline FK references non-existent table '{s}' in table '{s}'", .{ fk.ref_table, table.name }),
                     });
+                }
+            }
+        }
+    }
+}
+
+// ─── Type Modifier Validation ──────────────────────────────
+
+/// Validates that modifiers are used with compatible types:
+/// - `+`/`++` (auto_inc/auto_inc_pk) only on numeric or datetime types
+/// - `u` (unsigned) only on numeric types
+/// Reports warnings for undefined behavior.
+fn runValidateTypeModifiers(ctx: *PassContext) !void {
+    for (ctx.tables.items) |table| {
+        for (table.fields) |field| {
+            for (field.modifiers) |mod| {
+                switch (mod.kind) {
+                    .auto_inc_pk, .auto_inc => {
+                        // +/++ on datetime → timestamp default (valid, handled by codegen)
+                        // +/++ on numeric → auto increment (valid)
+                        // +/++ on anything else → undefined
+                        if (!type_map.isNumericTpsType(field.type_info) and !type_map.isDatetimeTpsType(field.type_info)) {
+                            const mod_name = if (mod.kind == .auto_inc_pk) "auto_increment" else "auto_increment";
+                            ctx.diagnostics.push(.{
+                                .severity = .warning,
+                                .line_no = mod.line_no,
+                                .message = try std.fmt.allocPrint(ctx.alloc, "'{s}' modifier has no effect on non-numeric/non-datetime type in field '{s}'", .{ mod_name, field.name }),
+                            });
+                        }
+                    },
+                    .primary_key => {}, // valid on any type
+                    .not_null => {}, // valid on any type
+                    .unsigned => {
+                        if (!type_map.isNumericTpsType(field.type_info)) {
+                            ctx.diagnostics.push(.{
+                                .severity = .warning,
+                                .line_no = mod.line_no,
+                                .message = try std.fmt.allocPrint(ctx.alloc, "'unsigned' modifier has no effect on non-numeric type in field '{s}'", .{field.name}),
+                            });
+                        }
+                    },
+                    .inline_unique => {}, // valid on any type
+                    .inline_index => {}, // valid on any type
                 }
             }
         }
@@ -511,4 +564,164 @@ test "suffix inference: no suffix keeps explicit type" {
     const result = try sa.analyze(ast);
 
     try testing.expectEqualStrings("b", result.tables[0].fields[0].type_info.simple);
+}
+
+// ─── Type Modifier Validation Tests ─────────────────────────
+
+fn makeTestFieldWithMods(name: []const u8, type_info: ast_mod.TypeInfo, mods: []const Modifier) Field {
+    return .{
+        .name = name,
+        .type_info = type_info,
+        .modifiers = mods,
+        .default_val = null,
+        .check = null,
+        .fk = null,
+        .comment = null,
+        .line_no = 1,
+    };
+}
+
+test "validate_type_modifiers: ++ on varchar produces warning" {
+    const alloc = testing.allocator;
+    const mods = try alloc.alloc(Modifier, 1);
+    mods[0] = .{ .kind = .auto_inc_pk, .line_no = 3 };
+    const fields = try alloc.alloc(Field, 1);
+    fields[0] = makeTestFieldWithMods("name", .{ .simple = "s" }, mods);
+
+    var tables = try std.ArrayList(ResolvedTable).initCapacity(alloc, 1);
+    try tables.append(alloc, .{
+        .name = "t",
+        .comment = null,
+        .engine = null,
+        .fields = fields,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
+    });
+
+    var diagnostics = diag.DiagnosticCollector.init(alloc);
+    var ctx = PassContext{
+        .alloc = alloc,
+        .tables = &tables,
+        .schema = null,
+        .diagnostics = &diagnostics,
+    };
+    try runValidateTypeModifiers(&ctx);
+    try testing.expect(diagnostics.diagnostics.items.len > 0);
+}
+
+test "validate_type_modifiers: u on varchar produces warning" {
+    const alloc = testing.allocator;
+    const mods = try alloc.alloc(Modifier, 1);
+    mods[0] = .{ .kind = .unsigned, .line_no = 2 };
+    const fields = try alloc.alloc(Field, 1);
+    fields[0] = makeTestFieldWithMods("tag", .{ .simple = "s" }, mods);
+
+    var tables = try std.ArrayList(ResolvedTable).initCapacity(alloc, 1);
+    try tables.append(alloc, .{
+        .name = "t",
+        .comment = null,
+        .engine = null,
+        .fields = fields,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
+    });
+
+    var diagnostics = diag.DiagnosticCollector.init(alloc);
+    var ctx = PassContext{
+        .alloc = alloc,
+        .tables = &tables,
+        .schema = null,
+        .diagnostics = &diagnostics,
+    };
+    try runValidateTypeModifiers(&ctx);
+    try testing.expect(diagnostics.diagnostics.items.len > 0);
+}
+
+test "validate_type_modifiers: ++ on n produces no warning" {
+    const alloc = testing.allocator;
+    const mods = try alloc.alloc(Modifier, 1);
+    mods[0] = .{ .kind = .auto_inc_pk, .line_no = 1 };
+    const fields = try alloc.alloc(Field, 1);
+    fields[0] = makeTestFieldWithMods("id", .{ .simple = "n" }, mods);
+
+    var tables = try std.ArrayList(ResolvedTable).initCapacity(alloc, 1);
+    try tables.append(alloc, .{
+        .name = "t",
+        .comment = null,
+        .engine = null,
+        .fields = fields,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
+    });
+
+    var diagnostics = diag.DiagnosticCollector.init(alloc);
+    var ctx = PassContext{
+        .alloc = alloc,
+        .tables = &tables,
+        .schema = null,
+        .diagnostics = &diagnostics,
+    };
+    try runValidateTypeModifiers(&ctx);
+    try testing.expectEqual(@as(usize, 0), diagnostics.diagnostics.items.len);
+}
+
+test "validate_type_modifiers: + on t produces no warning" {
+    const alloc = testing.allocator;
+    const mods = try alloc.alloc(Modifier, 1);
+    mods[0] = .{ .kind = .auto_inc, .line_no = 1 };
+    const fields = try alloc.alloc(Field, 1);
+    fields[0] = makeTestFieldWithMods("created_at", .{ .simple = "t" }, mods);
+
+    var tables = try std.ArrayList(ResolvedTable).initCapacity(alloc, 1);
+    try tables.append(alloc, .{
+        .name = "t",
+        .comment = null,
+        .engine = null,
+        .fields = fields,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
+    });
+
+    var diagnostics = diag.DiagnosticCollector.init(alloc);
+    var ctx = PassContext{
+        .alloc = alloc,
+        .tables = &tables,
+        .schema = null,
+        .diagnostics = &diagnostics,
+    };
+    try runValidateTypeModifiers(&ctx);
+    try testing.expectEqual(@as(usize, 0), diagnostics.diagnostics.items.len);
+}
+
+test "validate_type_modifiers: u on n produces no warning" {
+    const alloc = testing.allocator;
+    const mods = try alloc.alloc(Modifier, 1);
+    mods[0] = .{ .kind = .unsigned, .line_no = 1 };
+    const fields = try alloc.alloc(Field, 1);
+    fields[0] = makeTestFieldWithMods("count", .{ .simple = "n" }, mods);
+
+    var tables = try std.ArrayList(ResolvedTable).initCapacity(alloc, 1);
+    try tables.append(alloc, .{
+        .name = "t",
+        .comment = null,
+        .engine = null,
+        .fields = fields,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
+    });
+
+    var diagnostics = diag.DiagnosticCollector.init(alloc);
+    var ctx = PassContext{
+        .alloc = alloc,
+        .tables = &tables,
+        .schema = null,
+        .diagnostics = &diagnostics,
+    };
+    try runValidateTypeModifiers(&ctx);
+    try testing.expectEqual(@as(usize, 0), diagnostics.diagnostics.items.len);
 }

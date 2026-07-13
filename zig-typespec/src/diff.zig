@@ -1,25 +1,26 @@
 const std = @import("std");
 const sem = @import("semantic.zig");
 const ast_mod = @import("ast.zig");
+const diff_fields = @import("diff_fields.zig");
+const diff_indexes = @import("diff_indexes.zig");
+const diff_fks = @import("diff_fks.zig");
 const Field = ast_mod.Field;
 const TypeInfo = ast_mod.TypeInfo;
-const Modifier = ast_mod.Modifier;
-const ModifierType = ast_mod.ModifierType;
-const DefaultVal = ast_mod.DefaultVal;
-const CheckConstraint = ast_mod.CheckConstraint;
 const IndexDecl = ast_mod.IndexDecl;
-const IndexType = ast_mod.IndexType;
 const FkDecl = ast_mod.FkDecl;
+
+// ─── Re-export sub-module types ────────────────────────────
+
+pub const FieldDiff = diff_fields.FieldDiff;
+pub const FieldAction = diff_fields.FieldAction;
+pub const IndexDiff = diff_indexes.IndexDiff;
+pub const IndexAction = diff_indexes.IndexAction;
+pub const FkDiff = diff_fks.FkDiff;
+pub const FkAction = diff_fks.FkAction;
 
 // ─── Diff Data Structures ──────────────────────────────────
 
 pub const TableAction = enum { create, alter };
-
-pub const FieldAction = enum { add, modify, drop, rename };
-
-pub const IndexAction = enum { add, drop, modify };
-
-pub const FkAction = enum { add, drop };
 
 pub const SchemaDiff = struct {
     table_diffs: []const TableDiff,
@@ -34,26 +35,14 @@ pub const TableDiff = struct {
     fk_diffs: []const FkDiff,
 };
 
-pub const FieldDiff = struct {
-    name: []const u8,
-    action: FieldAction,
-    old_field: ?Field,
-    new_field: ?Field,
-    rename_from: ?[]const u8,
-};
+// ─── Re-export equality helpers ────────────────────────────
 
-pub const IndexDiff = struct {
-    name: []const u8,
-    action: IndexAction,
-    old_idx: ?IndexDecl,
-    new_idx: ?IndexDecl,
-};
-
-pub const FkDiff = struct {
-    action: FkAction,
-    old_fk: ?FkDecl,
-    new_fk: ?FkDecl,
-};
+pub const fieldsEqual = diff_fields.fieldsEqual;
+pub const typeInfoEqual = diff_fields.typeInfoEqual;
+pub const defaultValEqual = diff_fields.defaultValEqual;
+pub const checkEqual = diff_fields.checkEqual;
+pub const indexesEqual = diff_indexes.indexesEqual;
+pub const fksEqual = diff_fks.fksEqual;
 
 // ─── Diff Engine ───────────────────────────────────────────
 
@@ -70,9 +59,9 @@ pub fn diff(old: sem.ResolvedAst, new: sem.ResolvedAst, alloc: std.mem.Allocator
     // Tables in new but not old → create
     for (new.tables) |new_table| {
         if (!old_map.contains(new_table.name)) {
-            const field_diffs = try createAllFieldDiffs(alloc, &.{}, new_table.fields);
-            const index_diffs = try createAllIndexDiffs(alloc, &.{}, new_table.indexes);
-            const fk_diffs = try createAllFkDiffs(alloc, &.{}, new_table.fks);
+            const field_diffs = try diff_fields.createAllFieldDiffs(alloc, new_table.fields);
+            const index_diffs = try diff_indexes.createAllIndexDiffs(alloc, new_table.indexes);
+            const fk_diffs = try diff_fks.createAllFkDiffs(alloc, new_table.fks);
             try table_diffs.append(alloc, .{
                 .name = new_table.name,
                 .action = .create,
@@ -108,411 +97,17 @@ pub fn diff(old: sem.ResolvedAst, new: sem.ResolvedAst, alloc: std.mem.Allocator
 }
 
 fn diffTable(alloc: std.mem.Allocator, old: sem.ResolvedTable, new: sem.ResolvedTable) !TableDiff {
-    // Build name→field maps (skip slot markers)
-    var old_fmap = std.StringHashMap(usize).init(alloc);
-    for (old.fields, 0..) |f, i| {
-        if (!std.mem.eql(u8, f.name, "..."))
-            try old_fmap.put(f.name, i);
-    }
-    var new_fmap = std.StringHashMap(usize).init(alloc);
-    for (new.fields, 0..) |f, i| {
-        if (!std.mem.eql(u8, f.name, "..."))
-            try new_fmap.put(f.name, i);
-    }
-
-    var field_diffs = try std.ArrayList(FieldDiff).initCapacity(alloc, 8);
-    var dropped_field_names = try std.ArrayList([]const u8).initCapacity(alloc, 4);
-    var dropped_field_indices = try std.ArrayList(usize).initCapacity(alloc, 4);
-    var added_fields = try std.ArrayList(Field).initCapacity(alloc, 4);
-
-    // Fields in both → compare
-    for (old.fields) |old_field| {
-        if (std.mem.eql(u8, old_field.name, "...")) continue;
-        if (new_fmap.get(old_field.name)) |new_idx| {
-            const new_field = new.fields[new_idx];
-            if (!fieldsEqual(old_field, new_field)) {
-                try field_diffs.append(alloc, .{
-                    .name = old_field.name,
-                    .action = .modify,
-                    .old_field = old_field,
-                    .new_field = new_field,
-                    .rename_from = null,
-                });
-            }
-        } else {
-            // Field in old but not new → potential rename
-            try dropped_field_names.append(alloc, old_field.name);
-            try dropped_field_indices.append(alloc, if (old_fmap.get(old_field.name)) |idx| idx else 0);
-        }
-    }
-
-    // Fields in new but not old → add or rename target
-    for (new.fields) |new_field| {
-        if (std.mem.eql(u8, new_field.name, "...")) continue;
-        if (!old_fmap.contains(new_field.name)) {
-            try added_fields.append(alloc, new_field);
-        }
-    }
-
-    // Rename detection: try to match dropped ↔ added by (type_info, modifiers, default, check)
-    const renames = try detectRenames(alloc, old.fields, new.fields, &dropped_field_names);
-
-    // Emit add for unmatched added fields
-    for (added_fields.items) |af| {
-        var was_renamed = false;
-        for (renames) |r| {
-            if (std.mem.eql(u8, r.new_name, af.name)) {
-                was_renamed = true;
-                break;
-            }
-        }
-        if (!was_renamed) {
-            try field_diffs.append(alloc, .{
-                .name = af.name,
-                .action = .add,
-                .old_field = null,
-                .new_field = af,
-                .rename_from = null,
-            });
-        }
-    }
-
-    // Emit drop for unmatched dropped fields + rename entries
-    for (renames) |r| {
-        try field_diffs.append(alloc, .{
-            .name = r.new_name,
-            .action = .rename,
-            .old_field = r.old_field,
-            .new_field = r.new_field,
-            .rename_from = r.old_name,
-        });
-    }
-
-    for (dropped_field_names.items) |dfn| {
-        var was_renamed = false;
-        for (renames) |r| {
-            if (std.mem.eql(u8, r.old_name, dfn)) {
-                was_renamed = true;
-                break;
-            }
-        }
-        if (!was_renamed) {
-            // Find the old field
-            const old_field = if (old_fmap.get(dfn)) |idx| old.fields[idx] else null;
-            try field_diffs.append(alloc, .{
-                .name = dfn,
-                .action = .drop,
-                .old_field = old_field,
-                .new_field = null,
-                .rename_from = null,
-            });
-        }
-    }
-
-    // Index comparison
-    const index_diffs = try diffIndexes(alloc, old.indexes, new.indexes);
-
-    // FK comparison
-    const fk_diffs = try diffFks(alloc, old.fks, new.fks);
+    const field_diffs = try diff_fields.diffFields(alloc, old.fields, new.fields);
+    const index_diffs = try diff_indexes.diffIndexes(alloc, old.indexes, new.indexes);
+    const fk_diffs = try diff_fks.diffFks(alloc, old.fks, new.fks);
 
     return .{
         .name = old.name,
         .action = .alter,
-        .field_diffs = try field_diffs.toOwnedSlice(alloc),
+        .field_diffs = field_diffs,
         .index_diffs = index_diffs,
         .fk_diffs = fk_diffs,
     };
-}
-
-// ─── Rename Detection ──────────────────────────────────────
-
-const RenamePair = struct {
-    old_name: []const u8,
-    new_name: []const u8,
-    old_field: ?Field,
-    new_field: ?Field,
-};
-
-fn detectRenames(
-    alloc: std.mem.Allocator,
-    old_fields: []const Field,
-    new_fields: []const Field,
-    dropped_names: *const std.ArrayList([]const u8),
-) ![]const RenamePair {
-    var renames = try std.ArrayList(RenamePair).initCapacity(alloc, 4);
-
-    // Build field maps
-    var old_fmap = std.StringHashMap(usize).init(alloc);
-    for (old_fields, 0..) |f, i| {
-        if (!std.mem.eql(u8, f.name, "..."))
-            try old_fmap.put(f.name, i);
-    }
-    var new_fmap = std.StringHashMap(usize).init(alloc);
-    for (new_fields, 0..) |f, i| {
-        if (!std.mem.eql(u8, f.name, "..."))
-            try new_fmap.put(f.name, i);
-    }
-
-    // For each dropped field, find candidate added fields with same signature
-    for (dropped_names.items) |old_name| {
-        const old_idx = old_fmap.get(old_name) orelse continue;
-        const old_f = old_fields[old_idx];
-
-        // Find matching added field
-        var match_name: ?[]const u8 = null;
-        var match_count: usize = 0;
-
-        for (new_fields) |new_f| {
-            if (std.mem.eql(u8, new_f.name, "...")) continue;
-            if (new_fmap.contains(new_f.name) and old_fmap.contains(new_f.name)) continue; // not an added field
-            if (!new_fmap.contains(new_f.name)) continue; // skip fields in old (shouldn't happen in this loop)
-
-            if (fieldSignatureMatch(old_f, new_f)) {
-                match_name = new_f.name;
-                match_count += 1;
-            }
-        }
-
-        // Only emit rename if exactly 1 match (unambiguous)
-        if (match_count == 1 and match_name != null) {
-            const new_name = match_name.?;
-            const new_idx = new_fmap.get(new_name) orelse continue;
-            try renames.append(alloc, .{
-                .old_name = old_name,
-                .new_name = new_name,
-                .old_field = old_f,
-                .new_field = new_fields[new_idx],
-            });
-        }
-    }
-
-    return try renames.toOwnedSlice(alloc);
-}
-
-fn fieldSignatureMatch(a: Field, b: Field) bool {
-    // Same type
-    if (!typeInfoEqual(a.type_info, b.type_info)) return false;
-    // Same modifiers (ignoring line_no)
-    if (a.modifiers.len != b.modifiers.len) return false;
-    for (a.modifiers, 0..) |am, i| {
-        if (am.kind != b.modifiers[i].kind) return false;
-    }
-    // Same default
-    if (!defaultValEqual(a.default_val, b.default_val)) return false;
-    // Same check
-    if (!checkEqual(a.check, b.check)) return false;
-    return true;
-}
-
-// ─── Equality Helpers ──────────────────────────────────────
-
-pub fn fieldsEqual(a: Field, b: Field) bool {
-    if (!typeInfoEqual(a.type_info, b.type_info)) return false;
-    if (a.modifiers.len != b.modifiers.len) return false;
-    for (a.modifiers, 0..) |am, i| {
-        if (am.kind != b.modifiers[i].kind) return false;
-    }
-    if (!defaultValEqual(a.default_val, b.default_val)) return false;
-    if (!checkEqual(a.check, b.check)) return false;
-    // Comments are not compared (they don't affect DDL semantics)
-    return true;
-}
-
-pub fn typeInfoEqual(a: TypeInfo, b: TypeInfo) bool {
-    if (std.meta.activeTag(a) != std.meta.activeTag(b)) return false;
-    return switch (a) {
-        .none => true,
-        .simple => |s| std.mem.eql(u8, s, b.simple),
-        .raw_sql => |s| std.mem.eql(u8, s, b.raw_sql),
-        .int_explicit => |n| n == b.int_explicit,
-        .decimal_explicit => |ds| ds.precision == b.decimal_explicit.precision and ds.scale == b.decimal_explicit.scale,
-        .varchar_explicit => |n| n == b.varchar_explicit,
-        .enum_type => |vals| {
-            if (vals.len != b.enum_type.len) return false;
-            for (vals, 0..) |v, i| {
-                if (!std.mem.eql(u8, v, b.enum_type[i])) return false;
-            }
-            return true;
-        },
-    };
-}
-
-pub fn defaultValEqual(a: ?DefaultVal, b: ?DefaultVal) bool {
-    if (a == null and b == null) return true;
-    if (a == null or b == null) return false;
-    return std.mem.eql(u8, a.?.value, b.?.value);
-}
-
-pub fn checkEqual(a: ?CheckConstraint, b: ?CheckConstraint) bool {
-    if (a == null and b == null) return true;
-    if (a == null or b == null) return false;
-    return a.?.kind == b.?.kind and std.mem.eql(u8, a.?.expr, b.?.expr);
-}
-
-pub fn indexesEqual(a: IndexDecl, b: IndexDecl) bool {
-    if (a.kind != b.kind) return false;
-    if (a.fields.len != b.fields.len) return false;
-    for (a.fields, 0..) |f, i| {
-        if (!std.mem.eql(u8, f, b.fields[i])) return false;
-    }
-    return true;
-}
-
-pub fn fksEqual(a: FkDecl, b: FkDecl) bool {
-    if (a.fields.len != b.fields.len) return false;
-    for (a.fields, 0..) |f, i| {
-        if (!std.mem.eql(u8, f, b.fields[i])) return false;
-    }
-    if (!std.mem.eql(u8, a.ref_table, b.ref_table)) return false;
-    if (a.ref_fields.len != b.ref_fields.len) return false;
-    for (a.ref_fields, 0..) |f, i| {
-        if (!std.mem.eql(u8, f, b.ref_fields[i])) return false;
-    }
-    if (a.actions.len != b.actions.len) return false;
-    for (a.actions, 0..) |act, i| {
-        if (act.trigger != b.actions[i].trigger or act.action != b.actions[i].action) return false;
-    }
-    return true;
-}
-
-// ─── Index Diff ────────────────────────────────────────────
-
-fn diffIndexes(alloc: std.mem.Allocator, old_idxs: []const IndexDecl, new_idxs: []const IndexDecl) ![]const IndexDiff {
-    var diffs = try std.ArrayList(IndexDiff).initCapacity(alloc, 4);
-
-    // Build name→index maps (for named indexes) and a list for unnamed
-    var old_by_name = std.StringHashMap(usize).init(alloc);
-    for (old_idxs, 0..) |idx, i| try old_by_name.put(idx.name, i);
-    var new_by_name = std.StringHashMap(usize).init(alloc);
-    for (new_idxs, 0..) |idx, i| try new_by_name.put(idx.name, i);
-
-    // Indexes in both → compare
-    for (old_idxs) |old_idx| {
-        if (new_by_name.get(old_idx.name)) |new_i| {
-            const new_idx = new_idxs[new_i];
-            if (!indexesEqual(old_idx, new_idx)) {
-                try diffs.append(alloc, .{
-                    .name = old_idx.name,
-                    .action = .modify,
-                    .old_idx = old_idx,
-                    .new_idx = new_idx,
-                });
-            }
-        } else {
-            try diffs.append(alloc, .{
-                .name = old_idx.name,
-                .action = .drop,
-                .old_idx = old_idx,
-                .new_idx = null,
-            });
-        }
-    }
-
-    // Indexes in new but not old → add
-    for (new_idxs) |new_idx| {
-        if (!old_by_name.contains(new_idx.name)) {
-            try diffs.append(alloc, .{
-                .name = new_idx.name,
-                .action = .add,
-                .old_idx = null,
-                .new_idx = new_idx,
-            });
-        }
-    }
-
-    return try diffs.toOwnedSlice(alloc);
-}
-
-// ─── FK Diff ───────────────────────────────────────────────
-
-fn diffFks(alloc: std.mem.Allocator, old_fks: []const FkDecl, new_fks: []const FkDecl) ![]const FkDiff {
-    var diffs = try std.ArrayList(FkDiff).initCapacity(alloc, 4);
-
-    // Match FKs by (local_fields, ref_table) identity
-    var old_matched = try std.ArrayList(bool).initCapacity(alloc, old_fks.len);
-    for (old_fks) |_| try old_matched.append(alloc, false);
-    var new_matched = try std.ArrayList(bool).initCapacity(alloc, new_fks.len);
-    for (new_fks) |_| try new_matched.append(alloc, false);
-
-    // Find matching FKs
-    for (old_fks, 0..) |old_fk, oi| {
-        for (new_fks, 0..) |new_fk, ni| {
-            if (!new_matched.items[ni] and fksEqual(old_fk, new_fk)) {
-                old_matched.items[oi] = true;
-                new_matched.items[ni] = true;
-                break;
-            }
-        }
-    }
-
-    // Unmatched old FKs → drop
-    for (old_fks, 0..) |old_fk, oi| {
-        if (!old_matched.items[oi]) {
-            try diffs.append(alloc, .{
-                .action = .drop,
-                .old_fk = old_fk,
-                .new_fk = null,
-            });
-        }
-    }
-
-    // Unmatched new FKs → add
-    for (new_fks, 0..) |new_fk, ni| {
-        if (!new_matched.items[ni]) {
-            try diffs.append(alloc, .{
-                .action = .add,
-                .old_fk = null,
-                .new_fk = new_fk,
-            });
-        }
-    }
-
-    return try diffs.toOwnedSlice(alloc);
-}
-
-// ─── Helpers for Create (new tables) ───────────────────────
-
-fn createAllFieldDiffs(alloc: std.mem.Allocator, old_fields: []const Field, new_fields: []const Field) ![]const FieldDiff {
-    _ = old_fields;
-    var diffs = try std.ArrayList(FieldDiff).initCapacity(alloc, new_fields.len);
-    for (new_fields) |f| {
-        if (std.mem.eql(u8, f.name, "...")) continue;
-        try diffs.append(alloc, .{
-            .name = f.name,
-            .action = .add,
-            .old_field = null,
-            .new_field = f,
-            .rename_from = null,
-        });
-    }
-    return try diffs.toOwnedSlice(alloc);
-}
-
-fn createAllIndexDiffs(alloc: std.mem.Allocator, old_idxs: []const IndexDecl, new_idxs: []const IndexDecl) ![]const IndexDiff {
-    _ = old_idxs;
-    var diffs = try std.ArrayList(IndexDiff).initCapacity(alloc, new_idxs.len);
-    for (new_idxs) |idx| {
-        try diffs.append(alloc, .{
-            .name = idx.name,
-            .action = .add,
-            .old_idx = null,
-            .new_idx = idx,
-        });
-    }
-    return try diffs.toOwnedSlice(alloc);
-}
-
-fn createAllFkDiffs(alloc: std.mem.Allocator, old_fks: []const FkDecl, new_fks: []const FkDecl) ![]const FkDiff {
-    _ = old_fks;
-    var diffs = try std.ArrayList(FkDiff).initCapacity(alloc, new_fks.len);
-    for (new_fks) |fk| {
-        try diffs.append(alloc, .{
-            .action = .add,
-            .old_fk = null,
-            .new_fk = fk,
-        });
-    }
-    return try diffs.toOwnedSlice(alloc);
 }
 
 // ─── Diff Printer (for `typespec diff` command) ────────────
@@ -602,7 +197,6 @@ pub fn formatDiff(alloc: std.mem.Allocator, d: SchemaDiff) ![]const u8 {
 }
 
 pub fn printDiff(d: SchemaDiff) void {
-    // Legacy stderr path — used only by diagnostic trace
     var has_changes = false;
 
     for (d.dropped_tables) |tname| {
@@ -628,7 +222,6 @@ pub fn printDiff(d: SchemaDiff) void {
             continue;
         }
 
-        // alter
         var table_has_changes = false;
         for (td.field_diffs) |fd| {
             if (!table_has_changes) {
@@ -700,6 +293,7 @@ fn makeResolvedAst(_: std.mem.Allocator, tables: []const sem.ResolvedTable) sem.
     return .{
         .schema_name = null,
         .schema_charset = null,
+        .custom_types = &.{},
         .tables = tables,
         .sql_comments = &.{},
     };
@@ -784,12 +378,22 @@ test "diff: added field detected" {
     new_fields[1] = makeField(alloc, "name", .{ .varchar_explicit = 32 });
 
     const old_ast = makeResolvedAst(alloc, try alloc.dupe(sem.ResolvedTable, &.{.{
-        .name = "user", .comment = null, .engine = null,
-        .fields = old_fields, .fks = &.{}, .indexes = &.{}, .line_no = 1,
+        .name = "user",
+        .comment = null,
+        .engine = null,
+        .fields = old_fields,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
     }}));
     const new_ast = makeResolvedAst(alloc, try alloc.dupe(sem.ResolvedTable, &.{.{
-        .name = "user", .comment = null, .engine = null,
-        .fields = new_fields, .fks = &.{}, .indexes = &.{}, .line_no = 1,
+        .name = "user",
+        .comment = null,
+        .engine = null,
+        .fields = new_fields,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
     }}));
 
     const result = try diff(old_ast, new_ast, alloc);
@@ -811,12 +415,22 @@ test "diff: renamed field detected by signature match" {
     new_fields[1] = makeField(alloc, "full_name", .{ .varchar_explicit = 32 });
 
     const old_ast = makeResolvedAst(alloc, try alloc.dupe(sem.ResolvedTable, &.{.{
-        .name = "user", .comment = null, .engine = null,
-        .fields = old_fields, .fks = &.{}, .indexes = &.{}, .line_no = 1,
+        .name = "user",
+        .comment = null,
+        .engine = null,
+        .fields = old_fields,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
     }}));
     const new_ast = makeResolvedAst(alloc, try alloc.dupe(sem.ResolvedTable, &.{.{
-        .name = "user", .comment = null, .engine = null,
-        .fields = new_fields, .fks = &.{}, .indexes = &.{}, .line_no = 1,
+        .name = "user",
+        .comment = null,
+        .engine = null,
+        .fields = new_fields,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
     }}));
 
     const result = try diff(old_ast, new_ast, alloc);
@@ -827,8 +441,6 @@ test "diff: renamed field detected by signature match" {
     try testing.expect(result.table_diffs[0].field_diffs[0].rename_from != null);
     try testing.expectEqualStrings("name", result.table_diffs[0].field_diffs[0].rename_from.?);
 }
-
-// ─── Additional diff tests ──────────────────────────────────────
 
 test "diff: two empty schemas produce no diff" {
     const alloc = testing.allocator;
@@ -849,16 +461,25 @@ test "diff: table created and dropped simultaneously" {
     new_fields[0] = makeField(alloc, "id", .{ .simple = "n" });
 
     const old_ast = makeResolvedAst(alloc, try alloc.dupe(sem.ResolvedTable, &.{.{
-        .name = "users", .comment = null, .engine = null,
-        .fields = old_fields, .fks = &.{}, .indexes = &.{}, .line_no = 1,
+        .name = "users",
+        .comment = null,
+        .engine = null,
+        .fields = old_fields,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
     }}));
     const new_ast = makeResolvedAst(alloc, try alloc.dupe(sem.ResolvedTable, &.{.{
-        .name = "accounts", .comment = null, .engine = null,
-        .fields = new_fields, .fks = &.{}, .indexes = &.{}, .line_no = 1,
+        .name = "accounts",
+        .comment = null,
+        .engine = null,
+        .fields = new_fields,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
     }}));
 
     const result = try diff(old_ast, new_ast, alloc);
-    // users dropped, accounts created
     try testing.expectEqual(@as(usize, 1), result.dropped_tables.len);
     try testing.expectEqualStrings("users", result.dropped_tables[0]);
     try testing.expectEqual(@as(usize, 1), result.table_diffs.len);
@@ -872,15 +493,25 @@ test "diff: field type change detected" {
     old_fields[0] = makeField(alloc, "count", .{ .simple = "n" });
 
     const new_fields = try alloc.alloc(Field, 1);
-    new_fields[0] = makeField(alloc, "count", .{ .simple = "N" }); // int → bigint
+    new_fields[0] = makeField(alloc, "count", .{ .simple = "N" });
 
     const old_ast = makeResolvedAst(alloc, try alloc.dupe(sem.ResolvedTable, &.{.{
-        .name = "stats", .comment = null, .engine = null,
-        .fields = old_fields, .fks = &.{}, .indexes = &.{}, .line_no = 1,
+        .name = "stats",
+        .comment = null,
+        .engine = null,
+        .fields = old_fields,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
     }}));
     const new_ast = makeResolvedAst(alloc, try alloc.dupe(sem.ResolvedTable, &.{.{
-        .name = "stats", .comment = null, .engine = null,
-        .fields = new_fields, .fks = &.{}, .indexes = &.{}, .line_no = 1,
+        .name = "stats",
+        .comment = null,
+        .engine = null,
+        .fields = new_fields,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
     }}));
 
     const result = try diff(old_ast, new_ast, alloc);
@@ -902,12 +533,22 @@ test "diff: index added and dropped" {
     new_idx[0] = .{ .kind = .regular, .name = "idx_email", .fields = &.{"email"}, .descending = &.{false}, .line_no = 1 };
 
     const old_ast = makeResolvedAst(alloc, try alloc.dupe(sem.ResolvedTable, &.{.{
-        .name = "user", .comment = null, .engine = null,
-        .fields = fields, .fks = &.{}, .indexes = old_idx, .line_no = 1,
+        .name = "user",
+        .comment = null,
+        .engine = null,
+        .fields = fields,
+        .fks = &.{},
+        .indexes = old_idx,
+        .line_no = 1,
     }}));
     const new_ast = makeResolvedAst(alloc, try alloc.dupe(sem.ResolvedTable, &.{.{
-        .name = "user", .comment = null, .engine = null,
-        .fields = fields, .fks = &.{}, .indexes = new_idx, .line_no = 1,
+        .name = "user",
+        .comment = null,
+        .engine = null,
+        .fields = fields,
+        .fks = &.{},
+        .indexes = new_idx,
+        .line_no = 1,
     }}));
 
     const result = try diff(old_ast, new_ast, alloc);
@@ -923,12 +564,22 @@ test "diff: no changes on identical tables" {
     fields[1] = makeField(alloc, "name", .{ .simple = "s" });
 
     const t1 = try alloc.dupe(sem.ResolvedTable, &.{.{
-        .name = "user", .comment = null, .engine = null,
-        .fields = fields, .fks = &.{}, .indexes = &.{}, .line_no = 1,
+        .name = "user",
+        .comment = null,
+        .engine = null,
+        .fields = fields,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
     }});
     const t2 = try alloc.dupe(sem.ResolvedTable, &.{.{
-        .name = "user", .comment = null, .engine = null,
-        .fields = fields, .fks = &.{}, .indexes = &.{}, .line_no = 1,
+        .name = "user",
+        .comment = null,
+        .engine = null,
+        .fields = fields,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
     }});
 
     const result = try diff(makeResolvedAst(alloc, t1), makeResolvedAst(alloc, t2), alloc);
@@ -948,17 +599,26 @@ test "diff: field added and dropped simultaneously" {
     new_fields[1] = makeField(alloc, "new_col", .{ .simple = "n" });
 
     const old_table = try alloc.dupe(sem.ResolvedTable, &.{.{
-        .name = "t", .comment = null, .engine = null,
-        .fields = old_fields, .fks = &.{}, .indexes = &.{}, .line_no = 1,
+        .name = "t",
+        .comment = null,
+        .engine = null,
+        .fields = old_fields,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
     }});
     const new_table = try alloc.dupe(sem.ResolvedTable, &.{.{
-        .name = "t", .comment = null, .engine = null,
-        .fields = new_fields, .fks = &.{}, .indexes = &.{}, .line_no = 1,
+        .name = "t",
+        .comment = null,
+        .engine = null,
+        .fields = new_fields,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
     }});
 
     const result = try diff(makeResolvedAst(alloc, old_table), makeResolvedAst(alloc, new_table), alloc);
     try testing.expectEqual(@as(usize, 1), result.table_diffs.len);
-    // Should detect both add and drop
     try testing.expectEqual(@as(usize, 2), result.table_diffs[0].field_diffs.len);
 }
 
@@ -972,24 +632,34 @@ test "diff: FK change detected" {
         .fields = &.{"user_id"},
         .ref_table = "users",
         .ref_fields = &.{"id"},
-        .on_delete = .cascade,
-        .on_update = .no_action,
+        .actions = &.{.{ .trigger = .on_delete, .action = .cascade }},
+        .line_no = 1,
     }});
     const fk2 = try alloc.dupe(ast_mod.FkDecl, &.{.{
         .fields = &.{"user_id"},
         .ref_table = "users",
         .ref_fields = &.{"id"},
-        .on_delete = .set_null,
-        .on_update = .no_action,
+        .actions = &.{.{ .trigger = .on_delete, .action = .set_null }},
+        .line_no = 1,
     }});
 
     const old_table = try alloc.dupe(sem.ResolvedTable, &.{.{
-        .name = "order", .comment = null, .engine = null,
-        .fields = fields, .fks = fk1, .indexes = &.{}, .line_no = 1,
+        .name = "order",
+        .comment = null,
+        .engine = null,
+        .fields = fields,
+        .fks = fk1,
+        .indexes = &.{},
+        .line_no = 1,
     }});
     const new_table = try alloc.dupe(sem.ResolvedTable, &.{.{
-        .name = "order", .comment = null, .engine = null,
-        .fields = fields, .fks = fk2, .indexes = &.{}, .line_no = 1,
+        .name = "order",
+        .comment = null,
+        .engine = null,
+        .fields = fields,
+        .fks = fk2,
+        .indexes = &.{},
+        .line_no = 1,
     }});
 
     const result = try diff(makeResolvedAst(alloc, old_table), makeResolvedAst(alloc, new_table), alloc);
@@ -1004,16 +674,25 @@ test "diff: table comment change detected" {
     fields[0] = makeField(alloc, "id", .{ .simple = "n" });
 
     const old_table = try alloc.dupe(sem.ResolvedTable, &.{.{
-        .name = "t", .comment = "old comment", .engine = null,
-        .fields = fields, .fks = &.{}, .indexes = &.{}, .line_no = 1,
+        .name = "t",
+        .comment = "old comment",
+        .engine = null,
+        .fields = fields,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
     }});
     const new_table = try alloc.dupe(sem.ResolvedTable, &.{.{
-        .name = "t", .comment = "new comment", .engine = null,
-        .fields = fields, .fks = &.{}, .indexes = &.{}, .line_no = 1,
+        .name = "t",
+        .comment = "new comment",
+        .engine = null,
+        .fields = fields,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
     }});
 
     const result = try diff(makeResolvedAst(alloc, old_table), makeResolvedAst(alloc, new_table), alloc);
     try testing.expectEqual(@as(usize, 1), result.table_diffs.len);
-    // Comment change should be detected as a modify
     try testing.expectEqual(@as(usize, 1), result.table_diffs[0].field_diffs.len);
 }

@@ -56,7 +56,7 @@ Run a single golden test by filter: `bash tests/test.sh 01` (matches test name s
 
 - **DialectBackend vtable** ([dialect.zig](zig-typespec/src/dialect.zig)): 16 function pointers for dialect-specific SQL rendering. [codegen.zig](zig-typespec/src/codegen.zig) is fully dialect-agnostic (zero `switch(dialect)` in production code). Adding a new SQL dialect = new enum variant + type mappings + ~60-line backend implementation.
 
-- **Semantic Pass Manager** ([semantic.zig](zig-typespec/src/semantic.zig)): Extensible array of `SemanticPass` structs. Current passes: `autofk` → `suffix_inference` → `validate`. New passes: write a `fn(*PassContext) !void` and add to `DEFAULT_PASSES`.
+- **Semantic Pass Manager** ([semantic.zig](zig-typespec/src/semantic.zig)): Extensible array of `SemanticPass` structs. Current passes: `autofk` → `suffix_inference` → `validate` → `validate_type_modifiers`. New passes: write a `fn(*PassContext) !void` and add to `DEFAULT_PASSES`.
 
 - **TypedAst IR** ([typed_ast.zig](zig-typespec/src/typed_ast.zig)): Separates type resolution from code generation. Codegen only outputs strings — no type inference logic.
 
@@ -69,9 +69,17 @@ Run a single golden test by filter: `bash tests/test.sh 01` (matches test name s
 | Module | Role |
 |--------|------|
 | `sql_parser.zig` | Recursive-descent SQL DDL parser (reverse pipeline) |
-| `diff.zig` | Structural schema comparison with rename detection |
+| `diff.zig` | Table-level diff orchestration + SchemaDiff types + printing |
+| `diff_fields.zig` | Field-level diffing + rename detection + equality helpers |
+| `diff_indexes.zig` | Index diffing |
+| `diff_fks.zig` | FK diffing |
 | `type_map.zig` | Single source of truth for TPS↔SQL type mappings (FORWARD_MAP + REVERSE_MAP) |
-| `parser.zig` | Token-level `.tps` parser → AST (delegates to parse_field/fk/check/index.zig) |
+| `parser.zig` | Token-level `.tps` parser → AST (delegates to parse_*.zig modules) |
+| `parse_typedef.zig` | `@type` directive parsing (delegated from parser.zig) |
+| `parse_field.zig` | Field declaration parsing (type, modifiers, default, inline FK) |
+| `parse_fk.zig` | Foreign key parsing (standalone FKs, actions) |
+| `parse_check.zig` | CHECK constraint classification |
+| `parse_index.zig` | Index + composite PK parsing |
 | `codegen.zig` | TypedAst → SQL DDL text (delegates to dialect backend) |
 | `reverse_codegen.zig` | SQL → `.tps` + greedy template extraction algorithm |
 | `semantic.zig` | Pass manager + template resolution orchestration |

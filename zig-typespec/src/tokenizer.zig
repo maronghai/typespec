@@ -333,7 +333,7 @@ test "tokenizeAll: mixed content" {
 
 test "tokenizeAll: spec comment" {
     const alloc = std.testing.allocator;
-    const lines = [_][]const u8{ "; this is a spec comment" };
+    const lines = [_][]const u8{"; this is a spec comment"};
     const tok = Tokenizer.init(&lines);
     const result = try tok.tokenizeAll(alloc);
     defer alloc.free(result);
@@ -343,7 +343,7 @@ test "tokenizeAll: spec comment" {
 
 test "tokenizeAll: SQL comment" {
     const alloc = std.testing.allocator;
-    const lines = [_][]const u8{ "-- CREATE TABLE foo (" };
+    const lines = [_][]const u8{"-- CREATE TABLE foo ("};
     const tok = Tokenizer.init(&lines);
     const result = try tok.tokenizeAll(alloc);
     defer alloc.free(result);

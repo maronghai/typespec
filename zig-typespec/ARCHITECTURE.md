@@ -40,6 +40,19 @@ TypeSpec is a compiler that transforms `.tps` schema files into SQL DDL. It cons
 
 **Leaf modules** (zero internal dependencies): `ast.zig`, `type_map.zig`, `diagnostic.zig`
 
+### Extracted Sub-Modules
+
+| Parent Module | Extracted Module | Responsibility |
+|--------------|-----------------|---------------|
+| `parser.zig` | `parse_typedef.zig` | `@type` directive parsing (name, base type, dialect overrides) |
+| `parser.zig` | `parse_field.zig` | Field declaration parsing (name, type, modifiers, default, check) |
+| `parser.zig` | `parse_fk.zig` | Foreign key parsing (inline + standalone, actions) |
+| `parser.zig` | `parse_check.zig` | CHECK constraint classification (range, IN, comparison) |
+| `parser.zig` | `parse_index.zig` | Index + composite PK parsing |
+| `diff.zig` | `diff_fields.zig` | Field-level diffing + rename detection + equality helpers |
+| `diff.zig` | `diff_indexes.zig` | Index diffing |
+| `diff.zig` | `diff_fks.zig` | FK diffing |
+
 ## Forward Pipeline
 
 ```
@@ -175,7 +188,7 @@ PG and SQLite share 4/5 method implementations. `emitCheckExpr` is a shared stan
 
 ```zig
 SemanticPass = struct { name: []const u8, run: fn(*PassContext) !void };
-DEFAULT_PASSES = [_]SemanticPass{ autofk, suffix_inference, validate };
+DEFAULT_PASSES = [_]SemanticPass{ autofk, suffix_inference, validate, validate_type_modifiers };
 ```
 
 New passes can be added by:

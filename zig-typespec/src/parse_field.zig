@@ -294,8 +294,14 @@ pub fn parseField(alloc: std.mem.Allocator, line: tk.Line) !Field {
         }
 
         // 4. Comments: : (column), -- (SQL), ; (spec)
-        if (tok.len >= 1 and tok[0] == ':') { comment = tok; break; }
-        if (tok.len >= 2 and tok[0] == '-' and tok[1] == '-') { comment = tok; break; }
+        if (tok.len >= 1 and tok[0] == ':') {
+            comment = tok;
+            break;
+        }
+        if (tok.len >= 2 and tok[0] == '-' and tok[1] == '-') {
+            comment = tok;
+            break;
+        }
         if (tok[0] == ';') break;
 
         // 5. Standalone modifiers: ++, +, *, !, @, @u
@@ -332,7 +338,10 @@ pub fn parseField(alloc: std.mem.Allocator, line: tk.Line) !Field {
         }
 
         // 9. Skip stray closing brackets
-        if (std.mem.eql(u8, tok, "]") or std.mem.eql(u8, tok, "}")) { i += 1; continue; }
+        if (std.mem.eql(u8, tok, "]") or std.mem.eql(u8, tok, "}")) {
+            i += 1;
+            continue;
+        }
 
         // 10. Potential custom type name (alphanumeric identifier, not a modifier)
         if (type_info == .none and tok.len > 0 and isAlphaIdent(tok)) {

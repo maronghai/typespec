@@ -259,11 +259,30 @@ fn compilePipeline(io: std.Io, alloc: std.mem.Allocator, file_data: []const u8) 
     const tok = tokenizer.Tokenizer.init(try lines.toOwnedSlice(alloc));
     const tokenized = try tok.tokenizeAll(alloc);
 
-    var p = parser.Parser.init(alloc);
-    const tree = try p.parse(tokenized);
+    // Use DiagnosticCollector for multi-error recovery
+    var diagnostics = diag.DiagnosticCollector.init(alloc);
+    var p = parser.Parser.initWithDiagnostics(alloc, &diagnostics);
+    const tree = p.parse(tokenized) catch |err| {
+        // Allocation errors propagate; syntax errors are collected
+        if (!diagnostics.hasErrors()) {
+            std.debug.print("error: {s}\n", .{@errorName(err)});
+        }
+        return err;
+    };
+
+    // Print collected diagnostics and abort if any errors
+    if (diagnostics.hasErrors()) {
+        diagnostics.printAll();
+        diagnostics.printSummary();
+        std.process.exit(1);
+    }
 
     var sa = semantic.SemanticAnalyzer.init(alloc);
-    const resolved = try sa.analyze(tree);
+    const resolved = sa.analyze(tree) catch |err| {
+        // Semantic errors already printed by SemanticAnalyzer
+        if (err == error.SemanticError) std.process.exit(1);
+        return err;
+    };
 
     return .{ .resolved = resolved, .lines = tokenized, .tree = tree };
 }

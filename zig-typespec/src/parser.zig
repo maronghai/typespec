@@ -6,6 +6,7 @@ const parse_fk = @import("parse_fk.zig");
 const parse_index = @import("parse_index.zig");
 const parse_check = @import("parse_check.zig");
 const parse_field = @import("parse_field.zig");
+const parse_typedef = @import("parse_typedef.zig");
 const Ast = ast_mod.Ast;
 const Table = ast_mod.Table;
 const Field = ast_mod.Field;
@@ -98,8 +99,21 @@ pub const Parser = struct {
                 },
                 .TypeDef => {
                     if (schema != null and line.tokens.len >= 3) {
-                        // @type name = base_type  OR  @type name dialect1=type1 dialect2=type2
-                        const ct = try self.parseTypeDef(line);
+                        const ct = self.parseTypeDef(line) catch |err| {
+                            if (self.diagnostics) |dc| {
+                                dc.record(.{
+                                    .severity = .@"error",
+                                    .line_no = line.line_no,
+                                    .col = if (line.tokens.len > 0) diag.tokenColumn(line.tokens[0], line.raw) else null,
+                                    .message = "failed to parse @type directive",
+                                    .actual = @errorName(err),
+                                    .source_line = line.raw,
+                                });
+                                continue;
+                            } else {
+                                return err;
+                            }
+                        };
                         try custom_types.append(self.alloc, ct);
                     }
                 },
@@ -107,7 +121,6 @@ pub const Parser = struct {
                     // Flush previous template
                     if (in_block == .template) {
                         try self.flushTemplate(&templates, cur_name, cur_parents_buf, cur_parents_len, &cur_fields, cur_line_no, cur_loc);
-                        // Re-init for next template
                         cur_fields = try std.ArrayList(Field).initCapacity(self.alloc, 16);
                         cur_parents_buf = try self.alloc.alloc([]const u8, 4);
                         cur_parents_len = 0;
@@ -116,7 +129,22 @@ pub const Parser = struct {
                     }
 
                     // Parse new template header
-                    const tmpl = try self.parseTemplate(line);
+                    const tmpl = self.parseTemplate(line) catch |err| {
+                        if (self.diagnostics) |dc| {
+                            dc.record(.{
+                                .severity = .@"error",
+                                .line_no = line.line_no,
+                                .col = if (line.tokens.len > 0) diag.tokenColumn(line.tokens[0], line.raw) else null,
+                                .message = "failed to parse template declaration",
+                                .actual = @errorName(err),
+                                .source_line = line.raw,
+                            });
+                            in_block = .none;
+                            continue;
+                        } else {
+                            return err;
+                        }
+                    };
                     cur_name = tmpl.name;
                     cur_parents_buf = try self.alloc.alloc([]const u8, 4);
                     cur_parents_len = 0;
@@ -152,12 +180,10 @@ pub const Parser = struct {
                     while (ti < line.tokens.len) : (ti += 1) {
                         const tok = line.tokens[ti];
                         if (std.mem.eql(u8, tok, "^")) {
-                            // Skip ^ and the engine name that follows
                             if (ti + 1 < line.tokens.len and !std.mem.eql(u8, line.tokens[ti + 1], ":")) {
                                 cur_engine = try self.alloc.dupe(u8, line.tokens[ti + 1]);
                                 ti += 1;
                             } else {
-                                // Standalone ^ without engine name — default InnoDB
                                 cur_engine = "InnoDB";
                             }
                             continue;
@@ -177,7 +203,22 @@ pub const Parser = struct {
                     };
 
                     // Parse new table header
-                    const hdr = try self.parseTableHeader(stripped_line);
+                    const hdr = self.parseTableHeader(stripped_line) catch |err| {
+                        if (self.diagnostics) |dc| {
+                            dc.record(.{
+                                .severity = .@"error",
+                                .line_no = line.line_no,
+                                .col = if (line.tokens.len > 0) diag.tokenColumn(line.tokens[0], line.raw) else null,
+                                .message = "failed to parse table declaration",
+                                .actual = @errorName(err),
+                                .source_line = line.raw,
+                            });
+                            in_block = .none;
+                            continue;
+                        } else {
+                            return err;
+                        }
+                    };
                     cur_name = hdr.name;
                     cur_comment = hdr.comment;
                     cur_template_ref = hdr.template_ref;
@@ -504,49 +545,7 @@ pub const Parser = struct {
     }
 
     fn parseTypeDef(self: *Parser, line: tk.Line) !ast_mod.CustomType {
-        // tokens: ["@", "type", "name", ...]
-        // After @type: "name" "=" base_type  OR  "name" "dialect=type" ...
-        const name = try self.alloc.dupe(u8, line.tokens[2]);
-
-        // Find the = sign or first dialect=type token
-        var base: TypeInfo = .none;
-        var overrides = try std.ArrayList(ast_mod.DialectOverride).initCapacity(self.alloc, 4);
-
-        var i: usize = 3;
-        // Skip = if present
-        if (i < line.tokens.len and std.mem.eql(u8, line.tokens[i], "=")) {
-            i += 1;
-        }
-        // Parse base type (first non-dialect token after =)
-        if (i < line.tokens.len) {
-            const tok = line.tokens[i];
-            // Check if this is a dialect=type pair
-            if (std.mem.indexOfScalar(u8, tok, '=') != null) {
-                // dialect=type format — no base type, only overrides
-                // Back up, we'll parse all as overrides
-            } else {
-                base = parse_field.tryParseType(tok) orelse .{ .simple = try self.alloc.dupe(u8, tok) };
-                i += 1;
-            }
-        }
-        // Parse dialect overrides: dialect=type pairs
-        while (i < line.tokens.len) : (i += 1) {
-            const tok = line.tokens[i];
-            if (std.mem.indexOfScalar(u8, tok, '=')) |eq_pos| {
-                const dialect = try self.alloc.dupe(u8, tok[0..eq_pos]);
-                const type_str = try self.alloc.dupe(u8, tok[eq_pos + 1 ..]);
-                // Dialect overrides are raw SQL types — use raw_sql to prevent custom type re-resolution
-                const type_info: TypeInfo = parse_field.tryParseType(type_str) orelse .{ .raw_sql = type_str };
-                try overrides.append(self.alloc, .{ .dialect = dialect, .type_info = type_info });
-            }
-        }
-
-        return .{
-            .name = name,
-            .base = base,
-            .dialect_overrides = try overrides.toOwnedSlice(self.alloc),
-            .line_no = line.line_no,
-        };
+        return parse_typedef.parseTypeDef(self.alloc, line);
     }
 
     // ─── Public API: delegated functions ────────────────────
