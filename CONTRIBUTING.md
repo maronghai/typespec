@@ -102,6 +102,11 @@ Each test compiles a `.tps` file and diffs the output against `tests/expected/<n
 3. Verify the output is correct
 4. Add the test case to `tests/test.sh`
 
+**Note for SQLite tests**: The compiler emits `-- @tps col_name type` metadata comments for roundtrip preservation. When creating or updating SQLite golden files (`tests/expected/*.sqlite.sql`), use the compiler to generate them:
+   ```bash
+   ./zig-typespec/zig-out/bin/typespec tests/<name>.tps -d sqlite > tests/expected/<name>.sqlite.sql
+   ```
+
 ### Adding a new migrate test
 
 1. Create `tests/migrate-<name>-old.tps` and `tests/migrate-<name>-new.tps`

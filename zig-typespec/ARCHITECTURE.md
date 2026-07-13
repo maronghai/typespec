@@ -99,7 +99,7 @@ Input (.tps text)
 | `Ast` | Parser output | Schema, templates, tables, SQL comments |
 | `[]ResolvedTable` | Template output | Tables with template fields merged |
 | `ResolvedAst` | Semantic output | Templates applied + passes run (autofk, suffix_inference, validate) |
-| `TypedAst` | TypeResolver output | SQL type strings resolved, modifiers as booleans |
+| `TypedAst` | TypeResolver output | SQL type strings resolved, modifiers as booleans, `tps_type` for roundtrip |
 | `SchemaDiff` | Diff output | Table/field/index/FK diffs with rename detection |
 
 ## Reverse Pipeline
@@ -247,6 +247,7 @@ TypeSpec uses two separate mapping tables in `type_map.zig`:
 5. **Parser module extraction**: `parse_field.zig`, `parse_fk.zig`, `parse_check.zig`, `parse_index.zig` serve as standalone reference implementations.
 6. **Template/Semantic separation**: Template resolution (inheritance, slot merging) is independent of semantic passes (autofk, suffix_inference, validation). Each can be modified without affecting the other.
 7. **Custom type system**: Users can define named type aliases via `~` directives in the schema block. Custom types support dialect-specific overrides and are resolved during type resolution (not parsing).
+8. **SQLite roundtrip preservation**: `-- @tps col_name type` metadata comments preserve original TPS types through lossy SQLite type affinity. Forward compiler emits comments; reverse compiler parses them for exact type restoration.
 
 ## Custom Type System
 

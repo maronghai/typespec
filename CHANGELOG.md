@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.4.22 (2026-07-13)
+
+### Added
+- SQLite roundtrip preservation: `-- @tps col_name type` metadata comments
+  - Forward compiler emits `-- @tps` comments for SQLite to preserve original TPS types
+  - Reverse compiler parses `-- @tps` comments to restore exact TPS types
+  - Ensures `typespec -d sqlite | typespec reverse -d sqlite` is identity
+
+### Changed
+- `TypedColumn` gains `tps_type: ?[]const u8` field for original TPS type tracking
+- `SqlColumn` gains `tps_override: ?[]const u8` field for roundtrip metadata
+- Codegen emits `-- @tps` comments only for SQLite dialect (lossless dialects skip)
+
+### Files
+- `typed_ast.zig`: Added `tps_type` field and capture logic in `resolveColumn`
+- `codegen.zig`: Emit `-- @tps` comments for SQLite
+- `sql_parser_common.zig`: Added `tps_override` field to `SqlColumn`
+- `sql_parser.zig`: Parse `-- @tps` comments in `captureTrailingComments`
+- `reverse_codegen.zig`: Use `tps_override` before heuristic lookup
+- 16 SQLite golden test files updated with `-- @tps` comments
+
 ## v0.4.21 (2026-07-13)
 
 ### Changed
