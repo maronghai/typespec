@@ -303,10 +303,12 @@ fn reverseLookupSqlite(t: []const u8, col_name: []const u8, is_auto_inc: bool, i
         const inner = std.mem.trim(u8, t[8 .. t.len - 1], " ");
         if (std.mem.eql(u8, inner, "255"))
             return .{ .tps = "s", .omit = canOmitType(col_name, "s", is_auto_inc, is_default_ts), .confidence = .high };
-        var sbuf: [16]u8 = undefined;
-        sbuf[0] = 's';
-        for (inner, 0..) |ch, i| sbuf[i + 1] = ch;
-        return .{ .tps = sbuf[0 .. 1 + inner.len], .omit = false, .confidence = .high };
+        const sbuf = struct {
+            var buf: [16]u8 = undefined;
+        };
+        sbuf.buf[0] = 's';
+        for (inner, 0..) |ch, i| sbuf.buf[i + 1] = ch;
+        return .{ .tps = sbuf.buf[0 .. 1 + inner.len], .omit = false, .confidence = .high };
     }
     if (std.mem.startsWith(u8, upper_t, "NUMERIC(") and std.mem.endsWith(u8, upper_t, ")")) {
         return .{ .tps = t[8 .. t.len - 1], .omit = false, .confidence = .high };
