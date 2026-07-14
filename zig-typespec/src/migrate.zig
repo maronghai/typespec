@@ -1,6 +1,5 @@
 const std = @import("std");
 const diff_mod = @import("diff.zig");
-const sem = @import("semantic.zig");
 const ast_mod = @import("ast.zig");
 const codegen = @import("codegen.zig");
 const typed_ast = @import("typed_ast.zig");
@@ -16,8 +15,8 @@ const optionalStrEq = utils.optionalStrEq;
 pub fn generateFromDiff(
     alloc: std.mem.Allocator,
     d: diff_mod.SchemaDiff,
-    old_ast: sem.ResolvedAst,
-    new_ast: sem.ResolvedAst,
+    old_ast: ast_mod.ResolvedAst,
+    new_ast: ast_mod.ResolvedAst,
     dialect: codegen.Dialect,
 ) ![]const u8 {
     _ = old_ast;
@@ -49,9 +48,9 @@ pub fn generateFromDiff(
                 // New table — emit CREATE TABLE using the new AST table
                 has_operations = true;
                 if (findResolvedTable(new_ast, td.name)) |table| {
-                    var single_tables = try std.ArrayList(sem.ResolvedTable).initCapacity(alloc, 1);
+                    var single_tables = try std.ArrayList(ast_mod.ResolvedTable).initCapacity(alloc, 1);
                     try single_tables.append(alloc, table);
-                    const single_resolved = sem.ResolvedAst{
+                    const single_resolved = ast_mod.ResolvedAst{
                         .schema_name = new_ast.schema_name,
                         .schema_charset = new_ast.schema_charset,
                         .custom_types = new_ast.custom_types,
@@ -257,8 +256,16 @@ pub fn generateFromDiff(
                             sub_needs_comma = true;
                             const eng = md.new_engine orelse "InnoDB";
                             try w.print("ENGINE={s}", .{eng});
+                        } else {
+                            // PG/SQLite: engine is not applicable; emit warning
+                            if (!table_has_ops) {
+                                try emitAlterTable(w, dialect, td.name);
+                                table_has_ops = true;
+                            }
+                            if (sub_needs_comma) try w.writeAll(",\n");
+                            sub_needs_comma = true;
+                            try w.writeAll("-- NOTE: ENGINE change is MySQL-only, ignored for this dialect\n");
                         }
-                        // PG/SQLite: engine is not applicable
                     }
                 }
 
@@ -464,7 +471,7 @@ fn emitDropFk(w: anytype, dialect: codegen.Dialect, table_name: []const u8, fk: 
     }
 }
 
-fn findResolvedTable(ast: sem.ResolvedAst, name: []const u8) ?sem.ResolvedTable {
+fn findResolvedTable(ast: ast_mod.ResolvedAst, name: []const u8) ?ast_mod.ResolvedTable {
     for (ast.tables) |table| {
         if (std.mem.eql(u8, table.name, name)) return table;
     }
@@ -475,7 +482,7 @@ fn findResolvedTable(ast: sem.ResolvedAst, name: []const u8) ?sem.ResolvedTable 
 
 const testing = std.testing;
 
-fn emptyResolvedAst() sem.ResolvedAst {
+fn emptyResolvedAst() ast_mod.ResolvedAst {
     return .{
         .schema_name = null,
         .schema_charset = null,

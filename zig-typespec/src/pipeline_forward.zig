@@ -14,7 +14,7 @@ const io_mod = @import("io.zig");
 /// Returned by compilePipeline so trace mode can inspect each stage
 /// without re-running the pipeline.
 pub const PipelineResult = struct {
-    resolved: semantic.ResolvedAst,
+    resolved: ast_mod.ResolvedAst,
     lines: []tokenizer.Line,
     tree: ast_mod.Ast,
 };
@@ -60,7 +60,7 @@ pub fn compilePipeline(io: std.Io, alloc: std.mem.Allocator, file_data: []const 
 }
 
 /// Compile a .tps file path to ResolvedAst (used by diff/migrate pipelines).
-pub fn compileToAst(io: std.Io, alloc: std.mem.Allocator, path: []const u8) !semantic.ResolvedAst {
+pub fn compileToAst(io: std.Io, alloc: std.mem.Allocator, path: []const u8) !ast_mod.ResolvedAst {
     const file_data = try std.Io.Dir.cwd().readFileAlloc(io, path, alloc, .unlimited);
     const pipeline = try compilePipeline(io, alloc, file_data);
     return pipeline.resolved;

@@ -15,8 +15,8 @@ const Modifier = ast_mod.Modifier;
 const DefaultVal = ast_mod.DefaultVal;
 const CheckConstraint = ast_mod.CheckConstraint;
 const SqlComment = ast_mod.SqlComment;
-pub const ResolvedTable = ast_mod.ResolvedTable;
-pub const ResolvedAst = ast_mod.ResolvedAst;
+const ResolvedTable = ast_mod.ResolvedTable;
+const ResolvedAst = ast_mod.ResolvedAst;
 
 // ─── Pass Manager ──────────────────────────────────────────────
 
