@@ -1,5 +1,5 @@
-# users  : User accounts
-id integer ++
+# users : User accounts
+id n ++
 name s128 *
 email * @u : Primary email
-created_at timestamp + *
+created_at t + *

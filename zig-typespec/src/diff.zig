@@ -24,6 +24,17 @@ pub const FkAction = diff_fks.FkAction;
 
 pub const TableAction = enum { create, alter };
 
+pub const TableMetadataDiff = struct {
+    old_comment: ?[]const u8,
+    new_comment: ?[]const u8,
+    old_engine: ?[]const u8,
+    new_engine: ?[]const u8,
+    pub fn hasChanges(self: TableMetadataDiff) bool {
+        return !optionalStrEq(self.old_comment, self.new_comment) or
+            !optionalStrEq(self.old_engine, self.new_engine);
+    }
+};
+
 pub const SchemaDiff = struct {
     table_diffs: []const TableDiff,
     dropped_tables: [][]const u8,
@@ -35,6 +46,7 @@ pub const TableDiff = struct {
     field_diffs: []const FieldDiff,
     index_diffs: []const IndexDiff,
     fk_diffs: []const FkDiff,
+    metadata_diff: ?TableMetadataDiff = null,
 };
 
 // ─── Re-export equality helpers ────────────────────────────
@@ -45,6 +57,14 @@ pub const defaultValEqual = diff_fields.defaultValEqual;
 pub const checkEqual = diff_fields.checkEqual;
 pub const indexesEqual = diff_indexes.indexesEqual;
 pub const fksEqual = diff_fks.fksEqual;
+
+// ─── Helpers ───────────────────────────────────────────────
+
+fn optionalStrEq(a: ?[]const u8, b: ?[]const u8) bool {
+    if (a == null and b == null) return true;
+    if (a == null or b == null) return false;
+    return std.mem.eql(u8, a.?, b.?);
+}
 
 // ─── Diff Engine ───────────────────────────────────────────
 
@@ -86,7 +106,7 @@ pub fn diff(old: sem.ResolvedAst, new: sem.ResolvedAst, alloc: std.mem.Allocator
         if (new_map.get(old_table.name)) |new_idx| {
             const new_table = new.tables[new_idx];
             const td = try diffTable(alloc, old_table, new_table);
-            if (td.field_diffs.len > 0 or td.index_diffs.len > 0 or td.fk_diffs.len > 0) {
+            if (td.field_diffs.len > 0 or td.index_diffs.len > 0 or td.fk_diffs.len > 0 or td.metadata_diff != null) {
                 try table_diffs.append(alloc, td);
             }
         }
@@ -103,12 +123,21 @@ fn diffTable(alloc: std.mem.Allocator, old: sem.ResolvedTable, new: sem.Resolved
     const index_diffs = try diff_indexes.diffIndexes(alloc, old.indexes, new.indexes);
     const fk_diffs = try diff_fks.diffFks(alloc, old.fks, new.fks);
 
+    // Compare metadata (comment, engine)
+    const metadata_diff = TableMetadataDiff{
+        .old_comment = old.comment,
+        .new_comment = new.comment,
+        .old_engine = old.engine,
+        .new_engine = new.engine,
+    };
+
     return .{
         .name = old.name,
         .action = .alter,
         .field_diffs = field_diffs,
         .index_diffs = index_diffs,
         .fk_diffs = fk_diffs,
+        .metadata_diff = if (metadata_diff.hasChanges()) metadata_diff else null,
     };
 }
 
@@ -164,6 +193,31 @@ pub fn formatDiff(alloc: std.mem.Allocator, d: SchemaDiff, dialect: Dialect) ![]
                 .drop => try w.print("  - {s} (drop)\n", .{fd.name}),
                 .modify => try w.print("  ~ {s} (modify)\n", .{fd.name}),
                 .rename => try w.print("  ~ {s} → {s} (rename)\n", .{ fd.rename_from.?, fd.name }),
+            }
+        }
+        // Metadata diffs (comment, engine)
+        if (td.metadata_diff) |md| {
+            if (!optionalStrEq(md.old_comment, md.new_comment)) {
+                if (!table_has_changes) {
+                    try w.print("-- ALTER TABLE {c}{s}{c}\n", .{ q, td.name, q });
+                    table_has_changes = true;
+                }
+                if (md.new_comment) |nc| {
+                    try w.print("  ~ comment → '{s}'\n", .{nc});
+                } else {
+                    try w.print("  - comment (removed)\n", .{});
+                }
+            }
+            if (!optionalStrEq(md.old_engine, md.new_engine)) {
+                if (!table_has_changes) {
+                    try w.print("-- ALTER TABLE {c}{s}{c}\n", .{ q, td.name, q });
+                    table_has_changes = true;
+                }
+                if (md.new_engine) |ne| {
+                    try w.print("  ~ engine → '{s}'\n", .{ne});
+                } else {
+                    try w.print("  - engine (removed)\n", .{});
+                }
             }
         }
         for (td.index_diffs) |idx| {
@@ -247,6 +301,31 @@ pub fn printDiff(d: SchemaDiff, dialect: Dialect) void {
                 .rename => std.debug.print("  ~ {s} → {s} (rename)\n", .{ fd.rename_from.?, fd.name }),
             }
         }
+        // Metadata diffs (comment, engine)
+        if (td.metadata_diff) |md| {
+            if (!optionalStrEq(md.old_comment, md.new_comment)) {
+                if (!table_has_changes) {
+                    std.debug.print("-- ALTER TABLE {c}{s}{c}\n", .{ q, td.name, q });
+                    table_has_changes = true;
+                }
+                if (md.new_comment) |nc| {
+                    std.debug.print("  ~ comment → '{s}'\n", .{nc});
+                } else {
+                    std.debug.print("  - comment (removed)\n", .{});
+                }
+            }
+            if (!optionalStrEq(md.old_engine, md.new_engine)) {
+                if (!table_has_changes) {
+                    std.debug.print("-- ALTER TABLE {c}{s}{c}\n", .{ q, td.name, q });
+                    table_has_changes = true;
+                }
+                if (md.new_engine) |ne| {
+                    std.debug.print("  ~ engine → '{s}'\n", .{ne});
+                } else {
+                    std.debug.print("  - engine (removed)\n", .{});
+                }
+            }
+        }
         for (td.index_diffs) |idx| {
             if (!table_has_changes) {
                 std.debug.print("-- ALTER TABLE {c}{s}{c}\n", .{ q, td.name, q });
@@ -282,6 +361,104 @@ pub fn printDiff(d: SchemaDiff, dialect: Dialect) void {
     if (!has_changes) {
         std.debug.print("No differences found.\n", .{});
     }
+}
+
+test "diff: table engine change detected" {
+    const alloc = testing.allocator;
+
+    const fields = try alloc.alloc(Field, 1);
+    fields[0] = makeField(alloc, "id", .{ .simple = "n" });
+
+    const old_table = try alloc.dupe(sem.ResolvedTable, &.{.{
+        .name = "t",
+        .comment = null,
+        .engine = "InnoDB",
+        .fields = fields,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
+    }});
+    const new_table = try alloc.dupe(sem.ResolvedTable, &.{.{
+        .name = "t",
+        .comment = null,
+        .engine = "MyISAM",
+        .fields = fields,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
+    }});
+
+    const result = try diff(makeResolvedAst(alloc, old_table), makeResolvedAst(alloc, new_table), alloc);
+    try testing.expectEqual(@as(usize, 1), result.table_diffs.len);
+    try testing.expect(result.table_diffs[0].metadata_diff != null);
+    try testing.expectEqualStrings("InnoDB", result.table_diffs[0].metadata_diff.?.old_engine.?);
+    try testing.expectEqualStrings("MyISAM", result.table_diffs[0].metadata_diff.?.new_engine.?);
+}
+
+test "diff: no metadata change produces null metadata_diff" {
+    const alloc = testing.allocator;
+
+    const fields = try alloc.alloc(Field, 1);
+    fields[0] = makeField(alloc, "id", .{ .simple = "n" });
+
+    const old_table = try alloc.dupe(sem.ResolvedTable, &.{.{
+        .name = "t",
+        .comment = "same",
+        .engine = "InnoDB",
+        .fields = fields,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
+    }});
+    const new_table = try alloc.dupe(sem.ResolvedTable, &.{.{
+        .name = "t",
+        .comment = "same",
+        .engine = "InnoDB",
+        .fields = fields,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
+    }});
+
+    const result = try diff(makeResolvedAst(alloc, old_table), makeResolvedAst(alloc, new_table), alloc);
+    // No changes at all → table shouldn't be in diffs
+    try testing.expectEqual(@as(usize, 0), result.table_diffs.len);
+}
+
+test "diff: combined field and metadata change" {
+    const alloc = testing.allocator;
+
+    const old_fields = try alloc.alloc(Field, 1);
+    old_fields[0] = makeField(alloc, "id", .{ .simple = "n" });
+
+    const new_fields = try alloc.alloc(Field, 2);
+    new_fields[0] = makeField(alloc, "id", .{ .simple = "n" });
+    new_fields[1] = makeField(alloc, "name", .{ .simple = "s" });
+
+    const old_table = try alloc.dupe(sem.ResolvedTable, &.{.{
+        .name = "t",
+        .comment = "old",
+        .engine = null,
+        .fields = old_fields,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
+    }});
+    const new_table = try alloc.dupe(sem.ResolvedTable, &.{.{
+        .name = "t",
+        .comment = "new",
+        .engine = null,
+        .fields = new_fields,
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
+    }});
+
+    const result = try diff(makeResolvedAst(alloc, old_table), makeResolvedAst(alloc, new_table), alloc);
+    try testing.expectEqual(@as(usize, 1), result.table_diffs.len);
+    // Both field and metadata changes
+    try testing.expectEqual(@as(usize, 1), result.table_diffs[0].field_diffs.len);
+    try testing.expect(result.table_diffs[0].metadata_diff != null);
 }
 
 // ─── Unit Tests ─────────────────────────────────────────────
@@ -706,5 +883,8 @@ test "diff: table comment change detected" {
 
     const result = try diff(makeResolvedAst(alloc, old_table), makeResolvedAst(alloc, new_table), alloc);
     try testing.expectEqual(@as(usize, 1), result.table_diffs.len);
-    try testing.expectEqual(@as(usize, 1), result.table_diffs[0].field_diffs.len);
+    // Comment change is now detected as metadata diff, not field diff
+    try testing.expect(result.table_diffs[0].metadata_diff != null);
+    try testing.expectEqualStrings("old comment", result.table_diffs[0].metadata_diff.?.old_comment.?);
+    try testing.expectEqualStrings("new comment", result.table_diffs[0].metadata_diff.?.new_comment.?);
 }

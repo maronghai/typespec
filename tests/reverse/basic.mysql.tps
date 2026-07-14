@@ -1,4 +1,4 @@
-# `user`
-id int ++ *
+# user
+id n ++ *
 name s128 *
 email

@@ -8,6 +8,14 @@ const dialect_mod = @import("dialect.zig");
 const Field = ast_mod.Field;
 const TypeInfo = ast_mod.TypeInfo;
 
+// ─── Helpers ───────────────────────────────────────────────
+
+fn optionalStrEq(a: ?[]const u8, b: ?[]const u8) bool {
+    if (a == null and b == null) return true;
+    if (a == null or b == null) return false;
+    return std.mem.eql(u8, a.?, b.?);
+}
+
 pub fn generateFromDiff(
     alloc: std.mem.Allocator,
     d: diff_mod.SchemaDiff,
@@ -193,6 +201,67 @@ pub fn generateFromDiff(
                                 try emitAddIndex(w, dialect, td.name, new_idx);
                             }
                         },
+                    }
+                }
+
+                // Metadata diffs (comment, engine)
+                if (td.metadata_diff) |md| {
+                    // Comment change
+                    if (!optionalStrEq(md.old_comment, md.new_comment)) {
+                        switch (dialect) {
+                            .mysql => {
+                                // MySQL: ALTER TABLE ... COMMENT='new comment'
+                                if (!table_has_ops) {
+                                    try emitAlterTable(w, dialect, td.name);
+                                    table_has_ops = true;
+                                }
+                                if (sub_needs_comma) try w.writeAll(",\n");
+                                sub_needs_comma = true;
+                                if (md.new_comment) |nc| {
+                                    try w.print("COMMENT='{s}'", .{nc});
+                                } else {
+                                    try w.writeAll("COMMENT=''");
+                                }
+                            },
+                            .pg => {
+                                // PostgreSQL: standalone COMMENT ON TABLE
+                                if (table_has_ops) {
+                                    try w.writeAll(";\n\n");
+                                    table_has_ops = false;
+                                    sub_needs_comma = false;
+                                }
+                                if (md.new_comment) |nc| {
+                                    try w.writeAll("COMMENT ON TABLE ");
+                                    try dialect_mod.getBackend(dialect).quoteIdent(w, td.name);
+                                    try w.print(" IS '{s}';\n\n", .{nc});
+                                    has_operations = true;
+                                }
+                            },
+                            .sqlite => {
+                                // SQLite: comments are not supported in ALTER TABLE
+                                if (!table_has_ops) {
+                                    try emitAlterTable(w, dialect, td.name);
+                                    table_has_ops = true;
+                                }
+                                if (sub_needs_comma) try w.writeAll(",\n");
+                                sub_needs_comma = true;
+                                try w.print("-- NOTE: Comment change not supported via ALTER TABLE in SQLite\n", .{});
+                            },
+                        }
+                    }
+                    // Engine change (MySQL only)
+                    if (!optionalStrEq(md.old_engine, md.new_engine)) {
+                        if (dialect == .mysql) {
+                            if (!table_has_ops) {
+                                try emitAlterTable(w, dialect, td.name);
+                                table_has_ops = true;
+                            }
+                            if (sub_needs_comma) try w.writeAll(",\n");
+                            sub_needs_comma = true;
+                            const eng = md.new_engine orelse "InnoDB";
+                            try w.print("ENGINE={s}", .{eng});
+                        }
+                        // PG/SQLite: engine is not applicable
                     }
                 }
 

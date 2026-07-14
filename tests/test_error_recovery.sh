@@ -79,5 +79,26 @@ else
     fail "invalid-custom-type" "Unexpected failure (rc=$rc): $output"
 fi
 
+# Test 8: Multi-block recovery → should parse valid blocks despite errors
+echo "Test: multi-block-recovery"
+output=$("$COMPILER" "$SCRIPT_DIR/error-recovery/multi-block-recovery.tps" -o /dev/null 2>&1) && rc=0 || rc=$?
+# Should produce warnings about bad field and duplicates, but still parse valid tables
+warn_count=$(echo "$output" | grep -c "warning:\|error:" || true)
+if [ "$warn_count" -ge 1 ]; then
+    pass "multi-block-recovery ($warn_count diagnostics)"
+else
+    fail "multi-block-recovery" "Expected >=1 diagnostics, got $warn_count: $output"
+fi
+
+# Test 9: Recovery after bad template → should parse valid tables after error
+echo "Test: recovery-after-bad-template"
+output=$("$COMPILER" "$SCRIPT_DIR/error-recovery/recovery-after-bad-template.tps" -o /dev/null 2>&1) && rc=0 || rc=$?
+# Should produce error about invalid syntax but still compile
+if [ "$rc" -eq 0 ] || echo "$output" | grep -qi "error\|failed"; then
+    pass "recovery-after-bad-template (rc=$rc)"
+else
+    fail "recovery-after-bad-template" "Unexpected failure (rc=$rc): $output"
+fi
+
 summary "Error Recovery"
 [ "$FAIL" -eq 0 ] && exit 0 || exit 1

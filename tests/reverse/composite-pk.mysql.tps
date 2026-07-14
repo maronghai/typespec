@@ -1,5 +1,5 @@
-# `order_item`
-order_id int *
-product_id int *
-quantity int * =1
+# order_item
+order_id *
+product_id *
+quantity n * =1
 price 10, 2 *

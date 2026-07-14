@@ -1,10 +1,10 @@
-# `tags`
-id int ++ *
+# tags
+id n ++ *
 name s64 * @u
 
-# `article_tag`
-article_id int *
-tag_id int *
+# article_tag
+article_id *
+tag_id *
 
 > article_id articles.id
 > tag_id tags.id

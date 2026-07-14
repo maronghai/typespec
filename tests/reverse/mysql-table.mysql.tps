@@ -1,5 +1,5 @@
-# `products`  : Product catalog
-id int ++ *
+# products : Product catalog
+id n ++ *
 name s128 * @u
 price 10, 2 *
-created_at datetime + *
+created_at t + *
