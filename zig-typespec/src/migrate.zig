@@ -133,7 +133,7 @@ pub fn generateFromDiff(
                                             try cg.emitColumnDef(w, typed_col);
                                         }
                                     },
-                                    .postgres, .sqlite => {
+                                    .pg, .sqlite => {
                                         if (sub_needs_comma) try w.writeAll(",\n");
                                         sub_needs_comma = true;
                                         try w.writeAll("RENAME COLUMN ");
@@ -271,16 +271,16 @@ fn emitAddIndex(w: anytype, dialect: codegen.Dialect, table_name: []const u8, id
                 },
             }
         },
-        .postgres => {
+        .pg => {
             switch (idx.kind) {
                 .unique => {
                     try w.writeAll("ADD UNIQUE (");
-                    try emitIndexFields(w, .postgres, idx);
+                    try emitIndexFields(w, .pg, idx);
                     try w.writeAll(")");
                 },
                 .primary_key => {
                     try w.writeAll("ADD PRIMARY KEY (");
-                    try emitIndexFields(w, .postgres, idx);
+                    try emitIndexFields(w, .pg, idx);
                     try w.writeAll(")");
                 },
                 else => {
@@ -324,7 +324,7 @@ fn emitDropIndex(w: anytype, dialect: codegen.Dialect, table_name: []const u8, i
                 else => try w.print("DROP INDEX `{s}`", .{idx.name}),
             }
         },
-        .postgres, .sqlite => {
+        .pg, .sqlite => {
             switch (idx.kind) {
                 .primary_key => try w.writeAll("DROP PRIMARY KEY"),
                 else => try w.print("DROP INDEX IF EXISTS \"{s}\"", .{idx.name}),
@@ -338,7 +338,7 @@ fn emitIndexFields(w: anytype, dialect: codegen.Dialect, idx: ast_mod.IndexDecl)
         if (fi > 0) try w.writeAll(", ");
         switch (dialect) {
             .mysql => try w.print("`{s}`", .{f}),
-            .postgres, .sqlite => try w.print("\"{s}\"", .{f}),
+            .pg, .sqlite => try w.print("\"{s}\"", .{f}),
         }
     }
 }
@@ -387,7 +387,7 @@ fn emitDropFk(w: anytype, dialect: codegen.Dialect, table_name: []const u8, fk: 
                 try w.writeAll(f);
             }
         },
-        .postgres => {
+        .pg => {
             try w.writeAll("\"fk_");
             for (fk.fields) |f| {
                 try w.writeAll(f);

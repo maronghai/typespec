@@ -43,7 +43,7 @@ pub const DialectBackend = struct {
 pub fn getBackend(dialect: Dialect) DialectBackend {
     return switch (dialect) {
         .mysql => mysql_backend,
-        .postgres => pg_backend,
+        .pg => pg_backend,
         .sqlite => sqlite_backend,
     };
 }

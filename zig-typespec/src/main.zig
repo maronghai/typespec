@@ -59,10 +59,16 @@ pub fn main(init: std.process.Init) !void {
     };
 }
 
+const VERSION = "0.4.29";
+
 // ─── Command Dispatch ──────────────────────────────────────────
 
 fn dispatch(io: std.Io, alloc: std.mem.Allocator, parsed: cli.ParsedArgs) !void {
     switch (parsed.command) {
+        .version => {
+            std.debug.print("typespec {s}\n", .{VERSION});
+            return;
+        },
         .compile => |cmd| {
             const file_data = if (cmd.input) |path|
                 try compiler.readFileOrStdin(io, alloc, path)

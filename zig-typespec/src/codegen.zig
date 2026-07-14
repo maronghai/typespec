@@ -391,7 +391,7 @@ test "codegen: PostgreSQL table uses double quotes" {
         .sql_comments = &.{},
     };
 
-    var cg = Codegen.init(alloc, .postgres);
+    var cg = Codegen.init(alloc, .pg);
     const sql = try cg.generateFromTypedAst(typed);
 
     try testing.expect(std.mem.indexOf(u8, sql, "CREATE TABLE \"user\"") != null);
@@ -432,7 +432,7 @@ test "codegen: emitColumnDef PG omits UNSIGNED" {
     const col = makeTestColumn("count", "integer");
     col.unsigned = true;
 
-    var cg = Codegen.init(alloc, .postgres);
+    var cg = Codegen.init(alloc, .pg);
     try cg.emitColumnDef(w, col);
     try w.flush();
 
@@ -501,7 +501,7 @@ test "codegen: PG standalone COMMENT ON TABLE" {
         .sql_comments = &.{},
     };
 
-    var cg = Codegen.init(alloc, .postgres);
+    var cg = Codegen.init(alloc, .pg);
     const sql = try cg.generateFromTypedAst(typed);
 
     try testing.expect(std.mem.indexOf(u8, sql, "COMMENT ON TABLE") != null);
@@ -596,7 +596,7 @@ test "codegen: PG uses double quotes, no backticks" {
         .sql_comments = &.{},
     };
 
-    var cg = Codegen.init(alloc, .postgres);
+    var cg = Codegen.init(alloc, .pg);
     const sql = try cg.generateFromTypedAst(typed);
 
     try testing.expect(std.mem.indexOf(u8, sql, "\"items\"") != null);
@@ -665,7 +665,7 @@ test "codegen: MySQL UNSIGNED column" {
     try testing.expect(std.mem.indexOf(u8, sql, "UNSIGNED") != null);
 
     // PG should NOT have UNSIGNED
-    var cg_pg = Codegen.init(alloc, .postgres);
+    var cg_pg = Codegen.init(alloc, .pg);
     const sql_pg = try cg_pg.generateFromTypedAst(typed);
     try testing.expect(std.mem.indexOf(u8, sql_pg, "UNSIGNED") == null);
 }
@@ -694,7 +694,7 @@ test "codegen: PG COMMENT ON TABLE and COLUMN" {
         .sql_comments = &.{},
     };
 
-    var cg = Codegen.init(alloc, .postgres);
+    var cg = Codegen.init(alloc, .pg);
     const sql = try cg.generateFromTypedAst(typed);
     try testing.expect(std.mem.indexOf(u8, sql, "COMMENT ON TABLE") != null);
     try testing.expect(std.mem.indexOf(u8, sql, "COMMENT ON COLUMN") != null);

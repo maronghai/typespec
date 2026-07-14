@@ -8,6 +8,7 @@ pub const Command = union(enum) {
     diff: struct { old: []const u8, new: []const u8 },
     migrate: struct { old: []const u8, new: []const u8, output: ?[]const u8 },
     reverse: struct { input: ?[]const u8, output: ?[]const u8, with_templates: bool },
+    version,
 };
 
 pub const ParsedArgs = struct {
@@ -28,10 +29,13 @@ pub fn parseArgs(alloc: std.mem.Allocator, raw_args: []const []const u8) !Parsed
     var dialect: dialect_enum.Dialect = .mysql;
     var filtered = try std.ArrayList([]const u8).initCapacity(alloc, raw_args.len);
 
-    // Pass 1: extract --dialect / -d from all args
+    // Pass 1: extract --dialect / -d / --version / -v from all args
     var i: usize = 1; // skip argv[0]
+    var want_version = false;
     while (i < raw_args.len) : (i += 1) {
-        if (std.mem.eql(u8, raw_args[i], "--dialect") or std.mem.eql(u8, raw_args[i], "-d")) {
+        if (std.mem.eql(u8, raw_args[i], "--version") or std.mem.eql(u8, raw_args[i], "-v")) {
+            want_version = true;
+        } else if (std.mem.eql(u8, raw_args[i], "--dialect") or std.mem.eql(u8, raw_args[i], "-d")) {
             if (i + 1 < raw_args.len) {
                 dialect = parseDialect(raw_args[i + 1]) catch |e| {
                     if (e == error.UnknownDialect) return error.UnknownDialect;
@@ -46,6 +50,10 @@ pub fn parseArgs(alloc: std.mem.Allocator, raw_args: []const []const u8) !Parsed
         }
     }
     const fargs = try filtered.toOwnedSlice(alloc);
+
+    if (want_version) {
+        return .{ .dialect = dialect, .command = .version };
+    }
 
     // Pass 2: route subcommand
     if (fargs.len < 1) {
@@ -108,7 +116,7 @@ pub fn parseArgs(alloc: std.mem.Allocator, raw_args: []const []const u8) !Parsed
 
 fn parseDialect(s: []const u8) !dialect_enum.Dialect {
     if (std.mem.eql(u8, s, "mysql")) return .mysql;
-    if (std.mem.eql(u8, s, "pg") or std.mem.eql(u8, s, "postgres")) return .postgres;
+    if (std.mem.eql(u8, s, "pg") or std.mem.eql(u8, s, "postgres")) return .pg;
     if (std.mem.eql(u8, s, "sqlite") or std.mem.eql(u8, s, "sq")) return .sqlite;
     return error.UnknownDialect;
 }
@@ -126,6 +134,7 @@ pub fn printUsage() void {
     std.debug.print("                                                           -t: extract shared templates\n", .{});
     std.debug.print("\nOptions:\n", .{});
     std.debug.print("  -d, --dialect  Target SQL dialect: mysql (default), pg, postgres, sqlite\n", .{});
+    std.debug.print("  -v, --version  Print version and exit\n", .{});
     std.debug.print("\nPipe mode: read from stdin when no input file is given.\n", .{});
     std.debug.print("  echo '# t\\nid n' | typespec\n", .{});
     std.debug.print("  cat schema.sql | typespec reverse -t\n", .{});

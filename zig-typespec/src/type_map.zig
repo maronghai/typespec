@@ -143,7 +143,7 @@ pub fn toSqlType(w: anytype, dialect: Dialect, type_info: TypeInfo) !void {
                     if (m.tps[0] == s[0]) {
                         const sql_type = switch (dialect) {
                             .mysql => m.mysql,
-                            .postgres => m.pg,
+                            .pg => m.pg,
                             .sqlite => m.sqlite,
                         };
                         // For PG/SQLite integer, strip display width (PG/SQLite ignore it)
@@ -171,7 +171,7 @@ pub fn toSqlType(w: anytype, dialect: Dialect, type_info: TypeInfo) !void {
         .decimal_explicit => |ds| {
             const type_name: []const u8 = switch (dialect) {
                 .mysql => "decimal",
-                .postgres => "numeric",
+                .pg => "numeric",
                 .sqlite => "NUMERIC",
             };
             try w.print("{s}({d}, {d})", .{ type_name, ds.precision, ds.scale });
@@ -194,7 +194,7 @@ pub fn toSqlType(w: anytype, dialect: Dialect, type_info: TypeInfo) !void {
                     }
                     try w.writeAll(")");
                 },
-                .postgres, .sqlite => {
+                .pg, .sqlite => {
                     try w.writeAll("TEXT");
                 },
             }
@@ -431,7 +431,7 @@ pub fn lookupCustomType(
             for (ct.dialect_overrides) |ov| {
                 const dname = switch (dialect) {
                     .mysql => "mysql",
-                    .postgres => "postgres",
+                    .pg => "postgres",
                     .sqlite => "sqlite",
                 };
                 if (std.mem.eql(u8, ov.dialect, dname)) {
@@ -461,7 +461,7 @@ test "forward: n maps to int in MySQL" {
 test "forward: n maps to integer in PostgreSQL" {
     var aw = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer aw.deinit();
-    try toSqlType(&aw.writer, .postgres, .{ .simple = "n" });
+    try toSqlType(&aw.writer, .pg, .{ .simple = "n" });
     try aw.flush();
     const out = aw.toArrayList();
     const result = try out.toOwnedSlice(std.testing.allocator);
@@ -494,7 +494,7 @@ test "forward: t maps to datetime in MySQL" {
 test "forward: t maps to timestamp in PostgreSQL" {
     var aw = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer aw.deinit();
-    try toSqlType(&aw.writer, .postgres, .{ .simple = "t" });
+    try toSqlType(&aw.writer, .pg, .{ .simple = "t" });
     try aw.flush();
     const out = aw.toArrayList();
     const result = try out.toOwnedSlice(std.testing.allocator);
@@ -527,7 +527,7 @@ test "forward: int_explicit(11) maps to int(11) in MySQL" {
 test "forward: int_explicit(11) maps to integer in PG" {
     var aw = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer aw.deinit();
-    try toSqlType(&aw.writer, .postgres, .{ .int_explicit = 11 });
+    try toSqlType(&aw.writer, .pg, .{ .int_explicit = 11 });
     try aw.flush();
     const out = aw.toArrayList();
     const result = try out.toOwnedSlice(std.testing.allocator);
@@ -549,7 +549,7 @@ test "forward: decimal_explicit maps correctly per dialect" {
     {
         var aw = std.Io.Writer.Allocating.init(std.testing.allocator);
         defer aw.deinit();
-        try toSqlType(&aw.writer, .postgres, .{ .decimal_explicit = .{ .precision = 10, .scale = 2 } });
+        try toSqlType(&aw.writer, .pg, .{ .decimal_explicit = .{ .precision = 10, .scale = 2 } });
         try aw.flush();
         const out = aw.toArrayList();
         const result = try out.toOwnedSlice(std.testing.allocator);
@@ -607,7 +607,7 @@ test "forward: enum_type maps to TEXT in PostgreSQL" {
     var aw = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer aw.deinit();
     const vals = [_][]const u8{ "M", "F" };
-    try toSqlType(&aw.writer, .postgres, .{ .enum_type = &vals });
+    try toSqlType(&aw.writer, .pg, .{ .enum_type = &vals });
     try aw.flush();
     const out = aw.toArrayList();
     const result = try out.toOwnedSlice(std.testing.allocator);
@@ -636,7 +636,7 @@ test "reverse: decimal(16, 2) maps to 16,2" {
 }
 
 test "reverse: numeric(16, 2) maps to 16,2" {
-    const r = reverseLookup("numeric(16, 2)", "col", false, false, .postgres);
+    const r = reverseLookup("numeric(16, 2)", "col", false, false, .pg);
     try std.testing.expectEqualStrings("16,2", r.tps);
 }
 

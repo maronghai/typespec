@@ -41,7 +41,7 @@ pub const SemanticPass = struct {
 pub const DEFAULT_PASSES = [_]SemanticPass{
     .{ .name = "autofk", .run = runAutoFk, .depends_on = &.{} },
     .{ .name = "suffix_inference", .run = runSuffixInference, .depends_on = &.{"autofk"} },
-    .{ .name = "validate", .run = runValidate, .depends_on = &.{"autofk", "suffix_inference"} },
+    .{ .name = "validate", .run = runValidate, .depends_on = &.{ "autofk", "suffix_inference" } },
     .{ .name = "validate_type_modifiers", .run = runValidateTypeModifiers, .depends_on = &.{"suffix_inference"} },
 };
 
