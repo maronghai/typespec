@@ -33,14 +33,16 @@ pub const PassContext = struct {
 pub const SemanticPass = struct {
     name: []const u8,
     run: *const fn (ctx: *PassContext) anyerror!void,
+    /// Pass names that must run before this pass. Debug mode validates ordering.
+    depends_on: []const []const u8 = &.{},
 };
 
 /// Default pass pipeline — order matters!
 pub const DEFAULT_PASSES = [_]SemanticPass{
-    .{ .name = "autofk", .run = runAutoFk },
-    .{ .name = "suffix_inference", .run = runSuffixInference },
-    .{ .name = "validate", .run = runValidate },
-    .{ .name = "validate_type_modifiers", .run = runValidateTypeModifiers },
+    .{ .name = "autofk", .run = runAutoFk, .depends_on = &.{} },
+    .{ .name = "suffix_inference", .run = runSuffixInference, .depends_on = &.{"autofk"} },
+    .{ .name = "validate", .run = runValidate, .depends_on = &.{"autofk", "suffix_inference"} },
+    .{ .name = "validate_type_modifiers", .run = runValidateTypeModifiers, .depends_on = &.{"suffix_inference"} },
 };
 
 // ─── SemanticAnalyzer ──────────────────────────────────────────
@@ -65,6 +67,19 @@ pub const SemanticAnalyzer = struct {
         const tmpl_map = try template_mod.buildTemplateMap(self.alloc, tree.templates);
 
         // Run registered passes (autofk, suffix_inference, validate, ...)
+        // Debug: validate dependency ordering
+        if (comptime std.debug.runtime_safety) {
+            var seen_names = std.StringHashMap(void).init(self.alloc);
+            defer seen_names.deinit();
+            for (DEFAULT_PASSES) |pass| {
+                for (pass.depends_on) |dep| {
+                    if (!seen_names.contains(dep)) {
+                        std.debug.panic("SemanticPass '{s}' depends on '{s}' which has not run yet", .{ pass.name, dep });
+                    }
+                }
+                try seen_names.put(pass.name, {});
+            }
+        }
         var diagnostics = diag.DiagnosticCollector.init(self.alloc);
         var ctx = PassContext{
             .alloc = self.alloc,

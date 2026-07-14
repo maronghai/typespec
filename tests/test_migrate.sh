@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # ── TypeSpec Migration Test Runner ──
 # Tests: typespec migrate <old.tps> <new.tps> produces expected migration SQL.
+# Runs each test for all available dialects (mysql, pg, sqlite).
 # Usage: ./test_migrate.sh [test-filter]
 
 set -euo pipefail
@@ -22,34 +23,42 @@ for old_file in "$TEST_DIR"/migrate-*-old.tps; do
   fi
 
   new_file="$TEST_DIR/${base}-new.tps"
-  expected_file="$EXPECTED_DIR/${base}.sql"
 
   if [ ! -f "$new_file" ]; then
     skip "$base" "no new.tps"
     continue
   fi
-  if [ ! -f "$expected_file" ]; then
-    skip "$base" "no golden file"
-    continue
-  fi
 
-  tmp_file=$(mktemp)
-  trap "rm -f '$tmp_file'" EXIT
+  for dialect_suffix in "" pg sqlite; do
+    case "$dialect_suffix" in
+      "")    dialect="mysql"; suffix=".sql" ;;
+      pg)    dialect="pg";    suffix=".pg.sql" ;;
+      sqlite) dialect="sqlite"; suffix=".sqlite.sql" ;;
+    esac
 
-  if ! "$COMPILER" migrate "$old_file" "$new_file" -o "$tmp_file" 2>/dev/null; then
-    fail "$base" "compiler failed"
+    expected_file="$EXPECTED_DIR/${base}${suffix}"
+    if [ ! -f "$expected_file" ]; then
+      continue
+    fi
+
+    tmp_file=$(mktemp)
+    trap "rm -f '$tmp_file'" EXIT
+
+    if ! "$COMPILER" migrate "$old_file" "$new_file" -d "$dialect" -o "$tmp_file" 2>/dev/null; then
+      fail "$base ($dialect)" "compiler failed"
+      rm -f "$tmp_file"
+      continue
+    fi
+
+    if diff -u "$expected_file" "$tmp_file" > /dev/null 2>&1; then
+      pass "$base ($dialect)"
+    else
+      diff_output=$(diff -u "$expected_file" "$tmp_file" 2>&1 | head -20)
+      fail "$base ($dialect)" "$diff_output"
+    fi
+
     rm -f "$tmp_file"
-    continue
-  fi
-
-  if diff -u "$expected_file" "$tmp_file" > /dev/null 2>&1; then
-    pass "$base"
-  else
-    diff_output=$(diff -u "$expected_file" "$tmp_file" 2>&1 | head -20)
-    fail "$base" "$diff_output"
-  fi
-
-  rm -f "$tmp_file"
+  done
 done
 
 summary "Migration"

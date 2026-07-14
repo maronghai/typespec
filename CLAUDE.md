@@ -20,11 +20,11 @@ cd zig-typespec && zig fmt --check src/               # Formatting check
 ```bash
 bash tests/test.sh                  # MySQL (82 tests)
 bash tests/test_postgres.sh         # PostgreSQL (82 tests)
-bash tests/test_sqlite.sh           # SQLite (16 tests)
-bash tests/test_migrate.sh          # Migration (10 tests)
+bash tests/test_sqlite.sh           # SQLite (24 tests)
+bash tests/test_migrate.sh          # Migration (30 tests: 10 MySQL + 10 PG + 10 SQLite)
 bash tests/test_reverse.sh          # Reverse engineering (15 tests)
 bash tests/test_diff.sh             # Schema diff (8 tests)
-bash tests/test_error_recovery.sh   # Error recovery (3 tests)
+bash tests/test_error_recovery.sh   # Error recovery (7 tests)
 ```
 
 Run a single golden test by filter: `bash tests/test.sh 01` (matches test name substring).
@@ -56,7 +56,7 @@ Run a single golden test by filter: `bash tests/test.sh 01` (matches test name s
 
 - **DialectBackend vtable** ([dialect.zig](zig-typespec/src/dialect.zig)): 16 function pointers for dialect-specific SQL rendering. [codegen.zig](zig-typespec/src/codegen.zig) is fully dialect-agnostic (zero `switch(dialect)` in production code). Adding a new SQL dialect = new enum variant + type mappings + ~60-line backend implementation.
 
-- **Semantic Pass Manager** ([semantic.zig](zig-typespec/src/semantic.zig)): Extensible array of `SemanticPass` structs. Current passes: `autofk` → `suffix_inference` → `validate` → `validate_type_modifiers`. New passes: write a `fn(*PassContext) !void` and add to `DEFAULT_PASSES`.
+- **Semantic Pass Manager** ([semantic.zig](zig-typespec/src/semantic.zig)): Extensible array of `SemanticPass` structs with `depends_on` dependency declarations. Current passes: `autofk` → `suffix_inference` → `validate` → `validate_type_modifiers`. Debug mode validates dependency ordering. New passes: write a `fn(*PassContext) !void` and add to `DEFAULT_PASSES`.
 
 - **TypedAst IR** ([typed_ast.zig](zig-typespec/src/typed_ast.zig)): Separates type resolution from code generation. Codegen only outputs strings — no type inference logic.
 
@@ -85,6 +85,8 @@ Run a single golden test by filter: `bash tests/test.sh 01` (matches test name s
 | `semantic.zig` | Pass manager + template resolution orchestration |
 | `dialect.zig` | DialectBackend vtable implementations for MySQL/PG/SQLite |
 | `main.zig` | CLI entry point, argument parsing, command dispatch, shared pipeline |
+| `compiler.zig` | Pipeline orchestration: compileToAst(), handleCompile/Diff/Migrate/Reverse() + I/O helpers |
+| `cli.zig` | CLI argument parsing, help text, Command/ParsedArgs type definitions |
 | `template.zig` | Template inheritance resolution and slot-based field merging |
 
 ### Testing

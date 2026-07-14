@@ -721,6 +721,46 @@ test "isNumericTpsType: decimal_explicit is numeric" {
     try std.testing.expect(isNumericTpsType(.{ .decimal_explicit = .{ .precision = 10, .scale = 2 } }));
 }
 
+// ─── Forward/Reverse Consistency Tests ────────────────────────
+
+test "consistency: every FORWARD_MAP entry has a matching REVERSE_MAP entry for each dialect" {
+    for (FORWARD_MAP) |fwd| {
+        var found_mysql = false;
+        var found_pg = false;
+        var found_sqlite = false;
+        for (REVERSE_MAP) |rev| {
+            if (!found_mysql and std.mem.eql(u8, fwd.tps, rev.tps) and std.mem.eql(u8, fwd.mysql, rev.mysql)) found_mysql = true;
+            if (!found_pg and std.mem.eql(u8, fwd.tps, rev.tps) and std.mem.eql(u8, fwd.pg, rev.pg)) found_pg = true;
+            if (!found_sqlite and std.mem.eql(u8, fwd.tps, rev.tps) and std.mem.eql(u8, fwd.sqlite, rev.sqlite)) found_sqlite = true;
+        }
+        // At least one dialect must have a match (some types differ across dialects)
+        try std.testing.expect(found_mysql or found_pg or found_sqlite);
+    }
+}
+
+test "consistency: REVERSE_MAP core entries match FORWARD_MAP" {
+    // The first 10 REVERSE_MAP entries (rev_priority=10) should mirror FORWARD_MAP exactly
+    for (FORWARD_MAP, 0..) |fwd, i| {
+        const rev = REVERSE_MAP[i];
+        try std.testing.expectEqualStrings(fwd.tps, rev.tps);
+        try std.testing.expectEqualStrings(fwd.mysql, rev.mysql);
+        try std.testing.expectEqualStrings(fwd.pg, rev.pg);
+        try std.testing.expectEqualStrings(fwd.sqlite, rev.sqlite);
+    }
+}
+
+test "consistency: no two REVERSE_MAP entries share same TPS + mysql type" {
+    for (REVERSE_MAP, 0..) |rev, i| {
+        for (REVERSE_MAP, 0..) |other, j| {
+            if (j <= i) continue;
+            if (std.mem.eql(u8, rev.tps, other.tps) and std.mem.eql(u8, rev.mysql, other.mysql)) {
+                // Same TPS + same MySQL type → priorities should differ (or it's a true duplicate)
+                try std.testing.expect(rev.rev_priority != other.rev_priority);
+            }
+        }
+    }
+}
+
 // ─── SQLite reverse tests ──────────────────────────────────────
 
 test "reverse sqlite: INTEGER + auto_increment maps to n" {

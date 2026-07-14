@@ -83,3 +83,110 @@ pub fn fksEqual(a: FkDecl, b: FkDecl) bool {
     }
     return true;
 }
+
+// ─── Inline Tests ─────────────────────────────────────────────
+
+fn makeFk(fields: []const []const u8, ref_table: []const u8, ref_fields: []const []const u8, actions: []const ast_mod.FkAction) FkDecl {
+    return .{
+        .fields = fields,
+        .ref_table = ref_table,
+        .ref_fields = ref_fields,
+        .actions = actions,
+        .line_no = 0,
+    };
+}
+
+test "diffFks identical — no diffs" {
+    const alloc = std.testing.allocator;
+    const old = [_]FkDecl{makeFk(&.{"user_id"}, "user", &.{"id"}, &.{})};
+    const new_ = [_]FkDecl{makeFk(&.{"user_id"}, "user", &.{"id"}, &.{})};
+    const diffs = try diffFks(alloc, &old, &new_);
+    defer alloc.free(diffs);
+    try std.testing.expectEqual(@as(usize, 0), diffs.len);
+}
+
+test "diffFks added FK" {
+    const alloc = std.testing.allocator;
+    const old = [_]FkDecl{};
+    const new_ = [_]FkDecl{makeFk(&.{"user_id"}, "user", &.{"id"}, &.{})};
+    const diffs = try diffFks(alloc, &old, &new_);
+    defer alloc.free(diffs);
+    try std.testing.expectEqual(@as(usize, 1), diffs.len);
+    try std.testing.expectEqual(FkAction.add, diffs[0].action);
+    try std.testing.expect(diffs[0].new_fk != null);
+    try std.testing.expect(diffs[0].old_fk == null);
+}
+
+test "diffFks dropped FK" {
+    const alloc = std.testing.allocator;
+    const old = [_]FkDecl{makeFk(&.{"user_id"}, "user", &.{"id"}, &.{})};
+    const new_ = [_]FkDecl{};
+    const diffs = try diffFks(alloc, &old, &new_);
+    defer alloc.free(diffs);
+    try std.testing.expectEqual(@as(usize, 1), diffs.len);
+    try std.testing.expectEqual(FkAction.drop, diffs[0].action);
+    try std.testing.expect(diffs[0].old_fk != null);
+    try std.testing.expect(diffs[0].new_fk == null);
+}
+
+test "diffFks changed FK — drop + add" {
+    const alloc = std.testing.allocator;
+    // Changed ref_fields from (id) to (uuid) — this is a drop + add, not modify
+    const old = [_]FkDecl{makeFk(&.{"user_id"}, "user", &.{"id"}, &.{})};
+    const new_ = [_]FkDecl{makeFk(&.{"user_id"}, "user", &.{"uuid"}, &.{})};
+    const diffs = try diffFks(alloc, &old, &new_);
+    defer alloc.free(diffs);
+    try std.testing.expectEqual(@as(usize, 2), diffs.len);
+    // One drop and one add
+    var has_add = false;
+    var has_drop = false;
+    for (diffs) |d| {
+        if (d.action == .add) has_add = true;
+        if (d.action == .drop) has_drop = true;
+    }
+    try std.testing.expect(has_add);
+    try std.testing.expect(has_drop);
+}
+
+test "diffFks empty lists" {
+    const alloc = std.testing.allocator;
+    const old = [_]FkDecl{};
+    const new_ = [_]FkDecl{};
+    const diffs = try diffFks(alloc, &old, &new_);
+    defer alloc.free(diffs);
+    try std.testing.expectEqual(@as(usize, 0), diffs.len);
+}
+
+test "diffFks multi-match bipartite" {
+    const alloc = std.testing.allocator;
+    // Two old FKs and two new FKs — both match → no diffs
+    const old = [_]FkDecl{
+        makeFk(&.{"a_id"}, "a", &.{"id"}, &.{}),
+        makeFk(&.{"b_id"}, "b", &.{"id"}, &.{}),
+    };
+    const new_ = [_]FkDecl{
+        makeFk(&.{"a_id"}, "a", &.{"id"}, &.{}),
+        makeFk(&.{"b_id"}, "b", &.{"id"}, &.{}),
+    };
+    const diffs = try diffFks(alloc, &old, &new_);
+    defer alloc.free(diffs);
+    try std.testing.expectEqual(@as(usize, 0), diffs.len);
+}
+
+test "fksEqual basic" {
+    const a = makeFk(&.{"user_id"}, "user", &.{"id"}, &.{});
+    const b = makeFk(&.{"user_id"}, "user", &.{"id"}, &.{});
+    try std.testing.expect(fksEqual(a, b));
+}
+
+test "fksEqual different ref_table" {
+    const a = makeFk(&.{"user_id"}, "user", &.{"id"}, &.{});
+    const b = makeFk(&.{"user_id"}, "admin", &.{"id"}, &.{});
+    try std.testing.expect(!fksEqual(a, b));
+}
+
+test "fksEqual different fields" {
+    const a = makeFk(&.{"user_id"}, "user", &.{"id"}, &.{});
+    const b = makeFk(&.{"admin_id"}, "user", &.{"id"}, &.{});
+    try std.testing.expect(!fksEqual(a, b));
+}

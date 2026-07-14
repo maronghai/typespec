@@ -729,3 +729,245 @@ fn isInlineIndex(idx: sp.SqlIndex) bool {
         else => return false,
     }
 }
+
+// ─── Inline Tests ──────────────────────────────────────────────
+
+test "isInlineIndex uk_* matches" {
+    const idx = sp.SqlIndex{
+        .kind = .unique,
+        .name = "uk_email",
+        .fields = &.{"email"},
+        .descending = &.{},
+    };
+    try std.testing.expect(isInlineIndex(idx));
+}
+
+test "isInlineIndex idx_* matches" {
+    const idx = sp.SqlIndex{
+        .kind = .regular,
+        .name = "idx_name",
+        .fields = &.{"name"},
+        .descending = &.{},
+    };
+    try std.testing.expect(isInlineIndex(idx));
+}
+
+test "isInlineIndex multi-field → false" {
+    const idx = sp.SqlIndex{
+        .kind = .unique,
+        .name = "uk_a_b",
+        .fields = &.{ "a", "b" },
+        .descending = &.{},
+    };
+    try std.testing.expect(!isInlineIndex(idx));
+}
+
+test "isInlineIndex name mismatch → false" {
+    const idx = sp.SqlIndex{
+        .kind = .unique,
+        .name = "uk_email",
+        .fields = &.{"name"},
+        .descending = &.{},
+    };
+    try std.testing.expect(!isInlineIndex(idx));
+}
+
+test "isInlineIndex primary_key → false" {
+    const idx = sp.SqlIndex{
+        .kind = .primary_key,
+        .name = "",
+        .fields = &.{"id"},
+        .descending = &.{},
+    };
+    try std.testing.expect(!isInlineIndex(idx));
+}
+
+test "reverseCheck BETWEEN" {
+    const alloc = std.testing.allocator;
+    const result = reverseCheck(alloc, "age BETWEEN 0 AND 150", "age");
+    try std.testing.expect(result != null);
+    try std.testing.expectEqualStrings("[0,150]", result.?);
+}
+
+test "reverseCheck IN list" {
+    const alloc = std.testing.allocator;
+    const result = reverseCheck(alloc, "status IN ('active', 'pending')", "status");
+    try std.testing.expect(result != null);
+    try std.testing.expectEqualStrings("{active,pending}", result.?);
+}
+
+test "reverseCheck >= comparison" {
+    const alloc = std.testing.allocator;
+    const result = reverseCheck(alloc, "age >= 18", "age");
+    try std.testing.expect(result != null);
+    try std.testing.expectEqualStrings("{>=18}", result.?);
+}
+
+test "reverseCheck upper exclusive range" {
+    const alloc = std.testing.allocator;
+    const result = reverseCheck(alloc, "price >= 10 AND price < 100", "price");
+    try std.testing.expect(result != null);
+    try std.testing.expectEqualStrings("[10,100)", result.?);
+}
+
+test "reverseCheck lower exclusive range" {
+    const alloc = std.testing.allocator;
+    const result = reverseCheck(alloc, "score > 0 AND score <= 100", "score");
+    try std.testing.expect(result != null);
+    try std.testing.expectEqualStrings("(0,100]", result.?);
+}
+
+test "reverseCheck no match → null" {
+    const alloc = std.testing.allocator;
+    const result = reverseCheck(alloc, "x = 1", "y");
+    try std.testing.expect(result == null);
+}
+
+test "reverseCheck both exclusive range" {
+    const alloc = std.testing.allocator;
+    const result = reverseCheck(alloc, "score > 0 AND score < 100", "score");
+    try std.testing.expect(result != null);
+    try std.testing.expectEqualStrings("(0,100)", result.?);
+}
+
+test "reverseCheck compound comparison >= AND <=" {
+    const alloc = std.testing.allocator;
+    const result = reverseCheck(alloc, "age >= 18 AND age <= 65", "age");
+    try std.testing.expect(result != null);
+    try std.testing.expectEqualStrings("{>=18,<=65}", result.?);
+}
+
+test "reverseCheck single comparison =" {
+    const alloc = std.testing.allocator;
+    const result = reverseCheck(alloc, "status = 1", "status");
+    try std.testing.expect(result != null);
+    try std.testing.expectEqualStrings("{=1}", result.?);
+}
+
+test "reverseCheck single comparison <" {
+    const alloc = std.testing.allocator;
+    const result = reverseCheck(alloc, "count < 10", "count");
+    try std.testing.expect(result != null);
+    try std.testing.expectEqualStrings("{<10}", result.?);
+}
+
+test "reverseCheck backtick-quoted column" {
+    const alloc = std.testing.allocator;
+    const result = reverseCheck(alloc, "`age` BETWEEN 0 AND 150", "age");
+    try std.testing.expect(result != null);
+    try std.testing.expectEqualStrings("[0,150]", result.?);
+}
+
+test "reverseCheck double-quote-quoted column" {
+    const alloc = std.testing.allocator;
+    const result = reverseCheck(alloc, "\"age\" BETWEEN 0 AND 150", "age");
+    try std.testing.expect(result != null);
+    try std.testing.expectEqualStrings("[0,150]", result.?);
+}
+
+test "classifyFk shorthand single→id" {
+    const alloc = std.testing.allocator;
+    const fk = sp.SqlForeignKey{
+        .fields = &.{"user_id"},
+        .ref_table = "user",
+        .ref_fields = &.{"id"},
+        .actions = &.{},
+    };
+    const result = classifyFk(alloc, fk);
+    try std.testing.expectEqual(FkForm.shorthand, result.form);
+    try std.testing.expect(result.text != null);
+    try std.testing.expectEqualStrings("> user_id user.id", result.text.?);
+}
+
+test "classifyFk full multi-field" {
+    const alloc = std.testing.allocator;
+    const fk = sp.SqlForeignKey{
+        .fields = &.{ "a_id", "b_id" },
+        .ref_table = "ab",
+        .ref_fields = &.{ "a", "b" },
+        .actions = &.{},
+    };
+    const result = classifyFk(alloc, fk);
+    try std.testing.expectEqual(FkForm.full, result.form);
+}
+
+test "classifyFk full with actions" {
+    const alloc = std.testing.allocator;
+    const fk = sp.SqlForeignKey{
+        .fields = &.{"order_id"},
+        .ref_table = "orders",
+        .ref_fields = &.{"id"},
+        .actions = &.{
+            .{ .trigger = .on_delete, .action = .cascade },
+        },
+    };
+    const result = classifyFk(alloc, fk);
+    try std.testing.expectEqual(FkForm.full, result.form);
+    try std.testing.expect(result.text != null);
+    try std.testing.expectEqualStrings("> order_id orders.id -C", result.text.?);
+}
+
+test "classifyFk full with multiple actions" {
+    const alloc = std.testing.allocator;
+    const fk = sp.SqlForeignKey{
+        .fields = &.{"order_id"},
+        .ref_table = "orders",
+        .ref_fields = &.{"id"},
+        .actions = &.{
+            .{ .trigger = .on_delete, .action = .cascade },
+            .{ .trigger = .on_update, .action = .set_null },
+        },
+    };
+    const result = classifyFk(alloc, fk);
+    try std.testing.expectEqual(FkForm.full, result.form);
+    try std.testing.expect(result.text != null);
+    try std.testing.expectEqualStrings("> order_id orders.id -C N", result.text.?);
+}
+
+test "classifyFk shorthand with non-id reference" {
+    const alloc = std.testing.allocator;
+    const fk = sp.SqlForeignKey{
+        .fields = &.{"email"},
+        .ref_table = "auth",
+        .ref_fields = &.{"email"},
+        .actions = &.{},
+    };
+    const result = classifyFk(alloc, fk);
+    try std.testing.expectEqual(FkForm.full, result.form);
+    try std.testing.expect(result.text != null);
+    try std.testing.expectEqualStrings("> email auth(email)", result.text.?);
+}
+
+test "ReverseCodegen basic generate" {
+    const alloc = std.testing.allocator;
+    const schema = sp.SqlSchema{
+        .name = "testdb",
+        .charset = "utf8mb4",
+        .tables = &.{
+            .{
+                .name = "users",
+                .engine = null,
+                .charset = null,
+                .comment = null,
+                .columns = &.{
+                    .{ .name = "id", .type_sql = "INTEGER", .nullable = false, .unsigned = false, .auto_increment = true, .primary_key = true, .on_update_current_timestamp = false, .default_val = null, .check_expr = null, .comment = null, .tps_override = "n" },
+                    .{ .name = "name", .type_sql = "TEXT", .nullable = false, .unsigned = false, .auto_increment = false, .primary_key = false, .on_update_current_timestamp = false, .default_val = null, .check_expr = null, .comment = null, .tps_override = "s32" },
+                },
+                .indexes = &.{},
+                .foreign_keys = &.{},
+                .checks = &.{},
+            },
+        },
+    };
+    var rc = ReverseCodegen.init(alloc, .sqlite);
+    const output = try rc.generate(schema);
+    defer alloc.free(output);
+
+    // Should contain schema name
+    try std.testing.expect(std.mem.indexOf(u8, output, "$ testdb") != null);
+    // Should contain table definition
+    try std.testing.expect(std.mem.indexOf(u8, output, "# users") != null);
+    // Should contain fields with TPS types from override
+    try std.testing.expect(std.mem.indexOf(u8, output, "id n++") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "name s32") != null);
+}
