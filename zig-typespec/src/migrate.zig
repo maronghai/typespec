@@ -5,16 +5,13 @@ const ast_mod = @import("ast.zig");
 const codegen = @import("codegen.zig");
 const typed_ast = @import("typed_ast.zig");
 const dialect_mod = @import("dialect.zig");
+const utils = @import("utils.zig");
 const Field = ast_mod.Field;
 const TypeInfo = ast_mod.TypeInfo;
 
 // ─── Helpers ───────────────────────────────────────────────
 
-fn optionalStrEq(a: ?[]const u8, b: ?[]const u8) bool {
-    if (a == null and b == null) return true;
-    if (a == null or b == null) return false;
-    return std.mem.eql(u8, a.?, b.?);
-}
+const optionalStrEq = utils.optionalStrEq;
 
 pub fn generateFromDiff(
     alloc: std.mem.Allocator,

@@ -85,7 +85,7 @@ pub const Codegen = struct {
 
         // Inline indexes (delegated entirely to backend)
         for (table.columns) |col| {
-            if (col.inline_unique) {
+            if (col.flags.inline_unique) {
                 var dominated = false;
                 for (table.indexes) |idx| {
                     if (idx.kind == .unique or idx.kind == .primary_key) {
@@ -102,7 +102,7 @@ pub const Codegen = struct {
                     try self.backend.emitInlineIndex(w, col.name, true, &needs_comma);
                 }
             }
-            if (col.inline_index) {
+            if (col.flags.inline_index) {
                 var dominated = false;
                 for (table.indexes) |idx| {
                     for (idx.fields) |f| {
@@ -185,7 +185,7 @@ pub const Codegen = struct {
         // Standalone CREATE INDEX for inline regular indexes (PG/SQLite only)
         // MySQL handles them inline via emitInlineIndex; PG/SQLite emitInlineIndex is no-op for non-unique
         for (table.columns) |col| {
-            if (col.inline_index) {
+            if (col.flags.inline_index) {
                 // Skip if already covered by a standalone index
                 var dominated = false;
                 for (table.indexes) |idx| {
@@ -209,20 +209,20 @@ pub const Codegen = struct {
         try self.backend.quoteIdent(w, col.name);
         try w.print(" {s}", .{col.sql_type});
 
-        if (col.unsigned) try self.backend.emitUnsigned(w);
+        if (col.flags.unsigned) try self.backend.emitUnsigned(w);
 
-        if (!col.nullable) try w.writeAll(" NOT NULL");
+        if (!col.flags.nullable) try w.writeAll(" NOT NULL");
 
-        if (col.auto_increment) {
+        if (col.flags.auto_increment) {
             try self.backend.emitAutoIncrement(w);
         }
 
-        if (col.has_timestamp_default) {
-            try self.backend.emitTimestampModifier(w, col.on_update_current_timestamp);
+        if (col.flags.has_timestamp_default) {
+            try self.backend.emitTimestampModifier(w, col.flags.on_update_current_timestamp);
         }
 
-        if (col.primary_key) {
-            try self.backend.emitPrimaryKey(w, col.auto_increment);
+        if (col.flags.primary_key) {
+            try self.backend.emitPrimaryKey(w, col.flags.auto_increment);
         }
 
         if (col.default) |dv| try emitDefault(w, dv);
@@ -236,7 +236,7 @@ pub const Codegen = struct {
             try self.backend.emitInlineColumnComment(w, c);
         }
         // Enum type check constraint (PG/SQLite only; MySQL uses native ENUM)
-        if (col.is_enum) {
+        if (col.flags.is_enum) {
             try self.backend.emitEnumTypeCheck(w, col.name, col.enum_values);
         }
     }
@@ -310,20 +310,11 @@ fn makeTestColumn(name: []const u8, sql_type: []const u8) typed_ast_mod.TypedCol
     return .{
         .name = name,
         .sql_type = sql_type,
-        .nullable = false,
-        .primary_key = false,
-        .auto_increment = false,
-        .unsigned = false,
+        .flags = .{},
         .default = null,
         .check = null,
         .comment = null,
-        .inline_unique = false,
-        .inline_index = false,
-        .is_enum = false,
         .enum_values = &.{},
-        .is_datetime = false,
-        .has_timestamp_default = false,
-        .on_update_current_timestamp = false,
         .line_no = 1,
     };
 }
@@ -332,10 +323,10 @@ test "codegen: simple MySQL table" {
     const alloc = testing.allocator;
     const cols = try alloc.alloc(typed_ast_mod.TypedColumn, 2);
     cols[0] = makeTestColumn("id", "int");
-    cols[0].primary_key = true;
-    cols[0].auto_increment = true;
+    cols[0].flags.primary_key = true;
+    cols[0].flags.auto_increment = true;
     cols[1] = makeTestColumn("name", "varchar(32)");
-    cols[1].nullable = false;
+    cols[1].flags.nullable = false;
 
     const table = typed_ast_mod.TypedTable{
         .name = "user",
@@ -370,8 +361,8 @@ test "codegen: PostgreSQL table uses double quotes" {
     const alloc = testing.allocator;
     const cols = try alloc.alloc(typed_ast_mod.TypedColumn, 1);
     cols[0] = makeTestColumn("id", "integer");
-    cols[0].primary_key = true;
-    cols[0].auto_increment = true;
+    cols[0].flags.primary_key = true;
+    cols[0].flags.auto_increment = true;
 
     const table = typed_ast_mod.TypedTable{
         .name = "user",
@@ -406,8 +397,8 @@ test "codegen: emitColumnDef shared path" {
     const w = &aw.writer;
 
     const col = makeTestColumn("balance", "decimal(16, 2)");
-    col.nullable = false;
-    col.unsigned = true;
+    col.flags.nullable = false;
+    col.flags.unsigned = true;
     col.default = "0";
 
     var cg = Codegen.init(alloc, .mysql);
@@ -430,7 +421,7 @@ test "codegen: emitColumnDef PG omits UNSIGNED" {
     const w = &aw.writer;
 
     const col = makeTestColumn("count", "integer");
-    col.unsigned = true;
+    col.flags.unsigned = true;
 
     var cg = Codegen.init(alloc, .pg);
     try cg.emitColumnDef(w, col);
@@ -449,8 +440,8 @@ test "codegen: SQLite AUTOINCREMENT in PRIMARY KEY" {
     const alloc = testing.allocator;
     const cols = try alloc.alloc(typed_ast_mod.TypedColumn, 1);
     cols[0] = makeTestColumn("id", "INTEGER");
-    cols[0].primary_key = true;
-    cols[0].auto_increment = true;
+    cols[0].flags.primary_key = true;
+    cols[0].flags.auto_increment = true;
 
     const table = typed_ast_mod.TypedTable{
         .name = "item",
@@ -481,7 +472,7 @@ test "codegen: PG standalone COMMENT ON TABLE" {
     const alloc = testing.allocator;
     const cols = try alloc.alloc(typed_ast_mod.TypedColumn, 1);
     cols[0] = makeTestColumn("id", "integer");
-    cols[0].primary_key = true;
+    cols[0].flags.primary_key = true;
 
     const table = typed_ast_mod.TypedTable{
         .name = "users",
@@ -512,7 +503,7 @@ test "codegen: SQLite COMMENT uses -- style" {
     const alloc = testing.allocator;
     const cols = try alloc.alloc(typed_ast_mod.TypedColumn, 1);
     cols[0] = makeTestColumn("id", "INTEGER");
-    cols[0].primary_key = true;
+    cols[0].flags.primary_key = true;
 
     const table = typed_ast_mod.TypedTable{
         .name = "logs",
@@ -575,7 +566,7 @@ test "codegen: PG uses double quotes, no backticks" {
     const alloc = testing.allocator;
     const cols = try alloc.alloc(typed_ast_mod.TypedColumn, 2);
     cols[0] = makeTestColumn("id", "serial");
-    cols[0].primary_key = true;
+    cols[0].flags.primary_key = true;
     cols[1] = makeTestColumn("order", "text");
 
     const table = typed_ast_mod.TypedTable{
@@ -609,7 +600,7 @@ test "codegen: MySQL ENGINE in table footer" {
     const alloc = testing.allocator;
     const cols = try alloc.alloc(typed_ast_mod.TypedColumn, 1);
     cols[0] = makeTestColumn("id", "int");
-    cols[0].primary_key = true;
+    cols[0].flags.primary_key = true;
 
     const table = typed_ast_mod.TypedTable{
         .name = "t",
@@ -640,7 +631,7 @@ test "codegen: MySQL UNSIGNED column" {
     const alloc = testing.allocator;
     const cols = try alloc.alloc(typed_ast_mod.TypedColumn, 1);
     cols[0] = makeTestColumn("amount", "int");
-    cols[0].unsigned = true;
+    cols[0].flags.unsigned = true;
 
     const table = typed_ast_mod.TypedTable{
         .name = "t",
@@ -704,7 +695,7 @@ test "codegen: SQLite uses -- comments" {
     const alloc = testing.allocator;
     const cols = try alloc.alloc(typed_ast_mod.TypedColumn, 1);
     cols[0] = makeTestColumn("id", "INTEGER");
-    cols[0].primary_key = true;
+    cols[0].flags.primary_key = true;
 
     const table = typed_ast_mod.TypedTable{
         .name = "t",
@@ -736,7 +727,7 @@ test "codegen: multiple tables separated by blank line" {
     const alloc = testing.allocator;
     const cols = try alloc.alloc(typed_ast_mod.TypedColumn, 1);
     cols[0] = makeTestColumn("id", "int");
-    cols[0].primary_key = true;
+    cols[0].flags.primary_key = true;
 
     const t1 = typed_ast_mod.TypedTable{
         .name = "a",

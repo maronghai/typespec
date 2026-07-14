@@ -445,35 +445,17 @@ pub fn diagnosticTrace(resolved: ResolvedAst) void {
 // ─── Unit Tests ─────────────────────────────────────────────
 
 const testing = std.testing;
-
-fn makeTestField(name: []const u8, type_info: ast_mod.TypeInfo) Field {
-    return .{
-        .name = name,
-        .type_info = type_info,
-        .modifiers = &.{},
-        .default_val = null,
-        .check = null,
-        .fk = null,
-        .comment = null,
-        .line_no = 1,
-    };
-}
-
-fn makeTestAst(_: std.mem.Allocator, tables: []const ast_mod.Table, templates: []const ast_mod.Template) Ast {
-    return .{
-        .schema = null,
-        .templates = templates,
-        .tables = tables,
-        .sql_comments = &.{},
-    };
-}
+const test_helpers = struct {
+    const makeTestField = @import("test_helpers.zig").makeTestField;
+    const makeTestAst = @import("test_helpers.zig").makeTestAst;
+};
 
 test "suffix inference: _id → int" {
     const alloc = testing.allocator;
     const fields = try alloc.alloc(Field, 1);
-    fields[0] = makeTestField("user_id", .none);
+    fields[0] = test_helpers.makeTestField("user_id", .none);
 
-    const ast = makeTestAst(alloc, try alloc.dupe(ast_mod.Table, &.{.{
+    const ast = test_helpers.makeTestAst(alloc, try alloc.dupe(ast_mod.Table, &.{.{
         .name = "order",
         .template_ref = null,
         .comment = null,
@@ -495,9 +477,9 @@ test "suffix inference: _id → int" {
 test "suffix inference: _at → datetime" {
     const alloc = testing.allocator;
     const fields = try alloc.alloc(Field, 1);
-    fields[0] = makeTestField("created_at", .none);
+    fields[0] = test_helpers.makeTestField("created_at", .none);
 
-    const ast = makeTestAst(alloc, try alloc.dupe(ast_mod.Table, &.{.{
+    const ast = test_helpers.makeTestAst(alloc, try alloc.dupe(ast_mod.Table, &.{.{
         .name = "log",
         .template_ref = null,
         .comment = null,
@@ -517,9 +499,9 @@ test "suffix inference: _at → datetime" {
 test "suffix inference: _on → date" {
     const alloc = testing.allocator;
     const fields = try alloc.alloc(Field, 1);
-    fields[0] = makeTestField("paid_on", .none);
+    fields[0] = test_helpers.makeTestField("paid_on", .none);
 
-    const ast = makeTestAst(alloc, try alloc.dupe(ast_mod.Table, &.{.{
+    const ast = test_helpers.makeTestAst(alloc, try alloc.dupe(ast_mod.Table, &.{.{
         .name = "payment",
         .template_ref = null,
         .comment = null,
@@ -539,9 +521,9 @@ test "suffix inference: _on → date" {
 test "suffix inference: explicit type wins over suffix" {
     const alloc = testing.allocator;
     const fields = try alloc.alloc(Field, 1);
-    fields[0] = makeTestField("point_id", .{ .varchar_explicit = 32 });
+    fields[0] = test_helpers.makeTestField("point_id", .{ .varchar_explicit = 32 });
 
-    const ast = makeTestAst(alloc, try alloc.dupe(ast_mod.Table, &.{.{
+    const ast = test_helpers.makeTestAst(alloc, try alloc.dupe(ast_mod.Table, &.{.{
         .name = "points",
         .template_ref = null,
         .comment = null,
@@ -562,9 +544,9 @@ test "suffix inference: explicit type wins over suffix" {
 test "suffix inference: no suffix keeps explicit type" {
     const alloc = testing.allocator;
     const fields = try alloc.alloc(Field, 1);
-    fields[0] = makeTestField("data", .{ .simple = "b" });
+    fields[0] = test_helpers.makeTestField("data", .{ .simple = "b" });
 
-    const ast = makeTestAst(alloc, try alloc.dupe(ast_mod.Table, &.{.{
+    const ast = test_helpers.makeTestAst(alloc, try alloc.dupe(ast_mod.Table, &.{.{
         .name = "t",
         .template_ref = null,
         .comment = null,

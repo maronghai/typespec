@@ -134,19 +134,7 @@ fn countVisitSqlComment(ctx: *VisitCounts, _: SqlComment) void {
 // ─── Unit Tests ──────────────────────────────────────────────
 
 const testing = std.testing;
-
-fn makeTestField(name: []const u8, ti: ast_mod.TypeInfo) Field {
-    return .{
-        .name = name,
-        .type_info = ti,
-        .modifiers = &.{},
-        .default_val = null,
-        .check = null,
-        .fk = null,
-        .comment = null,
-        .line_no = 1,
-    };
-}
+const makeTestField = @import("test_helpers.zig").makeTestField;
 
 test "visitor: count all AST nodes" {
     const alloc = testing.allocator;

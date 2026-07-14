@@ -24,6 +24,62 @@ const Dialect = dialect_enum.Dialect;
 // Adding a new dialect only requires changes in the SQL output layer,
 // not in type resolution.
 
+pub const ColumnFlag = enum(u16) {
+    nullable = 0x0001,
+    primary_key = 0x0002,
+    auto_increment = 0x0004,
+    unsigned = 0x0008,
+    inline_unique = 0x0010,
+    inline_index = 0x0020,
+    is_enum = 0x0040,
+    is_datetime = 0x0080,
+    has_timestamp_default = 0x0100,
+    on_update_current_timestamp = 0x0200,
+};
+
+pub const ColumnFlags = packed struct {
+    nullable: bool = false,
+    primary_key: bool = false,
+    auto_increment: bool = false,
+    unsigned: bool = false,
+    inline_unique: bool = false,
+    inline_index: bool = false,
+    is_enum: bool = false,
+    is_datetime: bool = false,
+    has_timestamp_default: bool = false,
+    on_update_current_timestamp: bool = false,
+
+    pub fn contains(self: ColumnFlags, comptime flag: ColumnFlag) bool {
+        return switch (flag) {
+            .nullable => self.nullable,
+            .primary_key => self.primary_key,
+            .auto_increment => self.auto_increment,
+            .unsigned => self.unsigned,
+            .inline_unique => self.inline_unique,
+            .inline_index => self.inline_index,
+            .is_enum => self.is_enum,
+            .is_datetime => self.is_datetime,
+            .has_timestamp_default => self.has_timestamp_default,
+            .on_update_current_timestamp => self.on_update_current_timestamp,
+        };
+    }
+
+    pub fn set(self: *ColumnFlags, flag: ColumnFlag, value: bool) void {
+        switch (flag) {
+            .nullable => self.nullable = value,
+            .primary_key => self.primary_key = value,
+            .auto_increment => self.auto_increment = value,
+            .unsigned => self.unsigned = value,
+            .inline_unique => self.inline_unique = value,
+            .inline_index => self.inline_index = value,
+            .is_enum => self.is_enum = value,
+            .is_datetime => self.is_datetime = value,
+            .has_timestamp_default => self.has_timestamp_default = value,
+            .on_update_current_timestamp => self.on_update_current_timestamp = value,
+        }
+    }
+};
+
 pub const TypedAst = struct {
     schema_name: ?[]const u8,
     schema_charset: ?[]const u8,
@@ -45,20 +101,11 @@ pub const TypedColumn = struct {
     name: []const u8,
     sql_type: []const u8,
     tps_type: ?[]const u8 = null,
-    nullable: bool,
-    primary_key: bool,
-    auto_increment: bool,
-    unsigned: bool,
+    flags: ColumnFlags = .{},
     default: ?[]const u8,
     check: ?CheckConstraint,
     comment: ?[]const u8,
-    inline_unique: bool,
-    inline_index: bool,
-    is_enum: bool,
     enum_values: []const []const u8,
-    is_datetime: bool,
-    has_timestamp_default: bool,
-    on_update_current_timestamp: bool,
     line_no: usize,
 };
 
@@ -190,20 +237,22 @@ pub const TypeResolver = struct {
             .name = field.name,
             .sql_type = sql_type,
             .tps_type = tps_type,
-            .nullable = !nn,
-            .primary_key = pk,
-            .auto_increment = ai,
-            .unsigned = unsigned,
+            .flags = .{
+                .nullable = !nn,
+                .primary_key = pk,
+                .auto_increment = ai,
+                .unsigned = unsigned,
+                .inline_unique = inline_unique,
+                .inline_index = inline_index,
+                .is_enum = is_enum,
+                .is_datetime = is_dt,
+                .has_timestamp_default = has_timestamp_mod,
+                .on_update_current_timestamp = on_update_ts,
+            },
             .default = if (field.default_val) |dv| dv.value else null,
             .check = field.check,
             .comment = field.comment,
-            .inline_unique = inline_unique,
-            .inline_index = inline_index,
-            .is_enum = is_enum,
             .enum_values = enum_vals,
-            .is_datetime = is_dt,
-            .has_timestamp_default = has_timestamp_mod,
-            .on_update_current_timestamp = on_update_ts,
             .line_no = field.line_no,
         };
     }

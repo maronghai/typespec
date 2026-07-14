@@ -5,6 +5,7 @@ const diff_fields = @import("diff_fields.zig");
 const diff_indexes = @import("diff_indexes.zig");
 const diff_fks = @import("diff_fks.zig");
 const dialect_enum = @import("dialect_enum.zig");
+const utils = @import("utils.zig");
 const Field = ast_mod.Field;
 const TypeInfo = ast_mod.TypeInfo;
 const IndexDecl = ast_mod.IndexDecl;
@@ -60,11 +61,7 @@ pub const fksEqual = diff_fks.fksEqual;
 
 // ─── Helpers ───────────────────────────────────────────────
 
-fn optionalStrEq(a: ?[]const u8, b: ?[]const u8) bool {
-    if (a == null and b == null) return true;
-    if (a == null or b == null) return false;
-    return std.mem.eql(u8, a.?, b.?);
-}
+const optionalStrEq = utils.optionalStrEq;
 
 // ─── Diff Engine ───────────────────────────────────────────
 

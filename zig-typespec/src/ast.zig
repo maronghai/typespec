@@ -55,6 +55,7 @@ pub const CheckConstraint = struct {
     kind: CheckKind,
     expr: []const u8,
     line_no: usize,
+    loc: ?SourceLocation = null,
 };
 
 pub const Field = struct {
@@ -90,6 +91,7 @@ pub const FkDecl = struct {
     ref_fields: []const []const u8,
     actions: []const FkAction,
     line_no: usize,
+    loc: ?SourceLocation = null,
 };
 
 pub const IndexType = enum {
@@ -105,6 +107,7 @@ pub const IndexDecl = struct {
     fields: []const []const u8,
     descending: []const bool,
     line_no: usize,
+    loc: ?SourceLocation = null,
 };
 
 pub const Template = struct {
@@ -135,6 +138,7 @@ pub const CustomType = struct {
     /// Dialect-specific overrides: key is dialect name ("mysql", "postgres", "sqlite")
     dialect_overrides: []const DialectOverride,
     line_no: usize,
+    loc: ?SourceLocation = null,
 };
 
 pub const DialectOverride = struct {

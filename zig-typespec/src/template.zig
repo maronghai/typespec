@@ -210,36 +210,18 @@ fn applyTemplate(
 // ─── Unit Tests ─────────────────────────────────────────────
 
 const testing = std.testing;
-
-fn makeTestField(name: []const u8, type_info: ast_mod.TypeInfo) Field {
-    return .{
-        .name = name,
-        .type_info = type_info,
-        .modifiers = &.{},
-        .default_val = null,
-        .check = null,
-        .fk = null,
-        .comment = null,
-        .line_no = 1,
-    };
-}
-
-fn makeTestAst(_: std.mem.Allocator, tables: []const ast_mod.Table, templates: []const ast_mod.Template) Ast {
-    return .{
-        .schema = null,
-        .templates = templates,
-        .tables = tables,
-        .sql_comments = &.{},
-    };
-}
+const test_helpers = struct {
+    const makeTestField = @import("test_helpers.zig").makeTestField;
+    const makeTestAst = @import("test_helpers.zig").makeTestAst;
+};
 
 test "template application: fields merged in order" {
     const alloc = testing.allocator;
 
     const tmpl_fields = try alloc.alloc(Field, 3);
-    tmpl_fields[0] = makeTestField("id", .{ .simple = "n" });
-    tmpl_fields[1] = makeTestField("...", .none);
-    tmpl_fields[2] = makeTestField("status", .{ .simple = "1" });
+    tmpl_fields[0] = test_helpers.makeTestField("id", .{ .simple = "n" });
+    tmpl_fields[1] = test_helpers.makeTestField("...", .none);
+    tmpl_fields[2] = test_helpers.makeTestField("status", .{ .simple = "1" });
 
     const tmpl = ast_mod.Template{
         .name = "base",
@@ -249,7 +231,7 @@ test "template application: fields merged in order" {
     };
 
     const table_fields = try alloc.alloc(Field, 1);
-    table_fields[0] = makeTestField("name", .{ .varchar_explicit = 32 });
+    table_fields[0] = test_helpers.makeTestField("name", .{ .varchar_explicit = 32 });
 
     const table = ast_mod.Table{
         .name = "user",
@@ -262,7 +244,7 @@ test "template application: fields merged in order" {
         .line_no = 1,
     };
 
-    const ast = makeTestAst(alloc, try alloc.dupe(ast_mod.Table, &.{table}), try alloc.dupe(ast_mod.Template, &.{tmpl}));
+    const ast = test_helpers.makeTestAst(alloc, try alloc.dupe(ast_mod.Table, &.{table}), try alloc.dupe(ast_mod.Template, &.{tmpl}));
     const tables = try resolveAndApply(alloc, ast);
 
     try testing.expectEqual(@as(usize, 3), tables[0].fields.len);
@@ -275,15 +257,15 @@ test "template: 3-level inheritance" {
     const alloc = testing.allocator;
 
     const gp_fields = try alloc.alloc(Field, 1);
-    gp_fields[0] = makeTestField("id", .{ .simple = "n" });
+    gp_fields[0] = test_helpers.makeTestField("id", .{ .simple = "n" });
     const gp_tmpl = ast_mod.Template{ .name = "gp", .parents = &.{}, .fields = gp_fields, .slot_index = null };
 
     const p_fields = try alloc.alloc(Field, 1);
-    p_fields[0] = makeTestField("status", .{ .simple = "1" });
+    p_fields[0] = test_helpers.makeTestField("status", .{ .simple = "1" });
     const p_tmpl = ast_mod.Template{ .name = "p", .parents = &.{"gp"}, .fields = p_fields, .slot_index = null };
 
     const c_fields = try alloc.alloc(Field, 1);
-    c_fields[0] = makeTestField("name", .{ .simple = "s" });
+    c_fields[0] = test_helpers.makeTestField("name", .{ .simple = "s" });
     const c_tmpl = ast_mod.Template{ .name = "c", .parents = &.{"p"}, .fields = c_fields, .slot_index = null };
 
     const table = ast_mod.Table{
@@ -297,7 +279,7 @@ test "template: 3-level inheritance" {
         .line_no = 1,
     };
 
-    const ast = makeTestAst(alloc, try alloc.dupe(ast_mod.Table, &.{table}), try alloc.dupe(ast_mod.Template, &.{ gp_tmpl, p_tmpl, c_tmpl }));
+    const ast = test_helpers.makeTestAst(alloc, try alloc.dupe(ast_mod.Table, &.{table}), try alloc.dupe(ast_mod.Template, &.{ gp_tmpl, p_tmpl, c_tmpl }));
     const tables = try resolveAndApply(alloc, ast);
 
     try testing.expectEqual(@as(usize, 3), tables[0].fields.len);
@@ -310,11 +292,11 @@ test "template: multiple mixins" {
     const alloc = testing.allocator;
 
     const m1_fields = try alloc.alloc(Field, 1);
-    m1_fields[0] = makeTestField("created_at", .none);
+    m1_fields[0] = test_helpers.makeTestField("created_at", .none);
     const m1 = ast_mod.Template{ .name = "timestamps", .parents = &.{}, .fields = m1_fields, .slot_index = null };
 
     const m2_fields = try alloc.alloc(Field, 1);
-    m2_fields[0] = makeTestField("deleted_at", .none);
+    m2_fields[0] = test_helpers.makeTestField("deleted_at", .none);
     const m2 = ast_mod.Template{ .name = "softdel", .parents = &.{}, .fields = m2_fields, .slot_index = null };
 
     const audit_fields = try alloc.alloc(Field, 0);
@@ -331,7 +313,7 @@ test "template: multiple mixins" {
         .line_no = 1,
     };
 
-    const ast = makeTestAst(alloc, try alloc.dupe(ast_mod.Table, &.{table}), try alloc.dupe(ast_mod.Template, &.{ m1, m2, audit }));
+    const ast = test_helpers.makeTestAst(alloc, try alloc.dupe(ast_mod.Table, &.{table}), try alloc.dupe(ast_mod.Template, &.{ m1, m2, audit }));
     const tables = try resolveAndApply(alloc, ast);
 
     try testing.expectEqual(@as(usize, 2), tables[0].fields.len);
@@ -343,11 +325,11 @@ test "template: child field type overrides parent" {
     const alloc = testing.allocator;
 
     const parent_fields = try alloc.alloc(Field, 1);
-    parent_fields[0] = makeTestField("id", .{ .simple = "n" });
+    parent_fields[0] = test_helpers.makeTestField("id", .{ .simple = "n" });
     const parent = ast_mod.Template{ .name = "base", .parents = &.{}, .fields = parent_fields, .slot_index = null };
 
     const child_fields = try alloc.alloc(Field, 1);
-    child_fields[0] = makeTestField("id", .{ .simple = "N" });
+    child_fields[0] = test_helpers.makeTestField("id", .{ .simple = "N" });
     const child = ast_mod.Template{ .name = "big_base", .parents = &.{"base"}, .fields = child_fields, .slot_index = null };
 
     const table = ast_mod.Table{
@@ -361,7 +343,7 @@ test "template: child field type overrides parent" {
         .line_no = 1,
     };
 
-    const ast = makeTestAst(alloc, try alloc.dupe(ast_mod.Table, &.{table}), try alloc.dupe(ast_mod.Template, &.{ parent, child }));
+    const ast = test_helpers.makeTestAst(alloc, try alloc.dupe(ast_mod.Table, &.{table}), try alloc.dupe(ast_mod.Template, &.{ parent, child }));
     const tables = try resolveAndApply(alloc, ast);
 
     try testing.expectEqual(@as(usize, 1), tables[0].fields.len);
