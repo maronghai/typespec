@@ -1,5 +1,5 @@
 const std = @import("std");
-const codegen = @import("codegen.zig");
+const dialect_enum = @import("dialect_enum.zig");
 
 // ─── Command Types ─────────────────────────────────────────────
 
@@ -11,14 +11,21 @@ pub const Command = union(enum) {
 };
 
 pub const ParsedArgs = struct {
-    dialect: codegen.Dialect,
+    dialect: dialect_enum.Dialect,
     command: Command,
+};
+
+pub const ArgError = error{
+    UnknownDialect,
+    MissingDialectValue,
+    DiffMissingArgs,
+    MigrateMissingArgs,
 };
 
 // ─── Argument Parsing ──────────────────────────────────────────
 
 pub fn parseArgs(alloc: std.mem.Allocator, raw_args: []const []const u8) !ParsedArgs {
-    var dialect: codegen.Dialect = .mysql;
+    var dialect: dialect_enum.Dialect = .mysql;
     var filtered = try std.ArrayList([]const u8).initCapacity(alloc, raw_args.len);
 
     // Pass 1: extract --dialect / -d from all args
@@ -27,17 +34,12 @@ pub fn parseArgs(alloc: std.mem.Allocator, raw_args: []const []const u8) !Parsed
         if (std.mem.eql(u8, raw_args[i], "--dialect") or std.mem.eql(u8, raw_args[i], "-d")) {
             if (i + 1 < raw_args.len) {
                 dialect = parseDialect(raw_args[i + 1]) catch |e| {
-                    if (e == error.UnknownDialect) {
-                        std.debug.print("error: unknown dialect '{s}' (expected: mysql, pg, postgres, sqlite)\n", .{raw_args[i + 1]});
-                        std.process.exit(1);
-                    }
-                    std.debug.print("error: --dialect requires a value (mysql, pg, postgres, sqlite)\n", .{});
-                    std.process.exit(1);
+                    if (e == error.UnknownDialect) return error.UnknownDialect;
+                    return error.MissingDialectValue;
                 };
                 i += 1; // skip dialect value
             } else {
-                std.debug.print("error: --dialect requires a value (mysql, pg, postgres, sqlite)\n", .{});
-                std.process.exit(1);
+                return error.MissingDialectValue;
             }
         } else {
             try filtered.append(alloc, raw_args[i]);
@@ -53,18 +55,12 @@ pub fn parseArgs(alloc: std.mem.Allocator, raw_args: []const []const u8) !Parsed
     const sub = fargs[0];
 
     if (std.mem.eql(u8, sub, "diff")) {
-        if (fargs.len < 3) {
-            std.debug.print("error: diff requires <old.tps> <new.tps>\n", .{});
-            std.process.exit(1);
-        }
+        if (fargs.len < 3) return error.DiffMissingArgs;
         return .{ .dialect = dialect, .command = .{ .diff = .{ .old = fargs[1], .new = fargs[2] } } };
     }
 
     if (std.mem.eql(u8, sub, "migrate")) {
-        if (fargs.len < 3) {
-            std.debug.print("error: migrate requires <old.tps> <new.tps>\n", .{});
-            std.process.exit(1);
-        }
+        if (fargs.len < 3) return error.MigrateMissingArgs;
         var output: ?[]const u8 = null;
         var j: usize = 3;
         while (j < fargs.len) : (j += 1) {
@@ -110,7 +106,7 @@ pub fn parseArgs(alloc: std.mem.Allocator, raw_args: []const []const u8) !Parsed
     return .{ .dialect = dialect, .command = .{ .compile = .{ .input = input, .output = output, .trace = trace } } };
 }
 
-fn parseDialect(s: []const u8) !codegen.Dialect {
+fn parseDialect(s: []const u8) !dialect_enum.Dialect {
     if (std.mem.eql(u8, s, "mysql")) return .mysql;
     if (std.mem.eql(u8, s, "pg") or std.mem.eql(u8, s, "postgres")) return .postgres;
     if (std.mem.eql(u8, s, "sqlite") or std.mem.eql(u8, s, "sq")) return .sqlite;

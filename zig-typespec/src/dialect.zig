@@ -35,6 +35,9 @@ pub const DialectBackend = struct {
     emitInlineColumnComment: *const fn (w: *Writer, comment: []const u8) anyerror!void,
     emitEnumTypeCheck: *const fn (w: *Writer, col_name: []const u8, enum_values: []const []const u8) anyerror!void,
     emitInlineColumnStandaloneIndex: *const fn (w: *Writer, table_name: []const u8, col_name: []const u8) anyerror!void,
+    // ── P0: dialect-specific metadata comments ──
+    emitTpsTypeMetadata: *const fn (w: *Writer, col_name: []const u8, tps_type: []const u8) anyerror!void,
+    emitConfidenceComment: *const fn (w: *Writer, confidence: []const u8) anyerror!void,
 };
 
 pub fn getBackend(dialect: Dialect) DialectBackend {
@@ -160,6 +163,8 @@ const mysql_backend = DialectBackend{
     .emitInlineColumnComment = mysqlEmitInlineColumnComment,
     .emitEnumTypeCheck = mysqlEmitEnumTypeCheck,
     .emitInlineColumnStandaloneIndex = mysqlNoopInlineColumnIndex,
+    .emitTpsTypeMetadata = mysqlNoopTpsTypeMetadata,
+    .emitConfidenceComment = mysqlNoopConfidenceComment,
 };
 
 // ─── Shared PG/SQLite Backend ──────────────────────────────────
@@ -320,6 +325,8 @@ const pg_backend = DialectBackend{
     .emitInlineColumnComment = pgSqliteEmitInlineColumnCommentPG,
     .emitEnumTypeCheck = pgSqliteEmitEnumTypeCheck,
     .emitInlineColumnStandaloneIndex = pgSqliteEmitInlineColumnStandaloneIndex,
+    .emitTpsTypeMetadata = pgNoopTpsTypeMetadata,
+    .emitConfidenceComment = pgNoopConfidenceComment,
 };
 
 // ─── SQLite Backend ────────────────────────────────────────────
@@ -342,12 +349,22 @@ const sqlite_backend = DialectBackend{
     .emitInlineColumnComment = pgSqliteEmitInlineColumnCommentSQLite,
     .emitEnumTypeCheck = pgSqliteEmitEnumTypeCheck,
     .emitInlineColumnStandaloneIndex = pgSqliteEmitInlineColumnStandaloneIndex,
+    .emitTpsTypeMetadata = sqliteEmitTpsTypeMetadata,
+    .emitConfidenceComment = sqliteEmitConfidenceComment,
 };
 
 // ─── Inline column standalone index (PG/SQLite vs MySQL) ─────
 
 fn mysqlNoopInlineColumnIndex(_: *Writer, _: []const u8, _: []const u8) anyerror!void {
     // MySQL handles inline indexes via emitInlineIndex — no standalone needed
+}
+
+fn mysqlNoopTpsTypeMetadata(_: *Writer, _: []const u8, _: []const u8) anyerror!void {
+    // MySQL: no TPS type metadata comments needed
+}
+
+fn mysqlNoopConfidenceComment(_: *Writer, _: []const u8) anyerror!void {
+    // MySQL: no confidence comments needed
 }
 
 fn pgSqliteEmitInlineColumnStandaloneIndex(w: *Writer, table_name: []const u8, col_name: []const u8) anyerror!void {
@@ -358,6 +375,22 @@ fn pgSqliteEmitInlineColumnStandaloneIndex(w: *Writer, table_name: []const u8, c
     try w.writeAll(" (");
     try pgSqliteQuoteIdent(w, col_name);
     try w.writeAll(");\n");
+}
+
+fn pgNoopTpsTypeMetadata(_: *Writer, _: []const u8, _: []const u8) anyerror!void {
+    // PG: no TPS type metadata comments needed
+}
+
+fn pgNoopConfidenceComment(_: *Writer, _: []const u8) anyerror!void {
+    // PG: no confidence comments needed
+}
+
+fn sqliteEmitTpsTypeMetadata(w: *Writer, col_name: []const u8, tps_type: []const u8) anyerror!void {
+    try w.print("-- @tps {s} {s}\n", .{ col_name, tps_type });
+}
+
+fn sqliteEmitConfidenceComment(w: *Writer, confidence: []const u8) anyerror!void {
+    try w.print(" -- [{s}]", .{confidence});
 }
 
 // ─── Shared helpers (dialect-independent) ──────────────────────

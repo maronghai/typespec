@@ -103,90 +103,24 @@ pub const TypeResolver = struct {
     }
 
     pub fn resolveColumn(self: *TypeResolver, field: Field, dialect: Dialect, custom_types: []const ast_mod.CustomType) !TypedColumn {
-        // Resolve SQL type string using std.fmt.bufPrint
-        var type_buf: [64]u8 = undefined;
-        const sql_type = switch (field.type_info) {
-            .none => try self.alloc.dupe(u8, "varchar(255)"),
-            .raw_sql => |sql| try self.alloc.dupe(u8, sql),
-            .simple => |s| blk: {
-                // Check custom types first (multi-char names only)
-                if (s.len > 1) {
-                    if (type_map.lookupCustomType(custom_types, s, dialect)) |ct_info| {
-                        // Recursively resolve the custom type's base info
-                        const ct_col = try self.resolveColumn(ast_mod.Field{
-                            .name = field.name,
-                            .type_info = ct_info,
-                            .modifiers = field.modifiers,
-                            .default_val = field.default_val,
-                            .check = field.check,
-                            .fk = field.fk,
-                            .comment = field.comment,
-                            .line_no = field.line_no,
-                        }, dialect, custom_types);
-                        return ct_col;
-                    }
-                }
-                if (s.len == 1) {
-                    for (type_map.FORWARD_MAP) |m| {
-                        if (m.tps[0] == s[0]) {
-                            const sql = switch (dialect) {
-                                .mysql => m.mysql,
-                                .postgres => m.pg,
-                                .sqlite => m.sqlite,
-                            };
-                            if (dialect != .mysql and std.mem.startsWith(u8, sql, "int(")) {
-                                break :blk try self.alloc.dupe(u8, "integer");
-                            }
-                            break :blk try self.alloc.dupe(u8, sql);
-                        }
-                    }
-                    break :blk try self.alloc.dupe(u8, s);
-                } else {
-                    break :blk try self.alloc.dupe(u8, s);
-                }
-            },
-            .int_explicit => |n| blk: {
-                if (dialect == .mysql) {
-                    const result = try std.fmt.bufPrint(&type_buf, "int({d})", .{n});
-                    break :blk try self.alloc.dupe(u8, result);
-                } else {
-                    break :blk try self.alloc.dupe(u8, "integer");
-                }
-            },
-            .decimal_explicit => |ds| blk: {
-                const type_name: []const u8 = switch (dialect) {
-                    .mysql => "decimal",
-                    .postgres => "numeric",
-                    .sqlite => "NUMERIC",
-                };
-                const result = try std.fmt.bufPrint(&type_buf, "{s}({d}, {d})", .{ type_name, ds.precision, ds.scale });
-                break :blk try self.alloc.dupe(u8, result);
-            },
-            .varchar_explicit => |n| blk: {
-                if (n > 0) {
-                    const result = try std.fmt.bufPrint(&type_buf, "varchar({d})", .{n});
-                    break :blk try self.alloc.dupe(u8, result);
-                } else {
-                    break :blk try self.alloc.dupe(u8, "TEXT");
-                }
-            },
-            .enum_type => |vals| blk: {
-                if (dialect == .mysql) {
-                    var buf = try std.ArrayList(u8).initCapacity(self.alloc, 32);
-                    try buf.appendSlice(self.alloc, "ENUM(");
-                    for (vals, 0..) |v, vi| {
-                        if (vi > 0) try buf.appendSlice(self.alloc, ", ");
-                        try buf.append(self.alloc, '\'');
-                        try buf.appendSlice(self.alloc, v);
-                        try buf.append(self.alloc, '\'');
-                    }
-                    try buf.append(self.alloc, ')');
-                    break :blk try buf.toOwnedSlice(self.alloc);
-                } else {
-                    break :blk try self.alloc.dupe(u8, "TEXT");
-                }
-            },
-        };
+        // Check custom types first (multi-char names only)
+        if (field.type_info == .simple and field.type_info.simple.len > 1) {
+            if (type_map.lookupCustomType(custom_types, field.type_info.simple, dialect)) |ct_info| {
+                // Recursively resolve the custom type's base info
+                return self.resolveColumn(ast_mod.Field{
+                    .name = field.name,
+                    .type_info = ct_info,
+                    .modifiers = field.modifiers,
+                    .default_val = field.default_val,
+                    .check = field.check,
+                    .fk = field.fk,
+                    .comment = field.comment,
+                    .line_no = field.line_no,
+                }, dialect, custom_types);
+            }
+        }
+        // Delegate type-to-SQL resolution to type_map (single source of truth)
+        const sql_type = try type_map.toSqlTypeAlloc(self.alloc, dialect, field.type_info);
 
         // Classify modifiers
         var pk = false;

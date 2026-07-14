@@ -26,8 +26,37 @@ pub fn main(init: std.process.Init) !void {
         return compiler.handleCompile(init.io, alloc, file_data, "<stdin>", null, false, .mysql);
     }
 
-    const parsed = try cli.parseArgs(alloc, arg_list);
-    return dispatch(init.io, alloc, parsed);
+    const parsed = cli.parseArgs(alloc, arg_list) catch |err| {
+        switch (err) {
+            error.UnknownDialect => {
+                std.debug.print("error: unknown dialect (expected: mysql, pg, postgres, sqlite)\n", .{});
+            },
+            error.MissingDialectValue => {
+                std.debug.print("error: --dialect requires a value (mysql, pg, postgres, sqlite)\n", .{});
+            },
+            error.DiffMissingArgs => {
+                std.debug.print("error: diff requires <old.tps> <new.tps>\n", .{});
+            },
+            error.MigrateMissingArgs => {
+                std.debug.print("error: migrate requires <old.tps> <new.tps>\n", .{});
+            },
+            else => {
+                std.debug.print("error: {s}\n", .{@errorName(err)});
+            },
+        }
+        std.process.exit(1);
+    };
+    return dispatch(init.io, alloc, parsed) catch |err| {
+        switch (err) {
+            error.DiagnosticsError, error.SemanticError, error.SqlParseError, error.ReverseDiagnosticsError => {
+                // Error already printed by the compiler module
+            },
+            else => {
+                std.debug.print("error: {s}\n", .{@errorName(err)});
+            },
+        }
+        std.process.exit(1);
+    };
 }
 
 // ─── Command Dispatch ──────────────────────────────────────────

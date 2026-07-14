@@ -170,12 +170,10 @@ pub const Codegen = struct {
             }
         }
 
-        // TPS type metadata comments for roundtrip preservation (SQLite only)
-        if (self.dialect == .sqlite) {
-            for (table.columns) |col| {
-                if (col.tps_type) |tps| {
-                    try w.print("-- @tps {s} {s}\n", .{ col.name, tps });
-                }
+        // TPS type metadata comments for roundtrip preservation (dialect-specific)
+        for (table.columns) |col| {
+            if (col.tps_type) |tps| {
+                try self.backend.emitTpsTypeMetadata(w, col.name, tps);
             }
         }
 

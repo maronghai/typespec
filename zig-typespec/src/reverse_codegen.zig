@@ -1,6 +1,7 @@
 const std = @import("std");
 const sp = @import("sql_parser.zig");
 const type_map = @import("type_map.zig");
+const dialect_mod = @import("dialect.zig");
 const Dialect = sp.Dialect;
 
 // ─── Type Reverse Mapping ────────────────────────────────────────
@@ -135,8 +136,8 @@ fn writeColumnSuffix(w: anytype, col: sp.SqlColumn, indexes: []const sp.SqlIndex
         }
     }
 
-    // 8. Confidence comment for SQLite (only when not high)
-    if (dialect == .sqlite and tr.confidence != .high) {
+    // 8. Confidence comment (dialect-specific, only when not high)
+    if (tr.confidence != .high) {
         // Only emit confidence comment if there's no existing comment
         if (col.comment == null or (col.comment != null and (col.comment.?.len == 0))) {
             const conf_str: []const u8 = switch (tr.confidence) {
@@ -144,7 +145,8 @@ fn writeColumnSuffix(w: anytype, col: sp.SqlColumn, indexes: []const sp.SqlIndex
                 .medium => "MEDIUM",
                 .low => "LOW",
             };
-            try w.print(" -- [{s}]", .{conf_str});
+            const backend = dialect_mod.getBackend(dialect);
+            try backend.emitConfidenceComment(w, conf_str);
         }
     }
 }

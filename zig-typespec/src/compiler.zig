@@ -51,13 +51,11 @@ pub fn compilePipeline(io: std.Io, alloc: std.mem.Allocator, file_data: []const 
     if (diagnostics.hasErrors()) {
         diagnostics.printAll();
         diagnostics.printSummary();
-        std.process.exit(1);
+        return error.DiagnosticsError;
     }
 
     var sa = semantic.SemanticAnalyzer.init(alloc);
     const resolved = sa.analyze(tree) catch |err| {
-        // Semantic errors already printed by SemanticAnalyzer
-        if (err == error.SemanticError) std.process.exit(1);
         return err;
     };
 
@@ -126,11 +124,15 @@ pub fn detectSqlDialect(sql: []const u8) codegen.Dialect {
 pub fn handleReverse(io: std.Io, alloc: std.mem.Allocator, file_data: []const u8, input_name: []const u8, output_path: ?[]const u8, with_templates: bool, dialect: codegen.Dialect) !void {
     // Auto-detect dialect from SQL content when not explicitly specified
     const sql_dialect: sql_parser.Dialect = if (dialect == .mysql) detectSqlDialect(file_data) else dialect;
+
+    // Use DiagnosticCollector for consistent error handling with forward pipeline
+    var diagnostics = diag.DiagnosticCollector.init(alloc);
+
     var sp_parser = sql_parser.SqlParser.init(alloc, file_data, sql_dialect);
     const result = sp_parser.parse() catch |err| {
         const lc = sp_parser.lineColAt(sp_parser.pos);
         const src_line = sp_parser.getSourceLine(lc.line);
-        diag.printDiagnostic(.{
+        diagnostics.record(.{
             .severity = .@"error",
             .line_no = lc.line,
             .col = lc.col,
@@ -139,13 +141,14 @@ pub fn handleReverse(io: std.Io, alloc: std.mem.Allocator, file_data: []const u8
             .source_line = src_line,
             .actual = @errorName(err),
         });
-        std.process.exit(1);
+        diagnostics.printAll();
+        diagnostics.printSummary();
+        return error.SqlParseError;
     };
     const schema = result.schema;
 
-    var has_errors = false;
     for (result.diagnostics) |d| {
-        diag.printDiagnostic(.{
+        diagnostics.record(.{
             .severity = if (d.severity == .@"error") .@"error" else .warning,
             .line_no = d.line_no,
             .col = d.col,
@@ -153,12 +156,12 @@ pub fn handleReverse(io: std.Io, alloc: std.mem.Allocator, file_data: []const u8
             .message = d.message,
             .source_line = d.context,
         });
-        if (d.severity == .@"error") has_errors = true;
     }
 
-    if (has_errors) {
-        std.debug.print("aborting due to previous error(s)\n", .{});
-        std.process.exit(1);
+    if (diagnostics.hasErrors()) {
+        diagnostics.printAll();
+        diagnostics.printSummary();
+        return error.ReverseDiagnosticsError;
     }
 
     if (schema.tables.len == 0) {

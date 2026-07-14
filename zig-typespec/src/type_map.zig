@@ -202,6 +202,15 @@ pub fn toSqlType(w: anytype, dialect: Dialect, type_info: TypeInfo) !void {
     }
 }
 
+/// Allocating version of toSqlType — returns a heap-allocated SQL type string.
+/// Used by typed_ast.zig resolveColumn to avoid duplicating the type mapping logic.
+pub fn toSqlTypeAlloc(alloc: std.mem.Allocator, dialect: Dialect, type_info: TypeInfo) ![]const u8 {
+    var aw = std.Io.Writer.Allocating.init(alloc);
+    try toSqlType(&aw.writer, dialect, type_info);
+    var out = aw.toArrayList();
+    return try out.toOwnedSlice(alloc);
+}
+
 // ─── Reverse Mapping: SQL → TPS ──────────────────────────────
 
 pub const ReverseResult = struct {
