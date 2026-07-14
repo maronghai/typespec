@@ -3,6 +3,7 @@ const ast_mod = @import("ast.zig");
 const diag = @import("diagnostic.zig");
 const template_mod = @import("template.zig");
 const type_map = @import("type_map.zig");
+const ast_visitor = @import("ast_visitor.zig");
 const Ast = ast_mod.Ast;
 const Template = ast_mod.Template;
 const Table = ast_mod.Table;
@@ -272,8 +273,8 @@ fn runSuffixInference(ctx: *PassContext) !void {
 
 // ─── Validation Pass ───────────────────────────────────────
 
-/// Semantic validation: FK reference checks, template name existence,
-/// field name duplicates, circular inheritance detection.
+/// Semantic validation: FK reference checks, field name duplicates.
+/// Uses AstVisitor for traversal where possible.
 fn runValidate(ctx: *PassContext) !void {
     // 1. Collect all table names for FK reference checking
     var table_names = std.StringHashMap(void).init(ctx.alloc);
@@ -298,107 +299,94 @@ fn runValidate(ctx: *PassContext) !void {
             try field_names.put(field.name, fi);
         }
 
-        // Validate FK references
+        // Validate FK references (table-level + inline)
         for (table.fks) |fk| {
-            for (fk.fields) |fk_field| {
-                var found = false;
-                for (table.fields) |field| {
-                    if (std.mem.eql(u8, field.name, fk_field)) {
-                        found = true;
-                        break;
-                    }
-                }
-                if (!found) {
-                    // Warning (not error) — ultra shorthand FKs create implicit fields
-                    ctx.diagnostics.push(.{
-                        .severity = .warning,
-                        .line_no = table.line_no,
-                        .message = try std.fmt.allocPrint(ctx.alloc, "FK field '{s}' not found in table '{s}' — may be an implicit field from ultra shorthand", .{ fk_field, table.name }),
-                    });
-                }
-            }
-            if (fk.ref_table.len > 0 and !table_names.contains(fk.ref_table)) {
-                // Warning (not error) — DB enforces FK constraints at runtime
-                ctx.diagnostics.push(.{
-                    .severity = .warning,
-                    .line_no = table.line_no,
-                    .message = try std.fmt.allocPrint(ctx.alloc, "FK references non-existent table '{s}' in table '{s}'", .{ fk.ref_table, table.name }),
-                });
-            }
+            try validateFk(ctx, &table_names, table, fk);
         }
-
-        // Validate inline FK references
         for (table.fields) |field| {
             if (field.fk) |fk| {
-                for (fk.fields) |fk_field| {
-                    if (!std.mem.eql(u8, fk_field, field.name)) continue;
-                    var found = false;
-                    for (table.fields) |f| {
-                        if (std.mem.eql(u8, f.name, fk_field)) {
-                            found = true;
-                            break;
-                        }
-                    }
-                    if (!found) {
-                        ctx.diagnostics.push(.{
-                            .severity = .@"error",
-                            .line_no = table.line_no,
-                            .message = try std.fmt.allocPrint(ctx.alloc, "inline FK field '{s}' not found in table '{s}'", .{ fk_field, table.name }),
-                        });
-                    }
-                }
-                if (fk.ref_table.len > 0 and !table_names.contains(fk.ref_table)) {
-                    // Warning (not error) — DB enforces FK constraints at runtime
-                    ctx.diagnostics.push(.{
-                        .severity = .warning,
-                        .line_no = table.line_no,
-                        .message = try std.fmt.allocPrint(ctx.alloc, "inline FK references non-existent table '{s}' in table '{s}'", .{ fk.ref_table, table.name }),
-                    });
-                }
+                try validateFk(ctx, &table_names, table, fk);
             }
         }
     }
 }
 
-// ─── Type Modifier Validation ──────────────────────────────
-
-/// Validates that modifiers are used with compatible types:
-/// - `+`/`++` (auto_inc/auto_inc_pk) only on numeric or datetime types
-/// - `u` (unsigned) only on numeric types
-/// Reports warnings for undefined behavior.
-fn runValidateTypeModifiers(ctx: *PassContext) !void {
-    for (ctx.tables.items) |table| {
+/// Helper: validate a single FK declaration against the table and schema.
+fn validateFk(ctx: *PassContext, table_names: *const std.StringHashMap(void), table: ResolvedTable, fk: FkDecl) !void {
+    for (fk.fields) |fk_field| {
+        var found = false;
         for (table.fields) |field| {
-            for (field.modifiers) |mod| {
-                switch (mod.kind) {
-                    .auto_inc_pk, .auto_inc => {
-                        // +/++ on datetime → timestamp default (valid, handled by codegen)
-                        // +/++ on numeric → auto increment (valid)
-                        // +/++ on anything else → undefined
-                        if (!type_map.isNumericTpsType(field.type_info) and !type_map.isDatetimeTpsType(field.type_info)) {
-                            const mod_name = if (mod.kind == .auto_inc_pk) "auto_increment" else "auto_increment";
-                            ctx.diagnostics.push(.{
-                                .severity = .warning,
-                                .line_no = mod.line_no,
-                                .message = try std.fmt.allocPrint(ctx.alloc, "'{s}' modifier has no effect on non-numeric/non-datetime type in field '{s}'", .{ mod_name, field.name }),
-                            });
-                        }
-                    },
-                    .primary_key => {}, // valid on any type
-                    .not_null => {}, // valid on any type
-                    .unsigned => {
-                        if (!type_map.isNumericTpsType(field.type_info)) {
-                            ctx.diagnostics.push(.{
-                                .severity = .warning,
-                                .line_no = mod.line_no,
-                                .message = try std.fmt.allocPrint(ctx.alloc, "'unsigned' modifier has no effect on non-numeric type in field '{s}'", .{field.name}),
-                            });
-                        }
-                    },
-                    .inline_unique => {}, // valid on any type
-                    .inline_index => {}, // valid on any type
-                }
+            if (std.mem.eql(u8, field.name, fk_field)) {
+                found = true;
+                break;
             }
+        }
+        if (!found) {
+            ctx.diagnostics.push(.{
+                .severity = .warning,
+                .line_no = table.line_no,
+                .message = try std.fmt.allocPrint(ctx.alloc, "FK field '{s}' not found in table '{s}' — may be an implicit field from ultra shorthand", .{ fk_field, table.name }),
+            });
+        }
+    }
+    if (fk.ref_table.len > 0 and !table_names.contains(fk.ref_table)) {
+        ctx.diagnostics.push(.{
+            .severity = .warning,
+            .line_no = table.line_no,
+            .message = try std.fmt.allocPrint(ctx.alloc, "FK references non-existent table '{s}' in table '{s}'", .{ fk.ref_table, table.name }),
+        });
+    }
+}
+
+// ─── Type Modifier Validation (visitor-based) ────────────────
+
+/// Validates that modifiers are used with compatible types.
+/// Uses AstVisitor.walkResolvedTables for traversal.
+fn runValidateTypeModifiers(ctx: *PassContext) !void {
+    var vctx = ModifierValidationCtx{
+        .alloc = ctx.alloc,
+        .diagnostics = ctx.diagnostics,
+    };
+
+    const visitor = ast_visitor.AstVisitor(*ModifierValidationCtx){
+        .context = &vctx,
+        .visitField = visitFieldCheckModifiers,
+    };
+
+    visitor.walkResolvedTables(ctx.tables.items);
+}
+
+const ModifierValidationCtx = struct {
+    alloc: std.mem.Allocator,
+    diagnostics: *diag.DiagnosticCollector,
+};
+
+fn visitFieldCheckModifiers(ctx: *ModifierValidationCtx, field: *const Field, _: ?[]const u8) void {
+    for (field.modifiers) |mod| {
+        switch (mod.kind) {
+            .auto_inc_pk, .auto_inc => {
+                if (!type_map.isNumericTpsType(field.type_info) and !type_map.isDatetimeTpsType(field.type_info)) {
+                    const mod_name = if (mod.kind == .auto_inc_pk) "auto_increment" else "auto_increment";
+                    ctx.diagnostics.push(.{
+                        .severity = .warning,
+                        .line_no = mod.line_no,
+                        .message = std.fmt.allocPrint(ctx.alloc, "'{s}' modifier has no effect on non-numeric/non-datetime type in field '{s}'", .{ mod_name, field.name }) catch return,
+                    });
+                }
+            },
+            .primary_key => {},
+            .not_null => {},
+            .unsigned => {
+                if (!type_map.isNumericTpsType(field.type_info)) {
+                    ctx.diagnostics.push(.{
+                        .severity = .warning,
+                        .line_no = mod.line_no,
+                        .message = std.fmt.allocPrint(ctx.alloc, "'unsigned' modifier has no effect on non-numeric type in field '{s}'", .{field.name}) catch return,
+                    });
+                }
+            },
+            .inline_unique => {},
+            .inline_index => {},
         }
     }
 }

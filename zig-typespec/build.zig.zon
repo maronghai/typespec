@@ -1,0 +1,11 @@
+.{
+    .name = .typespec,
+    .version = "0.4.36",
+    .fingerprint = 0x8f72e825d4ccaae0,
+    .dependencies = .{},
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}

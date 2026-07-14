@@ -8,6 +8,7 @@ const Field = ast_mod.Field;
 const FkDecl = ast_mod.FkDecl;
 const IndexDecl = ast_mod.IndexDecl;
 const SqlComment = ast_mod.SqlComment;
+const ResolvedTable = ast_mod.ResolvedTable;
 
 // ─── AST Visitor Pattern ───────────────────────────────────────
 // Provides generic traversal for the AST without manual traversal
@@ -23,7 +24,7 @@ pub fn AstVisitor(comptime Context: type) type {
         visitSchema: ?*const fn (ctx: Context, schema: Schema) void = null,
         visitTemplate: ?*const fn (ctx: Context, template: Template) void = null,
         visitTable: ?*const fn (ctx: Context, table: Table) void = null,
-        visitField: ?*const fn (ctx: Context, field: Field, table_name: ?[]const u8) void = null,
+        visitField: ?*const fn (ctx: Context, field: *const Field, table_name: ?[]const u8) void = null,
         visitFk: ?*const fn (ctx: Context, fk: FkDecl, table_name: ?[]const u8) void = null,
         visitIndex: ?*const fn (ctx: Context, index: IndexDecl, table_name: ?[]const u8) void = null,
         visitSqlComment: ?*const fn (ctx: Context, comment: SqlComment) void = null,
@@ -43,7 +44,7 @@ pub fn AstVisitor(comptime Context: type) type {
                     visit(self.context, template);
                 }
                 // Walk template fields
-                for (template.fields) |field| {
+                for (template.fields) |*field| {
                     if (self.visitField) |visit| {
                         visit(self.context, field, template.name);
                     }
@@ -56,7 +57,7 @@ pub fn AstVisitor(comptime Context: type) type {
                     visit(self.context, table);
                 }
                 // Walk table fields
-                for (table.fields) |field| {
+                for (table.fields) |*field| {
                     if (self.visitField) |visit| {
                         visit(self.context, field, table.name);
                     }
@@ -88,6 +89,45 @@ pub fn AstVisitor(comptime Context: type) type {
                 }
             }
         }
+
+        /// Walk resolved tables (post-template-resolution) — skips schema/templates.
+        /// Uses ResolvedTable which has the same field/fk/index structure as Table.
+        pub fn walkResolvedTables(self: Self, tables: []const ResolvedTable) void {
+            for (tables) |table| {
+                if (self.visitTable) |visit| {
+                    visit(self.context, .{
+                        .name = table.name,
+                        .template_ref = null,
+                        .comment = table.comment,
+                        .engine = table.engine,
+                        .fields = table.fields,
+                        .fks = table.fks,
+                        .indexes = table.indexes,
+                        .line_no = table.line_no,
+                    });
+                }
+                for (table.fields) |*field| {
+                    if (self.visitField) |visit| {
+                        visit(self.context, field, table.name);
+                    }
+                    if (field.fk) |fk| {
+                        if (self.visitFk) |visit| {
+                            visit(self.context, fk, table.name);
+                        }
+                    }
+                }
+                for (table.fks) |fk| {
+                    if (self.visitFk) |visit| {
+                        visit(self.context, fk, table.name);
+                    }
+                }
+                for (table.indexes) |index| {
+                    if (self.visitIndex) |visit| {
+                        visit(self.context, index, table.name);
+                    }
+                }
+            }
+        }
     };
 }
 
@@ -115,7 +155,7 @@ fn countVisitTable(ctx: *VisitCounts, _: Table) void {
     ctx.tables += 1;
 }
 
-fn countVisitField(ctx: *VisitCounts, _: Field, _: ?[]const u8) void {
+fn countVisitField(ctx: *VisitCounts, _: *const Field, _: ?[]const u8) void {
     ctx.fields += 1;
 }
 
@@ -331,4 +371,33 @@ test "visitor: selective callbacks" {
     visitor.walk(ast);
 
     try testing.expectEqual(@as(usize, 1), table_count);
+}
+
+test "visitor: walkResolvedTables" {
+    const alloc = testing.allocator;
+
+    const table = ResolvedTable{
+        .name = "users",
+        .comment = null,
+        .engine = null,
+        .fields = &.{
+            makeTestField("id", .{ .simple = "n" }),
+            makeTestField("name", .{ .simple = "s" }),
+        },
+        .fks = &.{},
+        .indexes = &.{},
+        .line_no = 1,
+    };
+
+    var counts = VisitCounts{};
+    const visitor = AstVisitor(*VisitCounts){
+        .context = &counts,
+        .visitTable = countVisitTable,
+        .visitField = countVisitField,
+    };
+
+    visitor.walkResolvedTables(try alloc.dupe(ResolvedTable, &.{table}));
+
+    try testing.expectEqual(@as(usize, 1), counts.tables);
+    try testing.expectEqual(@as(usize, 2), counts.fields);
 }
