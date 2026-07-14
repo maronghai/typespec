@@ -31,23 +31,48 @@ for diff_file in "$TEST_DIR"/*.diff.txt; do
     continue
   fi
 
+  # Test with MySQL (default)
   tmp_file=$(mktemp)
   trap "rm -f '$tmp_file'" EXIT
 
   if ! "$COMPILER" diff "$old_file" "$new_file" -d mysql > "$tmp_file" 2>/dev/null; then
-    fail "$base" "compiler failed"
+    fail "$base (mysql)" "compiler failed"
     rm -f "$tmp_file"
     continue
   fi
 
   if diff -u "$diff_file" "$tmp_file" > /dev/null 2>&1; then
-    pass "$base"
+    pass "$base (mysql)"
   else
     diff_output=$(diff -u "$diff_file" "$tmp_file" 2>&1 | head -20)
-    fail "$base" "$diff_output"
+    fail "$base (mysql)" "$diff_output"
   fi
 
   rm -f "$tmp_file"
+
+  # Test with PG/SQLite if dialect-specific golden file exists
+  for dialect in pg sqlite; do
+    dialect_file="$TEST_DIR/${base}.diff.${dialect}.txt"
+    if [ ! -f "$dialect_file" ]; then
+      continue
+    fi
+
+    tmp_file=$(mktemp)
+    if ! "$COMPILER" diff "$old_file" "$new_file" -d "$dialect" > "$tmp_file" 2>/dev/null; then
+      fail "$base ($dialect)" "compiler failed"
+      rm -f "$tmp_file"
+      continue
+    fi
+
+    if diff -u "$dialect_file" "$tmp_file" > /dev/null 2>&1; then
+      pass "$base ($dialect)"
+    else
+      diff_output=$(diff -u "$dialect_file" "$tmp_file" 2>&1 | head -20)
+      fail "$base ($dialect)" "$diff_output"
+    fi
+
+    rm -f "$tmp_file"
+  done
 done
 
 summary "Diff"

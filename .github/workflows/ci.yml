@@ -43,3 +43,9 @@ jobs:
 
       - name: Diff tests
         run: bash tests/test_diff.sh
+
+      - name: Error recovery tests
+        run: bash tests/test_error_recovery.sh
+
+      - name: Roundtrip tests
+        run: bash tests/test_roundtrip.sh
