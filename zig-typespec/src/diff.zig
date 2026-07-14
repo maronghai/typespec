@@ -57,6 +57,7 @@ pub const defaultValEqual = diff_fields.defaultValEqual;
 pub const checkEqual = diff_fields.checkEqual;
 pub const indexesEqual = diff_indexes.indexesEqual;
 pub const fksEqual = diff_fks.fksEqual;
+pub const semanticEquiv = @import("type_map.zig").semanticEquiv;
 
 // ─── Helpers ───────────────────────────────────────────────
 

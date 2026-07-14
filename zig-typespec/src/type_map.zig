@@ -828,6 +828,16 @@ test "reverse sqlite: BLOB maps to B" {
     try std.testing.expectEqualStrings("B", r.tps);
 }
 
+// ─── Semantic Equivalence ────────────────────────────────────
+// Two SQL types are semantically equivalent if they map to the same
+// TPS symbol. Used by diff to distinguish dialect noise from real changes.
+
+pub fn semanticEquiv(a_sql_type: []const u8, a_col_name: []const u8, a_dialect: Dialect, b_sql_type: []const u8, b_col_name: []const u8, b_dialect: Dialect) bool {
+    const a_tps = reverseLookup(a_sql_type, a_col_name, false, false, a_dialect).tps;
+    const b_tps = reverseLookup(b_sql_type, b_col_name, false, false, b_dialect).tps;
+    return std.mem.eql(u8, a_tps, b_tps);
+}
+
 // ─── SQLite heuristic tests ──────────────────────────────────
 
 test "reverse sqlite: INTEGER + is_ prefix maps to b" {
@@ -873,4 +883,42 @@ test "reverse sqlite: TEXT + note maps to S" {
 test "reverse sqlite: TEXT + content maps to S" {
     const r = reverseLookup("TEXT", "content", false, false, .sqlite);
     try std.testing.expectEqualStrings("S", r.tps);
+}
+
+// ─── semanticEquiv tests ─────────────────────────────────────
+
+test "semanticEquiv: MySQL int ↔ PG integer → true" {
+    try std.testing.expect(semanticEquiv("int", "id", .mysql, "integer", "id", .pg));
+}
+
+test "semanticEquiv: MySQL int ↔ PG bigint → false" {
+    try std.testing.expect(!semanticEquiv("int", "id", .mysql, "bigint", "id", .pg));
+}
+
+test "semanticEquiv: MySQL datetime ↔ PG timestamp → true" {
+    try std.testing.expect(semanticEquiv("datetime", "created_at", .mysql, "timestamp", "created_at", .pg));
+}
+
+test "semanticEquiv: MySQL blob ↔ PG bytea → true" {
+    try std.testing.expect(semanticEquiv("blob", "data", .mysql, "bytea", "data", .pg));
+}
+
+test "semanticEquiv: MySQL boolean ↔ PG boolean → true (same name)" {
+    try std.testing.expect(semanticEquiv("boolean", "flag", .mysql, "boolean", "flag", .pg));
+}
+
+test "semanticEquiv: MySQL tinyint ↔ PG smallint → true (both → n)" {
+    try std.testing.expect(semanticEquiv("tinyint", "age", .mysql, "smallint", "age", .pg));
+}
+
+test "semanticEquiv: MySQL text ↔ PG text → true" {
+    try std.testing.expect(semanticEquiv("text", "bio", .mysql, "text", "bio", .pg));
+}
+
+test "semanticEquiv: MySQL int ↔ SQLite INTEGER → true" {
+    try std.testing.expect(semanticEquiv("int", "id", .mysql, "INTEGER", "id", .sqlite));
+}
+
+test "semanticEquiv: MySQL varchar(255) ↔ PG varchar → true (both → s)" {
+    try std.testing.expect(semanticEquiv("varchar(255)", "name", .mysql, "varchar", "name", .pg));
 }
