@@ -12,7 +12,7 @@ CREATE TABLE "customer" (
 CREATE TABLE "product" (
   "id" INTEGER PRIMARY KEY AUTOINCREMENT,
   "name" TEXT NOT NULL,
-  "price" NUMERIC NOT NULL
+  "price" NUMERIC(16, 2) NOT NULL
 );
 -- @tps id n
 -- @tps price m

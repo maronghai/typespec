@@ -3,7 +3,7 @@
 CREATE TABLE "order" (
   "id" INTEGER PRIMARY KEY AUTOINCREMENT,
   "user_id" INTEGER NOT NULL,
-  "amount" NUMERIC NOT NULL,
+  "amount" NUMERIC(16, 2) NOT NULL,
   "created" TEXT,
   FOREIGN KEY ("user_id") REFERENCES "user"("id")
 );

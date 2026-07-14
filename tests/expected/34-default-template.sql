@@ -7,7 +7,7 @@ CREATE TABLE `user` (
   `name` varchar(32) NOT NULL,
   `email` varchar(128) NOT NULL,
   `version` bigint,
-  `status` int(1) DEFAULT 0
+  `status` int DEFAULT 0
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE `product` (
@@ -15,5 +15,5 @@ CREATE TABLE `product` (
   `name` varchar(128) NOT NULL,
   `price` decimal(16, 2),
   `version` bigint,
-  `status` int(1) DEFAULT 0
+  `status` int DEFAULT 0
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

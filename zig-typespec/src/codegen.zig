@@ -207,7 +207,8 @@ pub const Codegen = struct {
     /// Render a single column definition (shared by CREATE TABLE and ALTER TABLE paths).
     pub fn emitColumnDef(self: Codegen, w: *Writer, col: typed_ast_mod.TypedColumn) !void {
         try self.backend.quoteIdent(w, col.name);
-        try w.print(" {s}", .{col.sql_type});
+        try w.writeAll(" ");
+        try col.sql_type.toSql(self.dialect, w);
 
         if (col.flags.unsigned) try self.backend.emitUnsigned(w);
 
@@ -306,7 +307,7 @@ pub fn diagnosticTrace(sql: []const u8) void {
 
 const testing = std.testing;
 
-fn makeTestColumn(name: []const u8, sql_type: []const u8) typed_ast_mod.TypedColumn {
+fn makeTestColumn(name: []const u8, sql_type: typed_ast_mod.SqlType) typed_ast_mod.TypedColumn {
     return .{
         .name = name,
         .sql_type = sql_type,

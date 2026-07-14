@@ -11,7 +11,7 @@ CREATE TABLE "order" (
   "id" INTEGER PRIMARY KEY AUTOINCREMENT,
   "order_no" varchar(64) NOT NULL,
   "user_id" INTEGER,
-  "amount" NUMERIC,
+  "amount" NUMERIC(16, 2),
   FOREIGN KEY ("user_id") REFERENCES "user"("id")
 );
 -- @tps id n

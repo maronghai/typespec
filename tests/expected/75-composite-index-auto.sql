@@ -6,7 +6,7 @@ CREATE TABLE `user` (
   `id` int AUTO_INCREMENT PRIMARY KEY,
   `name` varchar(32),
   `email` varchar(128),
-  `status` int(1) DEFAULT 0,
+  `status` int DEFAULT 0,
   `create_at` datetime DEFAULT CURRENT_TIMESTAMP,
   INDEX `idx_name_email` (`name`, `email`),
   UNIQUE INDEX `uk_email_status` (`email`, `status`)

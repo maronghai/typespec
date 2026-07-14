@@ -4,7 +4,7 @@ CREATE DATABASE `demo` CHARACTER SET utf8mb4;
 
 CREATE TABLE `all_types` (
   `id` int AUTO_INCREMENT PRIMARY KEY,
-  `name` TEXT,
+  `name` varchar(255),
   `full` text,
   `price` decimal(16, 2),
   `big_p` decimal(20, 6),
@@ -16,5 +16,5 @@ CREATE TABLE `all_types` (
   `code` varchar(64),
   `ver` bigint,
   `amt` decimal(10, 2),
-  `cnt` int(128)
+  `cnt` int
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

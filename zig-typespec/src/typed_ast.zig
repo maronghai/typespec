@@ -17,11 +17,9 @@ const Dialect = dialect_enum.Dialect;
 
 // ─── TypedAst: Dialect-agnostic IR between Semantic and Codegen ─
 //
-// ResolvedAst → TypedAst resolves types to concrete SQL strings.
-// TypedAst → SQL is pure output (no type inference logic).
-//
-// Adding a new dialect only requires changes in the SQL output layer,
-// not in type resolution.
+// ResolvedAst → TypedAst resolves types to structured SqlType.
+// TypedAst → SQL: SqlType.toSql(dialect, writer) renders dialect-specific output.
+// TypedAst → JSON/Prisma: inspect SqlType variants directly (no SQL binding).
 
 pub const ColumnFlag = enum(u16) {
     nullable = 0x0001,
@@ -79,6 +77,167 @@ pub const ColumnFlags = packed struct {
     }
 };
 
+// ─── SqlType: Dialect-agnostic structured type representation ──
+//
+// Replaces the raw SQL string in TypedColumn.sql_type.
+// Each variant carries enough information to render to any SQL dialect
+// or to non-SQL formats (JSON Schema, Prisma, etc.).
+
+pub const SqlType = union(enum) {
+    int,
+    bigint,
+    decimal: struct { precision: usize, scale: usize },
+    varchar: usize, // 0 = TEXT
+    text,
+    blob,
+    json,
+    datetime,
+    date,
+    boolean,
+    enum_values: []const []const u8,
+    /// Raw SQL pass-through (custom type override).
+    raw_sql: []const u8,
+    /// Multi-char type pass-through (PG-specific types like "uuid", "serial").
+    passthrough: []const u8,
+
+    /// Render this SqlType to a dialect-specific SQL type string.
+    pub fn toSql(self: SqlType, dialect: Dialect, w: *Writer) !void {
+        switch (self) {
+            .int => {
+                try w.writeAll(switch (dialect) {
+                    .mysql => "int",
+                    .pg => "integer",
+                    .sqlite => "INTEGER",
+                });
+            },
+            .bigint => {
+                try w.writeAll(switch (dialect) {
+                    .mysql => "bigint",
+                    .pg => "bigint",
+                    .sqlite => "INTEGER",
+                });
+            },
+            .decimal => |ds| {
+                const name = switch (dialect) {
+                    .mysql => "decimal",
+                    .pg => "numeric",
+                    .sqlite => "NUMERIC",
+                };
+                try w.print("{s}({d}, {d})", .{ name, ds.precision, ds.scale });
+            },
+            .varchar => |n| {
+                if (n > 0) {
+                    try w.print("varchar({d})", .{n});
+                } else {
+                    try w.writeAll(switch (dialect) {
+                        .mysql => "varchar(255)",
+                        .pg => "varchar(255)",
+                        .sqlite => "TEXT",
+                    });
+                }
+            },
+            .text => {
+                try w.writeAll(switch (dialect) {
+                    .mysql => "text",
+                    .pg => "text",
+                    .sqlite => "TEXT",
+                });
+            },
+            .blob => {
+                try w.writeAll(switch (dialect) {
+                    .mysql => "blob",
+                    .pg => "bytea",
+                    .sqlite => "BLOB",
+                });
+            },
+            .json => {
+                try w.writeAll(switch (dialect) {
+                    .mysql => "json",
+                    .pg => "json",
+                    .sqlite => "TEXT",
+                });
+            },
+            .datetime => {
+                try w.writeAll(switch (dialect) {
+                    .mysql => "datetime",
+                    .pg => "timestamp",
+                    .sqlite => "TEXT",
+                });
+            },
+            .date => {
+                try w.writeAll(switch (dialect) {
+                    .mysql => "date",
+                    .pg => "date",
+                    .sqlite => "TEXT",
+                });
+            },
+            .boolean => {
+                try w.writeAll(switch (dialect) {
+                    .mysql => "boolean",
+                    .pg => "boolean",
+                    .sqlite => "INTEGER",
+                });
+            },
+            .enum_values => |vals| {
+                switch (dialect) {
+                    .mysql => {
+                        try w.writeAll("ENUM(");
+                        for (vals, 0..) |v, vi| {
+                            if (vi > 0) try w.writeAll(", ");
+                            try w.print("'{s}'", .{v});
+                        }
+                        try w.writeAll(")");
+                    },
+                    .pg, .sqlite => {
+                        try w.writeAll("TEXT");
+                    },
+                }
+            },
+            .raw_sql => |sql| try w.writeAll(sql),
+            .passthrough => |t| try w.writeAll(t),
+        }
+    }
+
+    /// Build a SqlType from a TypeInfo + dialect (resolves single-char TPS symbols).
+    pub fn fromTypeInfo(type_info: TypeInfo, dialect: Dialect) SqlType {
+        return switch (type_info) {
+            .none => .{ .varchar = 0 },
+            .simple => |s| {
+                if (s.len == 1) {
+                    return switch (s[0]) {
+                        'n' => .int,
+                        'N' => .bigint,
+                        'm' => .{ .decimal = .{ .precision = 16, .scale = 2 } },
+                        'M' => .{ .decimal = .{ .precision = 20, .scale = 6 } },
+                        'S' => .text,
+                        'b' => .boolean,
+                        'B' => .blob,
+                        'j' => .json,
+                        'd' => .date,
+                        't' => .datetime,
+                        's' => .{ .varchar = 0 },
+                        '1' => .{ .varchar = 0 }, // "1" is an alias for "s" in some contexts
+                        else => .{ .passthrough = s },
+                    };
+                } else {
+                    return .{ .passthrough = s };
+                }
+            },
+            .int_explicit => |n| {
+                _ = dialect;
+                // int_explicit(n) always renders as int(n) in MySQL, integer in PG/SQLite
+                // But we store the precision for potential future use
+                _ = n;
+                return .int;
+            },
+            .decimal_explicit => |ds| .{ .decimal = .{ .precision = ds.precision, .scale = ds.scale } },
+            .varchar_explicit => |n| .{ .varchar = n },
+            .enum_type => |vals| .{ .enum_values = vals },
+            .raw_sql => |sql| .{ .raw_sql = sql },
+        };
+    }
+};
+
 pub const TypedAst = struct {
     schema_name: ?[]const u8,
     schema_charset: ?[]const u8,
@@ -98,7 +257,7 @@ pub const TypedTable = struct {
 
 pub const TypedColumn = struct {
     name: []const u8,
-    sql_type: []const u8,
+    sql_type: SqlType,
     tps_type: ?[]const u8 = null,
     flags: ColumnFlags = .{},
     default: ?[]const u8,
@@ -173,8 +332,8 @@ pub const TypeResolver = struct {
                 }, dialect, custom_types, depth + 1);
             }
         }
-        // Delegate type-to-SQL resolution to type_map (single source of truth)
-        const sql_type = try type_map.toSqlTypeAlloc(self.alloc, dialect, field.type_info);
+        // Resolve to structured SqlType (dialect-agnostic)
+        const sql_type = SqlType.fromTypeInfo(field.type_info, dialect);
 
         // Classify modifiers
         var pk = false;

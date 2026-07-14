@@ -9,6 +9,6 @@ CREATE TABLE `suffixes` (
   `updated_at` datetime,
   `paid_on` date,
   `deleted_on` date,
-  `name` TEXT,
-  `content` TEXT
+  `name` varchar(255),
+  `content` varchar(255)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

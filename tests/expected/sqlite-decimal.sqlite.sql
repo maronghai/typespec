@@ -3,8 +3,8 @@
 CREATE TABLE "products" (
   "id" INTEGER PRIMARY KEY AUTOINCREMENT,
   "name" TEXT NOT NULL,
-  "price" NUMERIC,
-  "big_p" NUMERIC,
+  "price" NUMERIC(16, 2),
+  "big_p" NUMERIC(20, 6),
   "amt" NUMERIC(10, 2)
 );
 -- @tps id n

@@ -3,8 +3,8 @@
 CREATE DATABASE `demo` CHARACTER SET utf8mb4;
 
 CREATE TABLE `explicit` (
-  `col_int` int(128),
+  `col_int` int,
   `col_dec` decimal(10, 2),
   `col_var` varchar(256),
-  `col_var0` TEXT
+  `col_var0` varchar(255)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

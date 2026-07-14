@@ -6,5 +6,5 @@ CREATE TABLE `counters` (
   `small_num` int UNSIGNED,
   `big_num` bigint UNSIGNED,
   `plain_int` int,
-  `unsigned32` int(12) UNSIGNED
+  `unsigned32` int UNSIGNED
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

@@ -10,7 +10,7 @@ CREATE TABLE "user" (
 CREATE TABLE "order" (
   "id" INTEGER PRIMARY KEY AUTOINCREMENT,
   "user_id" INTEGER,
-  "amount" NUMERIC,
+  "amount" NUMERIC(16, 2),
   FOREIGN KEY ("user_id") REFERENCES "user"("id") ON DELETE CASCADE
 );
 -- @tps id n

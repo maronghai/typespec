@@ -4,8 +4,8 @@ CREATE DATABASE "demo" ENCODING 'UTF8';
 
 CREATE TABLE "defaults" (
   "col1" integer DEFAULT 0,
-  "col2" TEXT DEFAULT 'hello',
+  "col2" varchar(255) DEFAULT 'hello',
   "col3" numeric(16, 2) DEFAULT 0,
-  "col4" TEXT DEFAULT 0,
+  "col4" varchar(255) DEFAULT 0,
   "col5" timestamp DEFAULT CURRENT_TIMESTAMP
 );

@@ -4,5 +4,5 @@ CREATE DATABASE `demo` CHARACTER SET utf8mb4;
 
 CREATE TABLE `my_table` (
   `id` int AUTO_INCREMENT PRIMARY KEY,
-  `name` TEXT
+  `name` varchar(255)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='这是一个测试表';

@@ -10,7 +10,7 @@ CREATE TABLE "mid" (
 
 CREATE TABLE "mid" (
   "id" INTEGER PRIMARY KEY AUTOINCREMENT,
-  "amount" NUMERIC
+  "amount" NUMERIC(16, 2)
 );
 -- order
 -- @tps id n

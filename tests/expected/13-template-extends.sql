@@ -5,6 +5,6 @@ CREATE DATABASE `demo` CHARACTER SET utf8mb4;
 CREATE TABLE `item` (
   `name` varchar(64) NOT NULL,
   `id` int AUTO_INCREMENT PRIMARY KEY,
-  `status` int(1) DEFAULT 0,
+  `status` int DEFAULT 0,
   `version` bigint
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

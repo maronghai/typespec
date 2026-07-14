@@ -6,5 +6,5 @@ CREATE TABLE "explicit" (
   "col_int" integer,
   "col_dec" numeric(10, 2),
   "col_var" varchar(256),
-  "col_var0" TEXT
+  "col_var0" varchar(255)
 );

@@ -6,5 +6,5 @@ CREATE TABLE `bare_fields` (
   `id` int AUTO_INCREMENT PRIMARY KEY,
   `user_id` int,
   `order_id` int,
-  `name` TEXT
+  `name` varchar(255)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

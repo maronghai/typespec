@@ -6,7 +6,7 @@ CREATE TABLE `multi` (
   `id` int AUTO_INCREMENT PRIMARY KEY,
   `name` varchar(32),
   `email` varchar(128),
-  `status` int(1),
+  `status` int,
   INDEX `idx_name_email` (`name`, `email`),
   UNIQUE INDEX `uk_email_status` (`email`, `status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

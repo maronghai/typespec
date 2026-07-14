@@ -4,6 +4,6 @@ CREATE DATABASE "demo" ENCODING 'UTF8';
 
 CREATE TABLE "my_table" (
   "id" integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-  "name" TEXT
+  "name" varchar(255)
 );
 COMMENT ON TABLE "my_table" IS '这是一个测试表';

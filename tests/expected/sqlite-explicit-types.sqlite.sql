@@ -2,7 +2,7 @@
 
 CREATE TABLE "explicit" (
   "id" INTEGER PRIMARY KEY AUTOINCREMENT,
-  "cnt" integer,
+  "cnt" INTEGER,
   "amt" NUMERIC(10, 2),
   "code" varchar(64),
   "ver" INTEGER,

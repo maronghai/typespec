@@ -4,7 +4,7 @@ CREATE TABLE "scores" (
   "id" INTEGER PRIMARY KEY AUTOINCREMENT,
   "value" INTEGER NOT NULL CHECK (value BETWEEN 0 AND 100),
   "grade" TEXT NOT NULL CHECK (grade IN ('A', 'B', 'C', 'D', 'F')),
-  "ratio" NUMERIC NOT NULL CHECK (ratio > 0)
+  "ratio" NUMERIC(16, 2) NOT NULL CHECK (ratio > 0)
 );
 -- @tps id n
 -- @tps value n
