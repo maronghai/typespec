@@ -71,3 +71,8 @@ pub const SqlParseResult = struct {
     schema: SqlSchema,
     diagnostics: []const SqlDiagnostic,
 };
+
+pub const CreateDbResult = struct {
+    name: ?[]const u8,
+    charset: ?[]const u8,
+};

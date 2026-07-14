@@ -40,6 +40,23 @@ pub const Parser = struct {
         return .{ .alloc = alloc, .diagnostics = diagnostics };
     }
 
+    /// Record a parse error via DiagnosticCollector, or signal caller to propagate.
+    /// Returns true if error was recorded (caller should continue), false to propagate.
+    fn handleParseError(self: *Parser, err: anyerror, line: tk.Line, comptime message: []const u8) bool {
+        if (self.diagnostics) |dc| {
+            dc.record(.{
+                .severity = .@"error",
+                .line_no = line.line_no,
+                .col = if (line.tokens.len > 0) diag.tokenColumn(line.tokens[0], line.raw) else null,
+                .message = message,
+                .actual = @errorName(err),
+                .source_line = line.raw,
+            });
+            return true;
+        }
+        return false;
+    }
+
     /// Compute SourceLocation from a tokenized line and a token within it.
     fn locFromLine(line: tk.Line, tok: []const u8) SourceLocation {
         const col = diag.tokenColumn(tok, line.raw);
@@ -100,19 +117,8 @@ pub const Parser = struct {
                 .TypeDef => {
                     if (schema != null and line.tokens.len >= 3) {
                         const ct = self.parseTypeDef(line) catch |err| {
-                            if (self.diagnostics) |dc| {
-                                dc.record(.{
-                                    .severity = .@"error",
-                                    .line_no = line.line_no,
-                                    .col = if (line.tokens.len > 0) diag.tokenColumn(line.tokens[0], line.raw) else null,
-                                    .message = "failed to parse ~ (custom type) directive",
-                                    .actual = @errorName(err),
-                                    .source_line = line.raw,
-                                });
-                                continue;
-                            } else {
-                                return err;
-                            }
+                            if (!self.handleParseError(err, line, "failed to parse ~ (custom type) directive")) return err;
+                            continue;
                         };
                         try custom_types.append(self.alloc, ct);
                     }
@@ -130,20 +136,9 @@ pub const Parser = struct {
 
                     // Parse new template header
                     const tmpl = self.parseTemplate(line) catch |err| {
-                        if (self.diagnostics) |dc| {
-                            dc.record(.{
-                                .severity = .@"error",
-                                .line_no = line.line_no,
-                                .col = if (line.tokens.len > 0) diag.tokenColumn(line.tokens[0], line.raw) else null,
-                                .message = "failed to parse template declaration",
-                                .actual = @errorName(err),
-                                .source_line = line.raw,
-                            });
-                            in_block = .none;
-                            continue;
-                        } else {
-                            return err;
-                        }
+                        if (!self.handleParseError(err, line, "failed to parse template declaration")) return err;
+                        in_block = .none;
+                        continue;
                     };
                     cur_name = tmpl.name;
                     cur_parents_buf = try self.alloc.alloc([]const u8, 4);
@@ -204,20 +199,9 @@ pub const Parser = struct {
 
                     // Parse new table header
                     const hdr = self.parseTableHeader(stripped_line) catch |err| {
-                        if (self.diagnostics) |dc| {
-                            dc.record(.{
-                                .severity = .@"error",
-                                .line_no = line.line_no,
-                                .col = if (line.tokens.len > 0) diag.tokenColumn(line.tokens[0], line.raw) else null,
-                                .message = "failed to parse table declaration",
-                                .actual = @errorName(err),
-                                .source_line = line.raw,
-                            });
-                            in_block = .none;
-                            continue;
-                        } else {
-                            return err;
-                        }
+                        if (!self.handleParseError(err, line, "failed to parse table declaration")) return err;
+                        in_block = .none;
+                        continue;
                     };
                     cur_name = hdr.name;
                     cur_comment = hdr.comment;
@@ -232,18 +216,7 @@ pub const Parser = struct {
                 .Field => {
                     if (in_block != .none) {
                         const fld = parse_field.parseField(self.alloc, line) catch |err| {
-                            if (self.diagnostics) |dc| {
-                                dc.record(.{
-                                    .severity = .@"error",
-                                    .line_no = line.line_no,
-                                    .col = if (line.tokens.len > 0) diag.tokenColumn(line.tokens[0], line.raw) else null,
-                                    .message = "failed to parse field",
-                                    .actual = @errorName(err),
-                                    .source_line = line.raw,
-                                });
-                            } else {
-                                return err;
-                            }
+                            if (!self.handleParseError(err, line, "failed to parse field")) return err;
                             continue;
                         };
                         try cur_fields.append(self.alloc, fld);
@@ -267,18 +240,7 @@ pub const Parser = struct {
                 .FK => {
                     if (in_block == .table) {
                         const fk = parse_fk.parseFk(self.alloc, line) catch |err| {
-                            if (self.diagnostics) |dc| {
-                                dc.record(.{
-                                    .severity = .@"error",
-                                    .line_no = line.line_no,
-                                    .col = if (line.tokens.len > 0) diag.tokenColumn(line.tokens[0], line.raw) else null,
-                                    .message = "failed to parse foreign key",
-                                    .actual = @errorName(err),
-                                    .source_line = line.raw,
-                                });
-                            } else {
-                                return err;
-                            }
+                            if (!self.handleParseError(err, line, "failed to parse foreign key")) return err;
                             continue;
                         };
                         try cur_fks.append(self.alloc, fk);
@@ -295,18 +257,7 @@ pub const Parser = struct {
                 .Index => {
                     if (in_block == .table) {
                         const idx = parse_index.parseIndex(self.alloc, line) catch |err| {
-                            if (self.diagnostics) |dc| {
-                                dc.record(.{
-                                    .severity = .@"error",
-                                    .line_no = line.line_no,
-                                    .col = if (line.tokens.len > 0) diag.tokenColumn(line.tokens[0], line.raw) else null,
-                                    .message = "failed to parse index",
-                                    .actual = @errorName(err),
-                                    .source_line = line.raw,
-                                });
-                            } else {
-                                return err;
-                            }
+                            if (!self.handleParseError(err, line, "failed to parse index")) return err;
                             continue;
                         };
                         try cur_indexes.append(self.alloc, idx);
@@ -323,18 +274,7 @@ pub const Parser = struct {
                 .CompositePK => {
                     if (in_block == .table) {
                         const idx = parse_index.parseCompositePk(self.alloc, line) catch |err| {
-                            if (self.diagnostics) |dc| {
-                                dc.record(.{
-                                    .severity = .@"error",
-                                    .line_no = line.line_no,
-                                    .col = if (line.tokens.len > 0) diag.tokenColumn(line.tokens[0], line.raw) else null,
-                                    .message = "failed to parse composite primary key",
-                                    .actual = @errorName(err),
-                                    .source_line = line.raw,
-                                });
-                            } else {
-                                return err;
-                            }
+                            if (!self.handleParseError(err, line, "failed to parse composite primary key")) return err;
                             continue;
                         };
                         try cur_indexes.append(self.alloc, idx);

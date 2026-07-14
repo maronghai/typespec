@@ -103,11 +103,19 @@ pub const TypeResolver = struct {
     }
 
     pub fn resolveColumn(self: *TypeResolver, field: Field, dialect: Dialect, custom_types: []const ast_mod.CustomType) !TypedColumn {
+        return self.resolveColumnInner(field, dialect, custom_types, 0);
+    }
+
+    fn resolveColumnInner(self: *TypeResolver, field: Field, dialect: Dialect, custom_types: []const ast_mod.CustomType, depth: u8) !TypedColumn {
         // Check custom types first (multi-char names only)
         if (field.type_info == .simple and field.type_info.simple.len > 1) {
             if (type_map.lookupCustomType(custom_types, field.type_info.simple, dialect)) |ct_info| {
+                // Detect circular custom type references (e.g., ~A B + ~B A)
+                if (depth >= 32) {
+                    return error.CircularCustomType;
+                }
                 // Recursively resolve the custom type's base info
-                return self.resolveColumn(ast_mod.Field{
+                return self.resolveColumnInner(ast_mod.Field{
                     .name = field.name,
                     .type_info = ct_info,
                     .modifiers = field.modifiers,
@@ -116,7 +124,7 @@ pub const TypeResolver = struct {
                     .fk = field.fk,
                     .comment = field.comment,
                     .line_no = field.line_no,
-                }, dialect, custom_types);
+                }, dialect, custom_types, depth + 1);
             }
         }
         // Delegate type-to-SQL resolution to type_map (single source of truth)

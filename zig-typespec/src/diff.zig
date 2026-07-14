@@ -4,10 +4,12 @@ const ast_mod = @import("ast.zig");
 const diff_fields = @import("diff_fields.zig");
 const diff_indexes = @import("diff_indexes.zig");
 const diff_fks = @import("diff_fks.zig");
+const dialect_enum = @import("dialect_enum.zig");
 const Field = ast_mod.Field;
 const TypeInfo = ast_mod.TypeInfo;
 const IndexDecl = ast_mod.IndexDecl;
 const FkDecl = ast_mod.FkDecl;
+const Dialect = dialect_enum.Dialect;
 
 // ─── Re-export sub-module types ────────────────────────────
 
@@ -112,20 +114,29 @@ fn diffTable(alloc: std.mem.Allocator, old: sem.ResolvedTable, new: sem.Resolved
 
 // ─── Diff Printer (for `typespec diff` command) ────────────
 
-pub fn formatDiff(alloc: std.mem.Allocator, d: SchemaDiff) ![]const u8 {
+/// Return the identifier quote character for the given dialect.
+fn quoteChar(dialect: Dialect) u8 {
+    return switch (dialect) {
+        .mysql => '`',
+        .pg, .sqlite => '"',
+    };
+}
+
+pub fn formatDiff(alloc: std.mem.Allocator, d: SchemaDiff, dialect: Dialect) ![]const u8 {
     var aw = std.Io.Writer.Allocating.init(alloc);
     const w = &aw.writer;
+    const q = quoteChar(dialect);
 
     var has_changes = false;
 
     for (d.dropped_tables) |tname| {
-        try w.print("-- DROP TABLE `{s}`\n", .{tname});
+        try w.print("-- DROP TABLE {c}{s}{c}\n", .{ q, tname, q });
         has_changes = true;
     }
 
     for (d.table_diffs) |td| {
         if (td.action == .create) {
-            try w.print("-- CREATE TABLE `{s}`\n", .{td.name});
+            try w.print("-- CREATE TABLE {c}{s}{c}\n", .{ q, td.name, q });
             has_changes = true;
             for (td.field_diffs) |fd| {
                 try w.print("  + {s}\n", .{fd.name});
@@ -145,7 +156,7 @@ pub fn formatDiff(alloc: std.mem.Allocator, d: SchemaDiff) ![]const u8 {
         var table_has_changes = false;
         for (td.field_diffs) |fd| {
             if (!table_has_changes) {
-                try w.print("-- ALTER TABLE `{s}`\n", .{td.name});
+                try w.print("-- ALTER TABLE {c}{s}{c}\n", .{ q, td.name, q });
                 table_has_changes = true;
             }
             switch (fd.action) {
@@ -157,7 +168,7 @@ pub fn formatDiff(alloc: std.mem.Allocator, d: SchemaDiff) ![]const u8 {
         }
         for (td.index_diffs) |idx| {
             if (!table_has_changes) {
-                try w.print("-- ALTER TABLE `{s}`\n", .{td.name});
+                try w.print("-- ALTER TABLE {c}{s}{c}\n", .{ q, td.name, q });
                 table_has_changes = true;
             }
             switch (idx.action) {
@@ -168,7 +179,7 @@ pub fn formatDiff(alloc: std.mem.Allocator, d: SchemaDiff) ![]const u8 {
         }
         for (td.fk_diffs) |fk| {
             if (!table_has_changes) {
-                try w.print("-- ALTER TABLE `{s}`\n", .{td.name});
+                try w.print("-- ALTER TABLE {c}{s}{c}\n", .{ q, td.name, q });
                 table_has_changes = true;
             }
             switch (fk.action) {
@@ -196,17 +207,18 @@ pub fn formatDiff(alloc: std.mem.Allocator, d: SchemaDiff) ![]const u8 {
     return try out.toOwnedSlice(alloc);
 }
 
-pub fn printDiff(d: SchemaDiff) void {
+pub fn printDiff(d: SchemaDiff, dialect: Dialect) void {
     var has_changes = false;
+    const q = quoteChar(dialect);
 
     for (d.dropped_tables) |tname| {
-        std.debug.print("-- DROP TABLE `{s}`\n", .{tname});
+        std.debug.print("-- DROP TABLE {c}{s}{c}\n", .{ q, tname, q });
         has_changes = true;
     }
 
     for (d.table_diffs) |td| {
         if (td.action == .create) {
-            std.debug.print("-- CREATE TABLE `{s}`\n", .{td.name});
+            std.debug.print("-- CREATE TABLE {c}{s}{c}\n", .{ q, td.name, q });
             has_changes = true;
             for (td.field_diffs) |fd| {
                 std.debug.print("  + {s}\n", .{fd.name});
@@ -225,7 +237,7 @@ pub fn printDiff(d: SchemaDiff) void {
         var table_has_changes = false;
         for (td.field_diffs) |fd| {
             if (!table_has_changes) {
-                std.debug.print("-- ALTER TABLE `{s}`\n", .{td.name});
+                std.debug.print("-- ALTER TABLE {c}{s}{c}\n", .{ q, td.name, q });
                 table_has_changes = true;
             }
             switch (fd.action) {
@@ -237,7 +249,7 @@ pub fn printDiff(d: SchemaDiff) void {
         }
         for (td.index_diffs) |idx| {
             if (!table_has_changes) {
-                std.debug.print("-- ALTER TABLE `{s}`\n", .{td.name});
+                std.debug.print("-- ALTER TABLE {c}{s}{c}\n", .{ q, td.name, q });
                 table_has_changes = true;
             }
             switch (idx.action) {
@@ -248,7 +260,7 @@ pub fn printDiff(d: SchemaDiff) void {
         }
         for (td.fk_diffs) |fk| {
             if (!table_has_changes) {
-                std.debug.print("-- ALTER TABLE `{s}`\n", .{td.name});
+                std.debug.print("-- ALTER TABLE {c}{s}{c}\n", .{ q, td.name, q });
                 table_has_changes = true;
             }
             switch (fk.action) {
