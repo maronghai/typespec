@@ -10,10 +10,17 @@ source "$(cd "$(dirname "$0")" && pwd)/lib.sh"
 FILTER="${1:-}"
 
 # Test schemas: .tps files that roundtrip cleanly
+# NOTE: 20-index-types / 39-index-autoname excluded — MySQL FULLTEXT index name
+# double-prefixes on roundtrip (ft_content → ft_ft_content).
+# 81-inline-index excluded for PG/SQLite — auto-named index loses table prefix
+# (idx_user_name → idx_name) due to reversecodegen stripping.
 ROUNDTRIP_TESTS=(
   "01-schema-only"
   "14-fk-full"
   "10-template-basic"
+  "21-index-composite"
+  "65-inline-unique"
+  "75-composite-index-auto"
 )
 
 for test_name in "${ROUNDTRIP_TESTS[@]}"; do
