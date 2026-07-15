@@ -116,6 +116,10 @@ Input (SQL DDL text)
 [2] Reverse Codegen (reverse_codegen.zig, 706 lines)
     SQL types → TPS symbols (via type_map.zig reverse lookup)
     Template extraction (greedy + scoring algorithm)
+    Index inline detection: recognizes both MySQL-style "idx_field" and
+    PG/SQLite-style "idx_table_field" as inline index suffixes (@, @u).
+    Non-standard index names preserved in full form: @ idx_name (field).
+    Confidence comments suppressed on fields with inline index suffixes.
     Output: .tps text
 ```
 

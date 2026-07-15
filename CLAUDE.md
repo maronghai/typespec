@@ -81,7 +81,7 @@ Run a single golden test by filter: `bash tests/test.sh 01` (matches test name s
 | `parse_check.zig` | CHECK constraint classification |
 | `parse_index.zig` | Index + composite PK parsing |
 | `codegen.zig` | TypedAst → SQL DDL text (delegates to dialect backend) |
-| `reverse_codegen.zig` | SQL → `.tps` + greedy template extraction algorithm |
+| `reverse_codegen.zig` | SQL → `.tps` + template extraction + index inline detection (MySQL `idx_field` / PG `idx_table_field`) |
 | `semantic.zig` | Pass manager + template resolution orchestration |
 | `dialect.zig` | DialectBackend vtable implementations for MySQL/PG/SQLite |
 | `main.zig` | CLI entry point, argument parsing, command dispatch, shared pipeline |

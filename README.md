@@ -502,12 +502,17 @@ This ensures `typespec -d sqlite schema.tps | typespec reverse -d sqlite` produc
 | AUTO_INCREMENT / GENERATED AS IDENTITY | ✅ |
 | NOT NULL / DEFAULT values | ✅ |
 | UNIQUE INDEX / INDEX / FULLTEXT INDEX | ✅ |
+| Inline index suffixes (`@`, `@u`) with table-prefixed names | ✅ |
 | FOREIGN KEY with ON DELETE/UPDATE actions | ✅ |
 | CHECK constraints (range, IN list, comparison) | ✅ |
 | MySQL COMMENT / PG COMMENT ON / SQLite comments | ✅ |
 | ENUM types | ✅ |
 | Template extraction (`-t` flag) | ✅ |
 | Score-based template ranking (cross-table coverage) | ✅ |
+
+**Index roundtrip**: Single-field indexes are detected as inline suffixes (`@` / `@u`) when the SQL index name follows the `idx_<field>` or `uk_<field>` convention — including PG/SQLite table-prefixed variants like `idx_<table>_<field>`. Non-standard index names (e.g., `idx_user` for field `user_id`) are emitted in full form: `@ idx_user (user_id)`.
+
+**Confidence comments**: SQLite reverse may assign low confidence to ambiguous types (e.g., `TEXT`). These `-- [LOW]` comments are suppressed on fields that already carry an inline index suffix, keeping the output clean.
 
 **Template extraction** (`-t`): Automatically discovers shared field sequences across tables and extracts them as reusable templates. Uses a scoring algorithm that favors templates covering many fields across many tables.
 
