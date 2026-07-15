@@ -13,12 +13,13 @@ const Dialect = sp.Dialect;
 pub const TypeResult = struct {
     tps: []const u8,
     omit: bool,
-    confidence: reverse_map.Confidence = .high,
+    /// Confidence score 0-100. Higher = more certain.
+    score: u8 = 100,
 };
 
 pub fn reverseType(sql_type: []const u8, col_name: []const u8, is_auto_inc: bool, is_default_ts: bool, dialect: Dialect) TypeResult {
     const r = reverse_map.reverseLookup(sql_type, col_name, is_auto_inc, is_default_ts, dialect);
-    return .{ .tps = r.tps, .omit = r.omit, .confidence = r.confidence };
+    return .{ .tps = r.tps, .omit = r.omit, .score = r.score };
 }
 
 pub fn isDatetime(sql_type: []const u8) bool {
@@ -52,7 +53,7 @@ fn writeColumnType(w: anytype, col: sp.SqlColumn, dialect: Dialect) !TypeResult 
     const is_ai = col.auto_increment;
     const is_ts = if (col.default_val) |dv| isCurrentTimestamp(dv) else false;
     const tr: TypeResult = if (col.tps_override) |tps|
-        .{ .tps = tps, .omit = false, .confidence = .high }
+        .{ .tps = tps, .omit = false, .score = 100 }
     else
         reverseType(col.type_sql, col.name, is_ai, is_ts, dialect);
     if (!tr.omit) {
@@ -163,17 +164,14 @@ fn writeColumnComment(w: anytype, col: sp.SqlColumn) !void {
     }
 }
 
-/// Write confidence comment (dialect-specific, only when not high).
+/// Write confidence comment (dialect-specific, only when score < 80).
 fn writeColumnConfidence(w: anytype, col: sp.SqlColumn, tr: TypeResult, dialect: Dialect) !void {
-    if (tr.confidence != .high) {
+    if (tr.score < 80) {
         if (col.comment == null or (col.comment != null and (col.comment.?.len == 0))) {
-            const conf_str: []const u8 = switch (tr.confidence) {
-                .high => unreachable,
-                .medium => "MEDIUM",
-                .low => "LOW",
-            };
+            var buf: [8]u8 = undefined;
+            const score_str = std.fmt.bufPrint(&buf, "score:{d}", .{tr.score}) catch "score:?";
             const backend = dialect_mod.getBackend(dialect);
-            try backend.emitConfidenceComment(w, conf_str);
+            try backend.emitConfidenceComment(w, score_str);
         }
     }
 }

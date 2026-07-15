@@ -94,6 +94,23 @@ pub fn lookupHint(name: []const u8) ?SqlHintType {
     return null;
 }
 
+/// Score a column name against SQLite hint rules.
+/// Returns the hint type and a confidence score (0-100).
+/// Higher score = more certain match. Exact matches score higher than prefix/suffix.
+pub fn scoreColumnName(name: []const u8) ?struct { hint: SqlHintType, score: u8 } {
+    for (&COLUMN_RULES) |rule| {
+        if (matchRule(name, rule)) {
+            const score: u8 = switch (rule.kind) {
+                .exact => 90,
+                .prefix => 85,
+                .suffix => 85,
+            };
+            return .{ .hint = rule.hint, .score = score };
+        }
+    }
+    return null;
+}
+
 /// Boolean column name patterns (delegates to lookup table).
 pub fn isBooleanColumnName(name: []const u8) bool {
     return lookupHint(name) == .boolean;
@@ -182,4 +199,19 @@ test "hints: current timestamp" {
     try testing.expect(isCurrentTimestamp("now()"));
     try testing.expect(!isCurrentTimestamp("2024-01-01"));
     try testing.expect(!isCurrentTimestamp("NULL"));
+}
+
+test "scoreColumnName: exact match scores higher than prefix" {
+    const exact = scoreColumnName("is_active").?;
+    try testing.expectEqual(SqlHintType.boolean, exact.hint);
+    try testing.expect(exact.score >= 90);
+
+    const prefix = scoreColumnName("is_verified").?;
+    try testing.expectEqual(SqlHintType.boolean, prefix.hint);
+    try testing.expect(prefix.score >= 85);
+    try testing.expect(prefix.score < exact.score);
+}
+
+test "scoreColumnName: unknown column returns null" {
+    try testing.expect(scoreColumnName("some_random_col") == null);
 }
