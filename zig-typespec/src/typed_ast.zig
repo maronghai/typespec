@@ -199,6 +199,48 @@ pub const SqlType = union(enum) {
         }
     }
 
+    /// Render this SqlType to a JSON Schema type object (dialect-agnostic).
+    pub fn toJsonSchema(self: SqlType, w: *Writer) !void {
+        switch (self) {
+            .int, .bigint => try w.writeAll("{\"type\":\"integer\"}"),
+            .decimal => |ds| {
+                // multipleOf = 10^(-scale), e.g. scale=2 → 0.01
+                var multiple_of: f64 = 1.0;
+                var i: usize = 0;
+                while (i < ds.scale) : (i += 1) {
+                    multiple_of /= 10.0;
+                }
+                if (ds.scale == 0) {
+                    try w.writeAll("{\"type\":\"integer\"}");
+                } else {
+                    try w.print("{{\"type\":\"number\",\"multipleOf\":{d}}}", .{multiple_of});
+                }
+            },
+            .varchar => |n| {
+                if (n > 0) {
+                    try w.print("{{\"type\":\"string\",\"maxLength\":{d}}}", .{n});
+                } else {
+                    try w.writeAll("{\"type\":\"string\"}");
+                }
+            },
+            .text => try w.writeAll("{\"type\":\"string\"}"),
+            .blob => try w.writeAll("{\"type\":\"string\",\"contentEncoding\":\"base64\"}"),
+            .json => try w.writeAll("{\"type\":\"object\"}"),
+            .datetime => try w.writeAll("{\"type\":\"string\",\"format\":\"date-time\"}"),
+            .date => try w.writeAll("{\"type\":\"string\",\"format\":\"date\"}"),
+            .boolean => try w.writeAll("{\"type\":\"boolean\"}"),
+            .enum_values => |vals| {
+                try w.writeAll("{\"type\":\"string\",\"enum\":[");
+                for (vals, 0..) |v, vi| {
+                    if (vi > 0) try w.writeAll(",");
+                    try w.print("\"{s}\"", .{v});
+                }
+                try w.writeAll("]}");
+            },
+            .raw_sql, .passthrough => try w.writeAll("{\"type\":\"string\"}"),
+        }
+    }
+
     /// Build a SqlType from a TypeInfo + dialect (resolves single-char TPS symbols).
     pub fn fromTypeInfo(type_info: TypeInfo, dialect: Dialect) SqlType {
         return switch (type_info) {

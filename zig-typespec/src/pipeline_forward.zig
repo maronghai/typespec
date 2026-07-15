@@ -5,8 +5,10 @@ const ast_mod = @import("ast.zig");
 const semantic = @import("semantic.zig");
 const codegen = @import("codegen.zig");
 const typed_ast = @import("typed_ast.zig");
+const json_schema = @import("json_schema.zig");
 const diag = @import("diagnostic.zig");
 const io_mod = @import("io.zig");
+const cli = @import("cli.zig");
 
 // ─── Forward Pipeline: .tps → SQL ─────────────────────────────
 
@@ -66,7 +68,7 @@ pub fn compileToAst(io: std.Io, alloc: std.mem.Allocator, path: []const u8) !ast
     return pipeline.resolved;
 }
 
-pub fn handleCompile(io: std.Io, alloc: std.mem.Allocator, file_data: []const u8, input_name: []const u8, output_path: ?[]const u8, trace: bool, dialect: codegen.Dialect) !void {
+pub fn handleCompile(io: std.Io, alloc: std.mem.Allocator, file_data: []const u8, input_name: []const u8, output_path: ?[]const u8, trace: bool, dialect: codegen.Dialect, target: cli.Target) !void {
     _ = input_name;
 
     const pipeline = try compilePipeline(io, alloc, file_data);
@@ -74,15 +76,22 @@ pub fn handleCompile(io: std.Io, alloc: std.mem.Allocator, file_data: []const u8
     var tr = typed_ast.TypeResolver.init(alloc);
     const typed = try tr.resolve(pipeline.resolved, dialect);
 
-    var cg = codegen.Codegen.init(alloc, dialect);
-    const sql = try cg.generateFromTypedAst(typed);
+    const output = switch (target) {
+        .json_schema => try json_schema.generate(alloc, typed),
+        .sql => blk: {
+            var cg = codegen.Codegen.init(alloc, dialect);
+            break :blk try cg.generateFromTypedAst(typed);
+        },
+    };
 
     if (trace) {
         tokenizer.Tokenizer.diagnosticTrace(pipeline.lines);
         parser.diagnosticTrace(pipeline.tree);
         semantic.diagnosticTrace(pipeline.resolved);
-        codegen.diagnosticTrace(sql);
+        if (target == .sql) {
+            codegen.diagnosticTrace(output);
+        }
     }
 
-    try io_mod.writeOutput(io, sql, output_path);
+    try io_mod.writeOutput(io, output, output_path);
 }
