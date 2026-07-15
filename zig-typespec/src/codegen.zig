@@ -1,6 +1,5 @@
 const std = @import("std");
 const ast_mod = @import("ast.zig");
-const type_map = @import("type_map.zig");
 const dialect_mod = @import("dialect.zig");
 const dialect_enum = @import("dialect_enum.zig");
 const typed_ast_mod = @import("typed_ast.zig");

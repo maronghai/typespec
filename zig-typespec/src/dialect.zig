@@ -1,6 +1,5 @@
 const std = @import("std");
 const ast_mod = @import("ast.zig");
-const type_map = @import("type_map.zig");
 const dialect_enum = @import("dialect_enum.zig");
 const Writer = std.Io.Writer;
 const IndexDecl = ast_mod.IndexDecl;
@@ -10,12 +9,19 @@ const Dialect = dialect_enum.Dialect;
 // ─── DialectBackend: vtable for dialect-specific SQL generation ─
 //
 // Adding a new dialect requires only:
-//   1. Add a new enum variant to Dialect (in type_map.zig)
+//   1. Add a new enum variant to Dialect (in dialect_enum.zig)
 //   2. Create a new DialectBackend instance below
 //   3. Register it in the getBackend() switch
 //
 // All dialect-specific rendering goes through this vtable.
 // codegen.zig is fully dialect-agnostic.
+
+/// Result of emitAlterTableComment — tells the caller how to update state.
+pub const CommentResult = enum {
+    added_to_alter, // MySQL: comment emitted inline in ALTER TABLE
+    standalone_emitted, // PG: standalone COMMENT ON TABLE emitted; caller should close ALTER
+    unsupported, // SQLite: warning comment emitted; no state change needed
+};
 
 pub const DialectBackend = struct {
     // ── Original 5 methods ──
@@ -38,24 +44,25 @@ pub const DialectBackend = struct {
     // ── P0: dialect-specific metadata comments ──
     emitTpsTypeMetadata: *const fn (w: *Writer, col_name: []const u8, tps_type: []const u8) anyerror!void,
     emitConfidenceComment: *const fn (w: *Writer, confidence: []const u8) anyerror!void,
-    // ── P0: ALTER TABLE migration methods ──
+    // ── P0: ALTER TABLE migration methods (unified, no switch needed) ──
     emitAlterDropColumn: *const fn (w: *Writer, col_name: []const u8) anyerror!void,
     emitAlterModifyColumn: *const fn (w: *Writer, col_name: []const u8) anyerror!void,
-    emitAlterRenameColumnMySQL: *const fn (w: *Writer) anyerror!void,
-    emitAlterRenameColumnPG: *const fn (w: *Writer, old_name: []const u8, new_name: []const u8) anyerror!void,
-    emitAlterTableCommentMySQL: *const fn (w: *Writer, comment: []const u8) anyerror!void,
-    emitAlterTableCommentPG: *const fn (w: *Writer, table_name: []const u8, comment: []const u8) anyerror!void,
-    emitAlterTableCommentSQLite: *const fn (w: *Writer) anyerror!void,
-    emitAlterEngineMySQL: *const fn (w: *Writer, engine: []const u8) anyerror!void,
-    emitAlterEngineWarning: *const fn (w: *Writer) anyerror!void,
-    emitAlterDropFkMySQL: *const fn (w: *Writer, fk: ast_mod.FkDecl) anyerror!void,
-    emitAlterDropFkPG: *const fn (w: *Writer, fk: ast_mod.FkDecl) anyerror!void,
-    emitAlterDropFkSQLite: *const fn (w: *Writer, fk: ast_mod.FkDecl) anyerror!void,
-    emitAlterAddIndexMySQL: *const fn (w: *Writer, table_name: []const u8, idx: IndexDecl) anyerror!void,
-    emitAlterAddIndexPG: *const fn (w: *Writer, table_name: []const u8, idx: IndexDecl) anyerror!void,
-    emitAlterAddIndexSQLite: *const fn (w: *Writer, table_name: []const u8, idx: IndexDecl) anyerror!void,
-    emitAlterDropIndexMySQL: *const fn (w: *Writer, idx: IndexDecl) anyerror!void,
-    emitAlterDropIndexPG: *const fn (w: *Writer, idx: IndexDecl) anyerror!void,
+    emitAlterRenameColumn: *const fn (w: *Writer, old_name: []const u8, new_name: []const u8) anyerror!void,
+    emitAlterAddIndex: *const fn (w: *Writer, table_name: []const u8, idx: IndexDecl) anyerror!void,
+    emitAlterDropIndex: *const fn (w: *Writer, idx: IndexDecl) anyerror!void,
+    emitAlterDropFk: *const fn (w: *Writer, fk: ast_mod.FkDecl) anyerror!void,
+    /// Returns the comment operation type without emitting (for state setup).
+    commentResult: *const fn () CommentResult,
+    /// Emits the comment SQL. Caller must set up ALTER TABLE state first for inline comments.
+    emitAlterTableComment: *const fn (w: *Writer, table_name: []const u8, comment: []const u8) anyerror!void,
+    emitAlterEngine: *const fn (w: *Writer, engine: ?[]const u8) anyerror!void,
+    // ── P0: ALTER behavioral flags (eliminate dialect checks in caller) ──
+    /// MySQL CHANGE COLUMN requires the full column definition after the rename.
+    rename_needs_column_def: bool,
+    /// MODIFY COLUMN: MySQL/PG need column def, SQLite just emits a warning.
+    modify_needs_column_def: bool,
+    /// PG ALTER COLUMN TYPE skips the column name (it's in the ALTER prefix).
+    modify_column_def_skips_name: bool,
 };
 
 pub fn getBackend(dialect: Dialect) DialectBackend {
@@ -176,54 +183,47 @@ fn mysqlEmitAlterModifyColumn(w: *Writer, _: []const u8) anyerror!void {
     try w.writeAll("MODIFY COLUMN ");
 }
 
-fn mysqlEmitAlterRenameColumnMySQL(w: *Writer) anyerror!void {
+// ─── Unified MySQL ALTER methods ──────────────────────────
+
+fn mysqlEmitAlterRenameColumn(w: *Writer, old_name: []const u8, _: []const u8) anyerror!void {
     try w.writeAll("CHANGE COLUMN ");
-}
-
-fn mysqlEmitAlterTableComment(w: *Writer, comment: []const u8) anyerror!void {
-    try w.print("COMMENT='{s}'", .{comment});
-}
-
-fn mysqlEmitAlterEngine(w: *Writer, engine: []const u8) anyerror!void {
-    try w.print("ENGINE={s}", .{engine});
-}
-
-fn mysqlEmitAlterDropFk(w: *Writer, fk: ast_mod.FkDecl) anyerror!void {
-    try w.writeAll("DROP FOREIGN KEY fk_");
-    for (fk.fields) |f| {
-        try w.writeAll(f);
-    }
+    try w.print("`{s}`", .{old_name});
 }
 
 fn mysqlEmitAlterAddIndex(w: *Writer, _: []const u8, idx: IndexDecl) anyerror!void {
     switch (idx.kind) {
         .regular => {
             try w.print("ADD INDEX `{s}` (", .{idx.name});
-            try emitMysqlIndexFields(w, idx);
+            for (idx.fields, 0..) |f, fi| {
+                if (fi > 0) try w.writeAll(", ");
+                try w.print("`{s}`", .{f});
+            }
             try w.writeAll(")");
         },
         .unique => {
             try w.print("ADD UNIQUE INDEX `{s}` (", .{idx.name});
-            try emitMysqlIndexFields(w, idx);
+            for (idx.fields, 0..) |f, fi| {
+                if (fi > 0) try w.writeAll(", ");
+                try w.print("`{s}`", .{f});
+            }
             try w.writeAll(")");
         },
         .fulltext => {
             try w.print("ADD FULLTEXT INDEX `{s}` (", .{idx.name});
-            try emitMysqlIndexFields(w, idx);
+            for (idx.fields, 0..) |f, fi| {
+                if (fi > 0) try w.writeAll(", ");
+                try w.print("`{s}`", .{f});
+            }
             try w.writeAll(")");
         },
         .primary_key => {
             try w.writeAll("ADD PRIMARY KEY (");
-            try emitMysqlIndexFields(w, idx);
+            for (idx.fields, 0..) |f, fi| {
+                if (fi > 0) try w.writeAll(", ");
+                try w.print("`{s}`", .{f});
+            }
             try w.writeAll(")");
         },
-    }
-}
-
-fn emitMysqlIndexFields(w: *Writer, idx: IndexDecl) !void {
-    for (idx.fields, 0..) |f, fi| {
-        if (fi > 0) try w.writeAll(", ");
-        try w.print("`{s}`", .{f});
     }
 }
 
@@ -234,17 +234,24 @@ fn mysqlEmitAlterDropIndex(w: *Writer, idx: IndexDecl) anyerror!void {
     }
 }
 
-// ─── MySQL noops for PG/SQLite-only methods ────────────────
+fn mysqlEmitAlterDropFk(w: *Writer, fk: ast_mod.FkDecl) anyerror!void {
+    try w.writeAll("DROP FOREIGN KEY fk_");
+    for (fk.fields) |f| {
+        try w.writeAll(f);
+    }
+}
 
-fn mysqlNoopRenameColumnPG(_: *Writer, _: []const u8, _: []const u8) anyerror!void {}
-fn mysqlNoopAlterTableCommentPG(_: *Writer, _: []const u8, _: []const u8) anyerror!void {}
-fn mysqlNoopAlterTableCommentSQLite(_: *Writer) anyerror!void {}
-fn mysqlNoopAlterEngineWarning(_: *Writer) anyerror!void {}
-fn mysqlNoopAlterDropFkPG(_: *Writer, _: ast_mod.FkDecl) anyerror!void {}
-fn mysqlNoopAlterDropFkSQLite(_: *Writer, _: ast_mod.FkDecl) anyerror!void {}
-fn mysqlNoopAlterAddIndexPG(_: *Writer, _: []const u8, _: IndexDecl) anyerror!void {}
-fn mysqlNoopAlterAddIndexSQLite(_: *Writer, _: []const u8, _: IndexDecl) anyerror!void {}
-fn mysqlNoopAlterDropIndexPG(_: *Writer, _: IndexDecl) anyerror!void {}
+fn mysqlEmitAlterTableComment(w: *Writer, _: []const u8, comment: []const u8) anyerror!void {
+    try w.print("COMMENT='{s}'", .{comment});
+}
+
+fn mysqlCommentResult() CommentResult {
+    return .added_to_alter;
+}
+
+fn mysqlEmitAlterEngine(w: *Writer, engine: ?[]const u8) anyerror!void {
+    try w.print("ENGINE={s}", .{engine orelse "InnoDB"});
+}
 
 const mysql_backend = DialectBackend{
     .quoteIdent = mysqlQuoteIdent,
@@ -266,21 +273,16 @@ const mysql_backend = DialectBackend{
     .emitConfidenceComment = mysqlNoopConfidenceComment,
     .emitAlterDropColumn = mysqlEmitAlterDropColumn,
     .emitAlterModifyColumn = mysqlEmitAlterModifyColumn,
-    .emitAlterRenameColumnMySQL = mysqlEmitAlterRenameColumnMySQL,
-    .emitAlterRenameColumnPG = mysqlNoopRenameColumnPG,
-    .emitAlterTableCommentMySQL = mysqlEmitAlterTableComment,
-    .emitAlterTableCommentPG = mysqlNoopAlterTableCommentPG,
-    .emitAlterTableCommentSQLite = mysqlNoopAlterTableCommentSQLite,
-    .emitAlterEngineMySQL = mysqlEmitAlterEngine,
-    .emitAlterEngineWarning = mysqlNoopAlterEngineWarning,
-    .emitAlterDropFkMySQL = mysqlEmitAlterDropFk,
-    .emitAlterDropFkPG = mysqlNoopAlterDropFkPG,
-    .emitAlterDropFkSQLite = mysqlNoopAlterDropFkSQLite,
-    .emitAlterAddIndexMySQL = mysqlEmitAlterAddIndex,
-    .emitAlterAddIndexPG = mysqlNoopAlterAddIndexPG,
-    .emitAlterAddIndexSQLite = mysqlNoopAlterAddIndexSQLite,
-    .emitAlterDropIndexMySQL = mysqlEmitAlterDropIndex,
-    .emitAlterDropIndexPG = mysqlNoopAlterDropIndexPG,
+    .emitAlterRenameColumn = mysqlEmitAlterRenameColumn,
+    .emitAlterAddIndex = mysqlEmitAlterAddIndex,
+    .emitAlterDropIndex = mysqlEmitAlterDropIndex,
+    .emitAlterDropFk = mysqlEmitAlterDropFk,
+    .commentResult = mysqlCommentResult,
+    .emitAlterTableComment = mysqlEmitAlterTableComment,
+    .emitAlterEngine = mysqlEmitAlterEngine,
+    .rename_needs_column_def = true,
+    .modify_needs_column_def = true,
+    .modify_column_def_skips_name = false,
 };
 
 // ─── Shared PG/SQLite Backend ──────────────────────────────────
@@ -425,7 +427,7 @@ fn pgEmitCreateDatabase(w: *Writer, name: []const u8, charset: ?[]const u8) anye
     }
 }
 
-// ─── PG/SQLite ALTER TABLE migration methods ────────────────
+// ─── Unified PG/SQLite ALTER methods ─────────────────────
 
 fn pgSqliteEmitAlterDropColumn(w: *Writer, col_name: []const u8) anyerror!void {
     try w.writeAll("DROP COLUMN \"");
@@ -445,28 +447,18 @@ fn pgSqliteEmitAlterRenameColumn(w: *Writer, old_name: []const u8, new_name: []c
     try w.print("RENAME COLUMN \"{s}\" TO \"{s}\"", .{ old_name, new_name });
 }
 
-fn pgEmitAlterTableComment(w: *Writer, table_name: []const u8, comment: []const u8) anyerror!void {
-    try w.print("COMMENT ON TABLE \"{s}\" IS '{s}';\n", .{ table_name, comment });
-}
-
-fn sqliteEmitAlterTableComment(w: *Writer) anyerror!void {
-    try w.writeAll("-- NOTE: Comment change not supported via ALTER TABLE in SQLite\n");
-}
-
-fn pgSqliteEmitAlterEngineWarning(w: *Writer) anyerror!void {
-    try w.writeAll("-- NOTE: ENGINE change is MySQL-only, ignored for this dialect\n");
-}
-
-fn pgEmitAlterDropFk(w: *Writer, fk: ast_mod.FkDecl) anyerror!void {
-    try w.writeAll("DROP CONSTRAINT \"fk_");
-    for (fk.fields) |f| {
-        try w.writeAll(f);
+fn pgSqliteEmitAlterDropIndex(w: *Writer, idx: IndexDecl) anyerror!void {
+    switch (idx.kind) {
+        .primary_key => try w.writeAll("DROP PRIMARY KEY"),
+        else => try w.print("DROP INDEX IF EXISTS \"{s}\"", .{idx.name}),
     }
-    try w.writeAll("\"");
 }
 
-fn sqliteEmitAlterDropFk(w: *Writer, _: ast_mod.FkDecl) anyerror!void {
-    try w.writeAll("-- WARNING: DROP FOREIGN KEY not supported via ALTER TABLE in SQLite\n");
+fn emitPgIndexFields(w: *Writer, idx: IndexDecl) !void {
+    for (idx.fields, 0..) |f, fi| {
+        if (fi > 0) try w.writeAll(", ");
+        try w.print("\"{s}\"", .{f});
+    }
 }
 
 fn pgEmitAlterAddIndex(w: *Writer, _: []const u8, idx: IndexDecl) anyerror!void {
@@ -484,13 +476,6 @@ fn pgEmitAlterAddIndex(w: *Writer, _: []const u8, idx: IndexDecl) anyerror!void 
         else => {
             try w.print("-- NOTE: CREATE INDEX needed for '{s}' (not supported via ALTER TABLE in PG)\n", .{idx.name});
         },
-    }
-}
-
-fn emitPgIndexFields(w: *Writer, idx: IndexDecl) !void {
-    for (idx.fields, 0..) |f, fi| {
-        if (fi > 0) try w.writeAll(", ");
-        try w.print("\"{s}\"", .{f});
     }
 }
 
@@ -516,34 +501,41 @@ fn sqliteEmitAlterAddIndex(w: *Writer, table_name: []const u8, idx: IndexDecl) a
     }
 }
 
-fn pgSqliteEmitAlterDropIndex(w: *Writer, idx: IndexDecl) anyerror!void {
-    switch (idx.kind) {
-        .primary_key => try w.writeAll("DROP PRIMARY KEY"),
-        else => try w.print("DROP INDEX IF EXISTS \"{s}\"", .{idx.name}),
+fn pgEmitAlterDropFk(w: *Writer, fk: ast_mod.FkDecl) anyerror!void {
+    try w.writeAll("DROP CONSTRAINT \"fk_");
+    for (fk.fields) |f| {
+        try w.writeAll(f);
     }
+    try w.writeAll("\"");
 }
 
-// ─── PG noops for MySQL-only methods ───────────────────────
+fn sqliteEmitAlterDropFk(w: *Writer, _: ast_mod.FkDecl) anyerror!void {
+    try w.writeAll("-- WARNING: DROP FOREIGN KEY not supported via ALTER TABLE in SQLite\n");
+}
 
-fn pgNoopAlterRenameColumnMySQL(_: *Writer) anyerror!void {}
-fn pgNoopAlterTableCommentMySQL(_: *Writer, _: []const u8) anyerror!void {}
-fn pgNoopAlterEngineMySQL(_: *Writer, _: []const u8) anyerror!void {}
-fn pgNoopAlterDropFkMySQL(_: *Writer, _: ast_mod.FkDecl) anyerror!void {}
-fn pgNoopAlterAddIndexMySQL(_: *Writer, _: []const u8, _: IndexDecl) anyerror!void {}
-fn pgNoopAlterDropIndexMySQL(_: *Writer, _: IndexDecl) anyerror!void {}
+fn pgEmitAlterTableComment(w: *Writer, table_name: []const u8, comment: []const u8) anyerror!void {
+    try w.print("COMMENT ON TABLE \"{s}\" IS '{s}';\n\n", .{ table_name, comment });
+}
 
-// ─── SQLite noops for PG-only methods ──────────────────────
+fn pgCommentResult() CommentResult {
+    return .standalone_emitted;
+}
+
+fn sqliteEmitAlterTableComment(w: *Writer, _: []const u8, _: []const u8) anyerror!void {
+    try w.writeAll("-- NOTE: Comment change not supported via ALTER TABLE in SQLite\n");
+}
+
+fn sqliteCommentResult() CommentResult {
+    return .unsupported;
+}
+
+fn pgSqliteEmitAlterEngineWarning(w: *Writer, _: ?[]const u8) anyerror!void {
+    try w.writeAll("-- NOTE: ENGINE change is MySQL-only, ignored for this dialect\n");
+}
 
 fn sqliteNoopAlterDropColumn(w: *Writer, _: []const u8) anyerror!void {
     try w.writeAll("-- WARNING: DROP COLUMN not supported in SQLite < 3.35; requires table recreation\n");
 }
-
-fn sqliteNoopAlterRenameColumnMySQL(_: *Writer) anyerror!void {}
-fn sqliteNoopAlterTableCommentMySQL(_: *Writer, _: []const u8) anyerror!void {}
-fn sqliteNoopAlterEngineMySQL(_: *Writer, _: []const u8) anyerror!void {}
-fn sqliteNoopAlterDropFkMySQL(_: *Writer, _: ast_mod.FkDecl) anyerror!void {}
-fn sqliteNoopAlterAddIndexMySQL(_: *Writer, _: []const u8, _: IndexDecl) anyerror!void {}
-fn sqliteNoopAlterDropIndexMySQL(_: *Writer, _: IndexDecl) anyerror!void {}
 
 const pg_backend = DialectBackend{
     .quoteIdent = pgSqliteQuoteIdent,
@@ -565,21 +557,16 @@ const pg_backend = DialectBackend{
     .emitConfidenceComment = pgNoopConfidenceComment,
     .emitAlterDropColumn = pgSqliteEmitAlterDropColumn,
     .emitAlterModifyColumn = pgEmitAlterModifyColumn,
-    .emitAlterRenameColumnMySQL = pgNoopAlterRenameColumnMySQL,
-    .emitAlterRenameColumnPG = pgSqliteEmitAlterRenameColumn,
-    .emitAlterTableCommentMySQL = pgNoopAlterTableCommentMySQL,
-    .emitAlterTableCommentPG = pgEmitAlterTableComment,
-    .emitAlterTableCommentSQLite = sqliteEmitAlterTableComment,
-    .emitAlterEngineMySQL = pgNoopAlterEngineMySQL,
-    .emitAlterEngineWarning = pgSqliteEmitAlterEngineWarning,
-    .emitAlterDropFkMySQL = pgNoopAlterDropFkMySQL,
-    .emitAlterDropFkPG = pgEmitAlterDropFk,
-    .emitAlterDropFkSQLite = sqliteEmitAlterDropFk,
-    .emitAlterAddIndexMySQL = pgNoopAlterAddIndexMySQL,
-    .emitAlterAddIndexPG = pgEmitAlterAddIndex,
-    .emitAlterAddIndexSQLite = sqliteEmitAlterAddIndex,
-    .emitAlterDropIndexMySQL = pgNoopAlterDropIndexMySQL,
-    .emitAlterDropIndexPG = pgSqliteEmitAlterDropIndex,
+    .emitAlterRenameColumn = pgSqliteEmitAlterRenameColumn,
+    .emitAlterAddIndex = pgEmitAlterAddIndex,
+    .emitAlterDropIndex = pgSqliteEmitAlterDropIndex,
+    .emitAlterDropFk = pgEmitAlterDropFk,
+    .commentResult = pgCommentResult,
+    .emitAlterTableComment = pgEmitAlterTableComment,
+    .emitAlterEngine = pgSqliteEmitAlterEngineWarning,
+    .rename_needs_column_def = false,
+    .modify_needs_column_def = true,
+    .modify_column_def_skips_name = true,
 };
 
 // ─── SQLite Backend ────────────────────────────────────────────
@@ -606,21 +593,16 @@ const sqlite_backend = DialectBackend{
     .emitConfidenceComment = sqliteEmitConfidenceComment,
     .emitAlterDropColumn = sqliteNoopAlterDropColumn,
     .emitAlterModifyColumn = sqliteEmitAlterModifyColumn,
-    .emitAlterRenameColumnMySQL = sqliteNoopAlterRenameColumnMySQL,
-    .emitAlterRenameColumnPG = pgSqliteEmitAlterRenameColumn,
-    .emitAlterTableCommentMySQL = sqliteNoopAlterTableCommentMySQL,
-    .emitAlterTableCommentPG = pgEmitAlterTableComment,
-    .emitAlterTableCommentSQLite = sqliteEmitAlterTableComment,
-    .emitAlterEngineMySQL = sqliteNoopAlterEngineMySQL,
-    .emitAlterEngineWarning = pgSqliteEmitAlterEngineWarning,
-    .emitAlterDropFkMySQL = sqliteNoopAlterDropFkMySQL,
-    .emitAlterDropFkPG = pgEmitAlterDropFk,
-    .emitAlterDropFkSQLite = sqliteEmitAlterDropFk,
-    .emitAlterAddIndexMySQL = sqliteNoopAlterAddIndexMySQL,
-    .emitAlterAddIndexPG = pgEmitAlterAddIndex,
-    .emitAlterAddIndexSQLite = sqliteEmitAlterAddIndex,
-    .emitAlterDropIndexMySQL = sqliteNoopAlterDropIndexMySQL,
-    .emitAlterDropIndexPG = pgSqliteEmitAlterDropIndex,
+    .emitAlterRenameColumn = pgSqliteEmitAlterRenameColumn,
+    .emitAlterAddIndex = sqliteEmitAlterAddIndex,
+    .emitAlterDropIndex = pgSqliteEmitAlterDropIndex,
+    .emitAlterDropFk = sqliteEmitAlterDropFk,
+    .commentResult = sqliteCommentResult,
+    .emitAlterTableComment = sqliteEmitAlterTableComment,
+    .emitAlterEngine = pgSqliteEmitAlterEngineWarning,
+    .rename_needs_column_def = false,
+    .modify_needs_column_def = false,
+    .modify_column_def_skips_name = false,
 };
 
 // ─── Inline column standalone index (PG/SQLite vs MySQL) ─────

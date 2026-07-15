@@ -1,7 +1,7 @@
 const std = @import("std");
 const sp = @import("sql_parser.zig");
 const ast_mod = @import("ast.zig");
-const type_map = @import("type_map.zig");
+const reverse_map = @import("reverse_map.zig");
 const dialect_mod = @import("dialect.zig");
 const reverse_check = @import("reverse_check.zig");
 const Dialect = sp.Dialect;
@@ -13,20 +13,20 @@ const Dialect = sp.Dialect;
 pub const TypeResult = struct {
     tps: []const u8,
     omit: bool,
-    confidence: type_map.Confidence = .high,
+    confidence: reverse_map.Confidence = .high,
 };
 
 pub fn reverseType(sql_type: []const u8, col_name: []const u8, is_auto_inc: bool, is_default_ts: bool, dialect: Dialect) TypeResult {
-    const r = type_map.reverseLookup(sql_type, col_name, is_auto_inc, is_default_ts, dialect);
+    const r = reverse_map.reverseLookup(sql_type, col_name, is_auto_inc, is_default_ts, dialect);
     return .{ .tps = r.tps, .omit = r.omit, .confidence = r.confidence };
 }
 
 pub fn isDatetime(sql_type: []const u8) bool {
-    return type_map.isDatetimeSqlType(sql_type);
+    return reverse_map.isDatetimeSqlType(sql_type);
 }
 
 pub fn isCurrentTimestamp(dv: []const u8) bool {
-    return type_map.isCurrentTimestamp(dv);
+    return reverse_map.isCurrentTimestamp(dv);
 }
 
 pub fn reverseCheck(alloc: std.mem.Allocator, sql_expr: []const u8, col_name: []const u8) ?[]const u8 {

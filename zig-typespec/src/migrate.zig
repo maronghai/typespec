@@ -17,37 +17,12 @@ fn emitComma(w: anytype, needs_comma: *bool) !void {
     needs_comma.* = true;
 }
 
-fn beginAlterTable(w: anytype, dialect: codegen.Dialect, table_name: []const u8, table_has_ops: *bool) !void {
+fn beginAlterTable(w: anytype, backend: dialect_mod.DialectBackend, table_name: []const u8, table_has_ops: *bool) !void {
     if (!table_has_ops.*) {
         try w.writeAll("ALTER TABLE ");
-        try dialect_mod.getBackend(dialect).quoteIdent(w, table_name);
+        try backend.quoteIdent(w, table_name);
         try w.writeAll("\n");
         table_has_ops.* = true;
-    }
-}
-
-// ─── Dialect dispatch wrappers (eliminate switch in main logic) ──
-
-fn emitAddIndex(w: anytype, dialect: codegen.Dialect, backend: dialect_mod.DialectBackend, table_name: []const u8, idx: ast_mod.IndexDecl) !void {
-    switch (dialect) {
-        .mysql => try backend.emitAlterAddIndexMySQL(w, table_name, idx),
-        .pg => try backend.emitAlterAddIndexPG(w, table_name, idx),
-        .sqlite => try backend.emitAlterAddIndexSQLite(w, table_name, idx),
-    }
-}
-
-fn emitDropIndex(w: anytype, dialect: codegen.Dialect, backend: dialect_mod.DialectBackend, idx: ast_mod.IndexDecl) !void {
-    switch (dialect) {
-        .mysql => try backend.emitAlterDropIndexMySQL(w, idx),
-        .pg, .sqlite => try backend.emitAlterDropIndexPG(w, idx),
-    }
-}
-
-fn emitDropFk(w: anytype, dialect: codegen.Dialect, backend: dialect_mod.DialectBackend, fk: ast_mod.FkDecl) !void {
-    switch (dialect) {
-        .mysql => try backend.emitAlterDropFkMySQL(w, fk),
-        .pg => try backend.emitAlterDropFkPG(w, fk),
-        .sqlite => try backend.emitAlterDropFkSQLite(w, fk),
     }
 }
 
@@ -114,7 +89,7 @@ pub fn generateFromDiff(
                 for (td.field_diffs) |fd| {
                     switch (fd.action) {
                         .add => {
-                            try beginAlterTable(w, dialect, td.name, &table_has_ops);
+                            try beginAlterTable(w, backend, td.name, &table_has_ops);
                             if (fd.new_field) |nf| {
                                 try emitComma(w, &sub_needs_comma);
                                 try w.writeAll("ADD COLUMN ");
@@ -123,46 +98,31 @@ pub fn generateFromDiff(
                             }
                         },
                         .drop => {
-                            try beginAlterTable(w, dialect, td.name, &table_has_ops);
+                            try beginAlterTable(w, backend, td.name, &table_has_ops);
                             try emitComma(w, &sub_needs_comma);
                             try backend.emitAlterDropColumn(w, fd.name);
                         },
                         .modify => {
-                            try beginAlterTable(w, dialect, td.name, &table_has_ops);
+                            try beginAlterTable(w, backend, td.name, &table_has_ops);
                             if (fd.new_field) |nf| {
                                 try emitComma(w, &sub_needs_comma);
-                                if (dialect == .sqlite) {
-                                    try backend.emitAlterModifyColumn(w, nf.name);
-                                } else {
-                                    try backend.emitAlterModifyColumn(w, nf.name);
+                                try backend.emitAlterModifyColumn(w, nf.name);
+                                if (backend.modify_needs_column_def) {
                                     const typed_col = try tr.resolveColumn(nf, dialect, new_ast.custom_types);
-                                    // PG emits column name in emitAlterModifyColumn, so skip it here
-                                    if (dialect == .pg) {
-                                        try cg.emitColumnDefEx(w, typed_col, true);
-                                    } else {
-                                        try cg.emitColumnDef(w, typed_col);
-                                    }
+                                    try cg.emitColumnDefEx(w, typed_col, backend.modify_column_def_skips_name);
                                 }
                             }
                         },
                         .rename => {
-                            try beginAlterTable(w, dialect, td.name, &table_has_ops);
+                            try beginAlterTable(w, backend, td.name, &table_has_ops);
                             if (fd.rename_from) |old_name| {
                                 try emitComma(w, &sub_needs_comma);
-                                switch (dialect) {
-                                    .mysql => {
-                                        try backend.emitAlterRenameColumnMySQL(w);
-                                        // MySQL CHANGE COLUMN: emit old name, then new column def
-                                        try backend.quoteIdent(w, old_name);
-                                        try w.writeAll(" ");
-                                        if (fd.new_field) |nf| {
-                                            const typed_col = try tr.resolveColumn(nf, dialect, new_ast.custom_types);
-                                            try cg.emitColumnDef(w, typed_col);
-                                        }
-                                    },
-                                    .pg, .sqlite => {
-                                        try backend.emitAlterRenameColumnPG(w, old_name, fd.name);
-                                    },
+                                try backend.emitAlterRenameColumn(w, old_name, fd.name);
+                                if (backend.rename_needs_column_def) {
+                                    if (fd.new_field) |nf| {
+                                        const typed_col = try tr.resolveColumn(nf, dialect, new_ast.custom_types);
+                                        try cg.emitColumnDef(w, typed_col);
+                                    }
                                 }
                             }
                         },
@@ -174,29 +134,29 @@ pub fn generateFromDiff(
                     switch (idx_diff.action) {
                         .add => {
                             if (idx_diff.new_idx) |idx| {
-                                try beginAlterTable(w, dialect, td.name, &table_has_ops);
+                                try beginAlterTable(w, backend, td.name, &table_has_ops);
                                 try emitComma(w, &sub_needs_comma);
-                                try emitAddIndex(w, dialect, backend, td.name, idx);
+                                try backend.emitAlterAddIndex(w, td.name, idx);
                             }
                         },
                         .drop => {
                             if (idx_diff.old_idx) |idx| {
-                                try beginAlterTable(w, dialect, td.name, &table_has_ops);
+                                try beginAlterTable(w, backend, td.name, &table_has_ops);
                                 try emitComma(w, &sub_needs_comma);
-                                try emitDropIndex(w, dialect, backend, idx);
+                                try backend.emitAlterDropIndex(w, idx);
                             }
                         },
                         .modify => {
                             // Drop old + add new
                             if (idx_diff.old_idx) |old_idx| {
-                                try beginAlterTable(w, dialect, td.name, &table_has_ops);
+                                try beginAlterTable(w, backend, td.name, &table_has_ops);
                                 try emitComma(w, &sub_needs_comma);
-                                try emitDropIndex(w, dialect, backend, old_idx);
+                                try backend.emitAlterDropIndex(w, old_idx);
                             }
                             if (idx_diff.new_idx) |new_idx| {
-                                try beginAlterTable(w, dialect, td.name, &table_has_ops);
+                                try beginAlterTable(w, backend, td.name, &table_has_ops);
                                 try emitComma(w, &sub_needs_comma);
-                                try emitAddIndex(w, dialect, backend, td.name, new_idx);
+                                try backend.emitAlterAddIndex(w, td.name, new_idx);
                             }
                         },
                     }
@@ -204,45 +164,41 @@ pub fn generateFromDiff(
 
                 // Metadata diffs (comment, engine)
                 if (td.metadata_diff) |md| {
-                    // Comment change
+                    // Comment change — two-phase: check result type, then set up state, then emit
                     if (!optionalStrEq(md.old_comment, md.new_comment)) {
                         if (md.new_comment) |nc| {
-                            switch (dialect) {
-                                .mysql => {
-                                    try beginAlterTable(w, dialect, td.name, &table_has_ops);
+                            const result = backend.commentResult();
+                            switch (result) {
+                                .added_to_alter => {
+                                    // MySQL: comment is inline in ALTER TABLE
+                                    try beginAlterTable(w, backend, td.name, &table_has_ops);
                                     try emitComma(w, &sub_needs_comma);
-                                    try backend.emitAlterTableCommentMySQL(w, nc);
+                                    try backend.emitAlterTableComment(w, td.name, nc);
                                 },
-                                .pg => {
+                                .standalone_emitted => {
                                     // PG: standalone COMMENT ON TABLE — close current ALTER TABLE if open
                                     if (table_has_ops) {
                                         try w.writeAll(";\n\n");
                                         table_has_ops = false;
                                         sub_needs_comma = false;
                                     }
-                                    try w.writeAll("COMMENT ON TABLE ");
-                                    try backend.quoteIdent(w, td.name);
-                                    try w.print(" IS '{s}';\n\n", .{nc});
+                                    try backend.emitAlterTableComment(w, td.name, nc);
                                     has_operations = true;
                                 },
-                                .sqlite => {
-                                    try beginAlterTable(w, dialect, td.name, &table_has_ops);
+                                .unsupported => {
+                                    // SQLite: warning comment — add to ALTER TABLE
+                                    try beginAlterTable(w, backend, td.name, &table_has_ops);
                                     try emitComma(w, &sub_needs_comma);
-                                    try backend.emitAlterTableCommentSQLite(w);
+                                    try backend.emitAlterTableComment(w, td.name, nc);
                                 },
                             }
                         }
                     }
-                    // Engine change (MySQL only)
+                    // Engine change
                     if (!optionalStrEq(md.old_engine, md.new_engine)) {
-                        try beginAlterTable(w, dialect, td.name, &table_has_ops);
+                        try beginAlterTable(w, backend, td.name, &table_has_ops);
                         try emitComma(w, &sub_needs_comma);
-                        if (dialect == .mysql) {
-                            const eng = md.new_engine orelse "InnoDB";
-                            try backend.emitAlterEngineMySQL(w, eng);
-                        } else {
-                            try backend.emitAlterEngineWarning(w);
-                        }
+                        try backend.emitAlterEngine(w, md.new_engine);
                     }
                 }
 
@@ -251,7 +207,7 @@ pub fn generateFromDiff(
                     switch (fk_diff.action) {
                         .add => {
                             if (fk_diff.new_fk) |fk| {
-                                try beginAlterTable(w, dialect, td.name, &table_has_ops);
+                                try beginAlterTable(w, backend, td.name, &table_has_ops);
                                 try emitComma(w, &sub_needs_comma);
                                 try w.writeAll("ADD FOREIGN KEY (");
                                 for (fk.fields, 0..) |f, fi| {
@@ -282,9 +238,9 @@ pub fn generateFromDiff(
                         },
                         .drop => {
                             if (fk_diff.old_fk) |fk| {
-                                try beginAlterTable(w, dialect, td.name, &table_has_ops);
+                                try beginAlterTable(w, backend, td.name, &table_has_ops);
                                 try emitComma(w, &sub_needs_comma);
-                                try emitDropFk(w, dialect, backend, fk);
+                                try backend.emitAlterDropFk(w, fk);
                             }
                         },
                     }
