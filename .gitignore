@@ -52,3 +52,6 @@ dist/
 package-lock.json
 bun.lock
 nul
+zig-upx/
+zig-out/
+.zig-cache/

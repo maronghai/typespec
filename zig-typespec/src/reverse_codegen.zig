@@ -93,12 +93,15 @@ fn writeColumnSuffix(w: anytype, col: sp.SqlColumn, indexes: []const sp.SqlIndex
 
     // 4. INLINE UNIQUE / INDEX from standalone indexes
     //    Use isInlineIndex (table-prefixed aware) to decide inline vs standalone.
+    var has_inline_index = false;
     for (indexes) |idx| {
         if (idx.fields.len == 1 and std.mem.eql(u8, idx.fields[0], col.name)) {
             if (idx.kind == .unique and isInlineIndex(idx, table_name)) {
                 try w.writeAll(" @u");
+                has_inline_index = true;
             } else if (idx.kind == .regular and isInlineIndex(idx, table_name)) {
                 try w.writeAll(" @");
+                has_inline_index = true;
             }
         }
     }
@@ -139,7 +142,9 @@ fn writeColumnSuffix(w: anytype, col: sp.SqlColumn, indexes: []const sp.SqlIndex
     }
 
     // 8. Confidence comment (dialect-specific, only when not high)
-    if (tr.confidence != .high) {
+    //    Suppress when an inline index suffix was added — the suffix already
+    //    carries meaning and the comment would clutter the same line.
+    if (tr.confidence != .high and !has_inline_index) {
         // Only emit confidence comment if there's no existing comment
         if (col.comment == null or (col.comment != null and (col.comment.?.len == 0))) {
             const conf_str: []const u8 = switch (tr.confidence) {
