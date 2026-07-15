@@ -3,6 +3,7 @@ const ast_mod = @import("ast.zig");
 const TypeInfo = ast_mod.TypeInfo;
 const dialect_enum = @import("dialect_enum.zig");
 const sqlite_hints = @import("sqlite_hints.zig");
+const type_registry = @import("type_registry.zig");
 
 // ─── Unified Type Mapping ────────────────────────────────────
 //

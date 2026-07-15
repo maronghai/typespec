@@ -4,5 +4,5 @@
 BEGIN;
 
 ALTER TABLE "user"
-MODIFY COLUMN "name" varchar(64) NOT NULL;
+ALTER COLUMN "name" TYPE varchar(64) NOT NULL;
 COMMIT;

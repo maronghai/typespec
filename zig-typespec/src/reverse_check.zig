@@ -1,30 +1,58 @@
 const std = @import("std");
+const ast_mod = @import("ast.zig");
+const CheckConstraint = ast_mod.CheckConstraint;
+const CheckKind = ast_mod.CheckKind;
 
 // ─── CHECK Constraint Reverse ─────────────────────────────────
-// Extracted from reverse_codegen.zig for single-responsibility.
-// Parses SQL CHECK expressions back to TPS bracket/brace syntax.
+// Parses SQL CHECK expressions back to structured CheckConstraint.
+// Used by reverse pipeline to convert SQL DDL back to TPS IR.
 
-pub fn reverseCheck(alloc: std.mem.Allocator, sql_expr: []const u8, col_name: []const u8) ?[]const u8 {
+/// Parse a SQL CHECK expression into a structured CheckConstraint.
+/// Returns null if the expression doesn't match any known pattern.
+pub fn parseSqlCheckExpr(alloc: std.mem.Allocator, sql_expr: []const u8, col_name: []const u8) ?CheckConstraint {
     const e = std.mem.trim(u8, sql_expr, " \t");
-    if (parseBetween(alloc, e, col_name)) |r| return r;
-    if (parseUpperExcl(alloc, e, col_name)) |r| return r;
-    if (parseLowerExcl(alloc, e, col_name)) |r| return r;
-    if (parseBothExcl(alloc, e, col_name)) |r| return r;
-    if (parseInList(alloc, e, col_name)) |r| return r;
-    if (parseCompoundCmp(alloc, e, col_name)) |r| return r;
-    if (parseSingleCmp(alloc, e, col_name)) |r| return r;
+    if (parseBetweenExpr(alloc, e, col_name)) |r| return r;
+    if (parseUpperExclExpr(alloc, e, col_name)) |r| return r;
+    if (parseLowerExclExpr(alloc, e, col_name)) |r| return r;
+    if (parseBothExclExpr(alloc, e, col_name)) |r| return r;
+    if (parseInListExpr(alloc, e, col_name)) |r| return r;
+    if (parseCompoundCmpExpr(alloc, e, col_name)) |r| return r;
+    if (parseSingleCmpExpr(alloc, e, col_name)) |r| return r;
     return null;
 }
 
-fn parseBetween(alloc: std.mem.Allocator, e: []const u8, cn: []const u8) ?[]const u8 {
+/// Legacy: parse SQL CHECK expression and return TPS bracket/brace syntax string.
+pub fn reverseCheck(alloc: std.mem.Allocator, sql_expr: []const u8, col_name: []const u8) ?[]const u8 {
+    if (parseSqlCheckExpr(alloc, sql_expr, col_name)) |cc| {
+        return checkConstraintToTps(alloc, cc);
+    }
+    return null;
+}
+
+/// Convert a CheckConstraint to TPS bracket/brace syntax string.
+fn checkConstraintToTps(alloc: std.mem.Allocator, cc: CheckConstraint) ?[]const u8 {
+    return switch (cc.kind) {
+        .range => std.fmt.allocPrint(alloc, "[{s}]", .{cc.expr}),
+        .range_upper_exclusive => std.fmt.allocPrint(alloc, "[{s})", .{cc.expr}),
+        .range_lower_exclusive => std.fmt.allocPrint(alloc, "({s}]", .{cc.expr}),
+        .range_both_exclusive => std.fmt.allocPrint(alloc, "({s})", .{cc.expr}),
+        .in_list => std.fmt.allocPrint(alloc, "{{{s}}}", .{cc.expr}),
+        .comparison => std.fmt.allocPrint(alloc, "{{{s}}}", .{cc.expr}),
+    };
+}
+
+fn parseBetweenExpr(alloc: std.mem.Allocator, e: []const u8, cn: []const u8) ?CheckConstraint {
     const bp = std.mem.indexOf(u8, e, " BETWEEN ") orelse return null;
     if (!fieldMatches(e[0..bp], cn)) return null;
     const rest = e[bp + 9 ..];
     const ap = std.mem.indexOf(u8, rest, " AND ") orelse return null;
-    return fmtCheck(alloc, "[{s},{s}]", .{ std.mem.trim(u8, rest[0..ap], " "), std.mem.trim(u8, rest[ap + 5 ..], " ") });
+    const low = std.mem.trim(u8, rest[0..ap], " ");
+    const high = std.mem.trim(u8, rest[ap + 5 ..], " ");
+    const expr = std.fmt.allocPrint(alloc, "{s},{s}", .{ low, high }) catch return null;
+    return .{ .kind = .range, .expr = expr, .line_no = 0 };
 }
 
-fn parseUpperExcl(alloc: std.mem.Allocator, e: []const u8, cn: []const u8) ?[]const u8 {
+fn parseUpperExclExpr(alloc: std.mem.Allocator, e: []const u8, cn: []const u8) ?CheckConstraint {
     const ap = std.mem.indexOf(u8, e, " AND ") orelse return null;
     const l = std.mem.trim(u8, e[0..ap], " \t`");
     const r = std.mem.trim(u8, e[ap + 5 ..], " \t`");
@@ -33,10 +61,12 @@ fn parseUpperExcl(alloc: std.mem.Allocator, e: []const u8, cn: []const u8) ?[]co
     if (!fieldMatches(l[0..lp], cn) or !fieldMatches(r[0..rp], cn)) return null;
     const high = r[rp + 3 ..];
     if (high.len > 0 and high[0] == '=') return null;
-    return fmtCheck(alloc, "[{s},{s})", .{ l[lp + 4 ..], high });
+    const low = l[lp + 4 ..];
+    const expr = std.fmt.allocPrint(alloc, "{s},{s}", .{ low, high }) catch return null;
+    return .{ .kind = .range_upper_exclusive, .expr = expr, .line_no = 0 };
 }
 
-fn parseLowerExcl(alloc: std.mem.Allocator, e: []const u8, cn: []const u8) ?[]const u8 {
+fn parseLowerExclExpr(alloc: std.mem.Allocator, e: []const u8, cn: []const u8) ?CheckConstraint {
     const ap = std.mem.indexOf(u8, e, " AND ") orelse return null;
     const l = std.mem.trim(u8, e[0..ap], " \t`");
     const r = std.mem.trim(u8, e[ap + 5 ..], " \t`");
@@ -45,10 +75,12 @@ fn parseLowerExcl(alloc: std.mem.Allocator, e: []const u8, cn: []const u8) ?[]co
     if (!fieldMatches(l[0..lp], cn) or !fieldMatches(r[0..rp], cn)) return null;
     const low = l[lp + 3 ..];
     if (low.len > 0 and low[0] == '=') return null;
-    return fmtCheck(alloc, "({s},{s}]", .{ low, r[rp + 4 ..] });
+    const high = r[rp + 4 ..];
+    const expr = std.fmt.allocPrint(alloc, "{s},{s}", .{ low, high }) catch return null;
+    return .{ .kind = .range_lower_exclusive, .expr = expr, .line_no = 0 };
 }
 
-fn parseBothExcl(alloc: std.mem.Allocator, e: []const u8, cn: []const u8) ?[]const u8 {
+fn parseBothExclExpr(alloc: std.mem.Allocator, e: []const u8, cn: []const u8) ?CheckConstraint {
     const ap = std.mem.indexOf(u8, e, " AND ") orelse return null;
     const l = std.mem.trim(u8, e[0..ap], " \t`");
     const r = std.mem.trim(u8, e[ap + 5 ..], " \t`");
@@ -58,17 +90,17 @@ fn parseBothExcl(alloc: std.mem.Allocator, e: []const u8, cn: []const u8) ?[]con
     const low = l[lp + 3 ..];
     const high = r[rp + 3 ..];
     if ((low.len > 0 and low[0] == '=') or (high.len > 0 and high[0] == '=')) return null;
-    return fmtCheck(alloc, "({s},{s})", .{ low, high });
+    const expr = std.fmt.allocPrint(alloc, "{s},{s}", .{ low, high }) catch return null;
+    return .{ .kind = .range_both_exclusive, .expr = expr, .line_no = 0 };
 }
 
-fn parseInList(alloc: std.mem.Allocator, e: []const u8, cn: []const u8) ?[]const u8 {
+fn parseInListExpr(alloc: std.mem.Allocator, e: []const u8, cn: []const u8) ?CheckConstraint {
     const ip = std.mem.indexOf(u8, e, " IN ") orelse return null;
     if (!fieldMatches(e[0..ip], cn)) return null;
     const rest = e[ip + 4 ..];
     if (rest.len == 0 or rest[0] != '(') return null;
-    // Parse: {val1,val2,...}
+    // Parse: (val1,val2,...) → expr = val1,val2,...
     var buf = std.ArrayList(u8).initCapacity(alloc, 64) catch return null;
-    buf.append(alloc, '{') catch return null;
     var i: usize = 1;
     var first = true;
     while (i < rest.len and rest[i] != ')') {
@@ -94,42 +126,39 @@ fn parseInList(alloc: std.mem.Allocator, e: []const u8, cn: []const u8) ?[]const
             }
         }
     }
-    buf.append(alloc, '}') catch return null;
-    return buf.toOwnedSlice(alloc) catch null;
+    const expr = buf.toOwnedSlice(alloc) catch return null;
+    return .{ .kind = .in_list, .expr = expr, .line_no = 0 };
 }
 
-fn parseCompoundCmp(alloc: std.mem.Allocator, e: []const u8, cn: []const u8) ?[]const u8 {
+fn parseCompoundCmpExpr(alloc: std.mem.Allocator, e: []const u8, cn: []const u8) ?CheckConstraint {
     const ap = std.mem.indexOf(u8, e, " AND ") orelse return null;
     const l = std.mem.trim(u8, e[0..ap], " \t`");
     const r = std.mem.trim(u8, e[ap + 5 ..], " \t`");
-    const lo = oneCmp(alloc, l, cn) orelse return null;
-    const ro = oneCmp(alloc, r, cn) orelse return null;
-    return fmtCheck(alloc, "{{{s},{s}}}", .{ lo, ro });
+    const lo = oneCmpStr(alloc, l, cn) orelse return null;
+    const ro = oneCmpStr(alloc, r, cn) orelse return null;
+    const expr = std.fmt.allocPrint(alloc, "{s},{s}", .{ lo, ro }) catch return null;
+    return .{ .kind = .comparison, .expr = expr, .line_no = 0 };
 }
 
-fn parseSingleCmp(alloc: std.mem.Allocator, e: []const u8, cn: []const u8) ?[]const u8 {
+fn parseSingleCmpExpr(alloc: std.mem.Allocator, e: []const u8, cn: []const u8) ?CheckConstraint {
     if (std.mem.indexOf(u8, e, " AND ") != null) return null;
-    const cmp = oneCmp(alloc, e, cn) orelse return null;
-    return fmtCheck(alloc, "{{{s}}}", .{cmp});
+    const cmp = oneCmpStr(alloc, e, cn) orelse return null;
+    return .{ .kind = .comparison, .expr = cmp, .line_no = 0 };
 }
 
-fn oneCmp(alloc: std.mem.Allocator, e: []const u8, cn: []const u8) ?[]const u8 {
+fn oneCmpStr(alloc: std.mem.Allocator, e: []const u8, cn: []const u8) ?[]const u8 {
     const ops = [_][]const u8{ ">=", "<=", ">", "<", "=" };
     for (ops) |op| {
         const pp = std.mem.indexOf(u8, e, op) orelse continue;
         if (!fieldMatches(e[0..pp], cn)) continue;
         const v = std.mem.trim(u8, e[pp + op.len ..], " ");
-        return fmtCheck(alloc, "{s}{s}", .{ op, v });
+        return std.fmt.allocPrint(alloc, "{s}{s}", .{ op, v }) catch null;
     }
     return null;
 }
 
 fn fieldMatches(raw: []const u8, expected: []const u8) bool {
     return std.mem.eql(u8, std.mem.trim(u8, raw, " \t`"), expected);
-}
-
-fn fmtCheck(alloc: std.mem.Allocator, comptime fmt: []const u8, args: anytype) ?[]const u8 {
-    return std.fmt.allocPrint(alloc, fmt, args) catch null;
 }
 
 // ─── Unit Tests ──────────────────────────────────────────────

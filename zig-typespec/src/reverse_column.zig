@@ -1,5 +1,6 @@
 const std = @import("std");
 const sp = @import("sql_parser.zig");
+const ast_mod = @import("ast.zig");
 const type_map = @import("type_map.zig");
 const dialect_mod = @import("dialect.zig");
 const reverse_check = @import("reverse_check.zig");
@@ -32,9 +33,22 @@ pub fn reverseCheck(alloc: std.mem.Allocator, sql_expr: []const u8, col_name: []
     return reverse_check.reverseCheck(alloc, sql_expr, col_name);
 }
 
+pub fn parseSqlCheckExpr(alloc: std.mem.Allocator, sql_expr: []const u8, col_name: []const u8) ?ast_mod.CheckConstraint {
+    return reverse_check.parseSqlCheckExpr(alloc, sql_expr, col_name);
+}
+
 /// Write TPS column suffix: type + modifiers + default + check + comment
 pub fn writeColumnSuffix(w: anytype, col: sp.SqlColumn, indexes: []const sp.SqlIndex, check_expr: ?[]const u8, dialect: Dialect) !void {
-    // ---- type ----
+    const tr = try writeColumnType(w, col, dialect);
+    try writeColumnModifiers(w, col, indexes, tr);
+    try writeColumnDefault(w, col, tr);
+    try writeColumnCheck(w, check_expr);
+    try writeColumnComment(w, col);
+    try writeColumnConfidence(w, col, tr, dialect);
+}
+
+/// Resolve and write the TPS type symbol. Returns TypeResult for downstream use.
+fn writeColumnType(w: anytype, col: sp.SqlColumn, dialect: Dialect) !TypeResult {
     const is_ai = col.auto_increment;
     const is_ts = if (col.default_val) |dv| isCurrentTimestamp(dv) else false;
     const tr: TypeResult = if (col.tps_override) |tps|
@@ -45,8 +59,11 @@ pub fn writeColumnSuffix(w: anytype, col: sp.SqlColumn, indexes: []const sp.SqlI
         try w.writeAll(" ");
         try w.writeAll(tr.tps);
     }
+    return tr;
+}
 
-    // ---- modifiers ----
+/// Write modifier suffixes: ++ / + / ! / * / u / @u / @
+fn writeColumnModifiers(w: anytype, col: sp.SqlColumn, indexes: []const sp.SqlIndex, tr: TypeResult) !void {
     // Detect PRIMARY KEY from table-level indexes (single-field PK)
     var has_table_pk = false;
     if (!col.primary_key) {
@@ -59,16 +76,14 @@ pub fn writeColumnSuffix(w: anytype, col: sp.SqlColumn, indexes: []const sp.SqlI
     }
     const is_pk = col.primary_key or has_table_pk;
 
-    // 1. prefix: ++ / + / ! for auto_increment / primary_key
+    // prefix: ++ / + / ! for auto_increment / primary_key
     if (col.auto_increment and is_pk) {
         try w.writeAll(" ++");
     } else if (col.auto_increment) {
         try w.writeAll(" +");
     } else if (isDatetime(col.type_sql) or std.mem.eql(u8, tr.tps, "t")) {
-        // datetime without auto_increment — check DEFAULT for +/++
         if (col.default_val) |dv| {
             if (isCurrentTimestamp(dv)) {
-                // Heuristic: column name contains "update"/"updated" -> on_update_current_timestamp (++)
                 const is_update_col = std.mem.indexOf(u8, col.name, "update") != null or
                     std.mem.indexOf(u8, col.name, "updated") != null;
                 if (col.on_update_current_timestamp or is_update_col) {
@@ -86,17 +101,17 @@ pub fn writeColumnSuffix(w: anytype, col: sp.SqlColumn, indexes: []const sp.SqlI
         try w.writeAll(" !");
     }
 
-    // 2. NOT NULL — emit * only when NOT NULL is explicit in the SQL
+    // NOT NULL
     if (!col.nullable) {
         try w.writeAll(" *");
     }
 
-    // 3. UNSIGNED
+    // UNSIGNED
     if (col.unsigned) {
         try w.writeAll(" u");
     }
 
-    // 4. INLINE UNIQUE / INDEX from standalone indexes
+    // INLINE UNIQUE / INDEX from standalone indexes
     for (indexes) |idx| {
         if (idx.fields.len == 1 and std.mem.eql(u8, idx.fields[0], col.name)) {
             if (idx.kind == .unique and idx.name.len > 3 and std.mem.startsWith(u8, idx.name, "uk_")) {
@@ -106,45 +121,51 @@ pub fn writeColumnSuffix(w: anytype, col: sp.SqlColumn, indexes: []const sp.SqlI
             }
         }
     }
+}
 
-    // 5. DEFAULT value
+/// Write DEFAULT value.
+fn writeColumnDefault(w: anytype, col: sp.SqlColumn, tr: TypeResult) !void {
     if (col.default_val) |dv| {
-        // datetime + CURRENT_TIMESTAMP/now() is already handled above (via + or ++)
         if ((isDatetime(col.type_sql) or std.mem.eql(u8, tr.tps, "t")) and isCurrentTimestamp(dv)) {
             // already emitted + or ++ above — skip
         } else if (std.mem.eql(u8, dv, "")) {
-            // Empty string default (DEFAULT '') — skip, equivalent to no default
+            // Empty string default — skip
         } else if (std.mem.eql(u8, dv, "NULL")) {
-            // DEFAULT NULL — only meaningful for nullable columns, skip (implicit)
+            // DEFAULT NULL — skip (implicit)
         } else if (std.mem.startsWith(u8, dv, "b'") and std.mem.endsWith(u8, dv, "'")) {
-            // MySQL binary literal b'0' / b'1' -> strip to plain 0/1 for bit(1) / boolean
+            // MySQL binary literal b'0' / b'1' → strip to plain 0/1
             try w.writeAll(" =");
             try w.writeAll(dv[2 .. dv.len - 1]);
         } else if (std.mem.eql(u8, dv, "gen_random_uuid()")) {
-            // PG: uuid auto-gen default — skip (implicit for uuid type)
+            // PG: uuid auto-gen default — skip
         } else {
             try w.writeAll(" =");
             try w.writeAll(dv);
         }
     }
+}
 
-    // 6. CHECK constraint (inline)
+/// Write CHECK constraint (inline).
+fn writeColumnCheck(w: anytype, check_expr: ?[]const u8) !void {
     if (check_expr) |ce| {
         try w.writeAll(" ");
         try w.writeAll(ce);
     }
+}
 
-    // 7. Field comment
+/// Write field comment.
+fn writeColumnComment(w: anytype, col: sp.SqlColumn) !void {
     if (col.comment) |c| {
         if (c.len > 0) {
             try w.writeAll(" : ");
             try w.writeAll(c);
         }
     }
+}
 
-    // 8. Confidence comment (dialect-specific, only when not high)
+/// Write confidence comment (dialect-specific, only when not high).
+fn writeColumnConfidence(w: anytype, col: sp.SqlColumn, tr: TypeResult, dialect: Dialect) !void {
     if (tr.confidence != .high) {
-        // Only emit confidence comment if there's no existing comment
         if (col.comment == null or (col.comment != null and (col.comment.?.len == 0))) {
             const conf_str: []const u8 = switch (tr.confidence) {
                 .high => unreachable,

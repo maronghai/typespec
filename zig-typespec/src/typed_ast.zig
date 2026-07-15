@@ -1,6 +1,7 @@
 const std = @import("std");
 const ast_mod = @import("ast.zig");
 const type_map = @import("type_map.zig");
+const type_registry = @import("type_registry.zig");
 const dialect_enum = @import("dialect_enum.zig");
 const Writer = std.Io.Writer;
 const Field = ast_mod.Field;
@@ -204,29 +205,16 @@ pub const SqlType = union(enum) {
             .none => .{ .varchar = 0 },
             .simple => |s| {
                 if (s.len == 1) {
-                    return switch (s[0]) {
-                        'n' => .int,
-                        'N' => .bigint,
-                        'm' => .{ .decimal = .{ .precision = 16, .scale = 2 } },
-                        'M' => .{ .decimal = .{ .precision = 20, .scale = 6 } },
-                        'S' => .text,
-                        'b' => .boolean,
-                        'B' => .blob,
-                        'j' => .json,
-                        'd' => .date,
-                        't' => .datetime,
-                        's' => .{ .varchar = 0 },
-                        '1' => .{ .varchar = 0 }, // "1" is an alias for "s" in some contexts
-                        else => .{ .passthrough = s },
-                    };
+                    // Use type_registry for single-char types
+                    if (type_registry.lookupSqlType(s, dialect)) |sql_type_name| {
+                        return inferSqlTypeFromName(sql_type_name);
+                    }
+                    return .{ .passthrough = s };
                 } else {
                     return .{ .passthrough = s };
                 }
             },
             .int_explicit => |n| {
-                _ = dialect;
-                // int_explicit(n) always renders as int(n) in MySQL, integer in PG/SQLite
-                // But we store the precision for potential future use
                 _ = n;
                 return .int;
             },
@@ -235,6 +223,55 @@ pub const SqlType = union(enum) {
             .enum_type => |vals| .{ .enum_values = vals },
             .raw_sql => |sql| .{ .raw_sql = sql },
         };
+    }
+
+    /// Infer SqlType variant from a SQL type name string (used by registry lookup).
+    fn inferSqlTypeFromName(sql_name: []const u8) SqlType {
+        // Handle precision-bearing types first: decimal(...)/numeric(...)  /NUMERIC(...)
+        if (std.mem.indexOf(u8, sql_name, "(")) |open| {
+            if (std.mem.endsWith(u8, sql_name, ")")) {
+                const close = sql_name.len - 1;
+                const type_prefix = sql_name[0..open];
+                const interior = sql_name[open + 1 .. close];
+                var parts = std.mem.splitScalar(u8, interior, ',');
+                const p_str = std.mem.trim(u8, parts.next() orelse "16", " ");
+                const s_str = std.mem.trim(u8, parts.next() orelse "2", " ");
+                const precision = std.fmt.parseInt(usize, p_str, 10) catch 16;
+                const scale = std.fmt.parseInt(usize, s_str, 10) catch 2;
+                // Check if it's a decimal/numeric type
+                if (std.mem.eql(u8, type_prefix, "decimal") or
+                    std.mem.eql(u8, type_prefix, "numeric") or
+                    std.mem.eql(u8, type_prefix, "NUMERIC"))
+                {
+                    return .{ .decimal = .{ .precision = precision, .scale = scale } };
+                }
+                // Check if it's a varchar type
+                if (std.mem.eql(u8, type_prefix, "varchar") or
+                    std.mem.eql(u8, type_prefix, "VARCHAR"))
+                {
+                    return .{ .varchar = precision };
+                }
+            }
+        }
+        // Handle simple types (case-insensitive for common names)
+        const lower = blk: {
+            var buf: [32]u8 = undefined;
+            const len = @min(sql_name.len, 32);
+            for (sql_name[0..len], 0..) |c, i| {
+                buf[i] = std.ascii.toLower(c);
+            }
+            break :blk buf[0..len];
+        };
+        if (std.mem.eql(u8, lower, "int") or std.mem.eql(u8, lower, "integer")) return .int;
+        if (std.mem.eql(u8, lower, "bigint")) return .bigint;
+        if (std.mem.eql(u8, lower, "text")) return .text;
+        if (std.mem.eql(u8, lower, "boolean")) return .boolean;
+        if (std.mem.eql(u8, lower, "blob") or std.mem.eql(u8, lower, "bytea")) return .blob;
+        if (std.mem.eql(u8, lower, "json")) return .json;
+        if (std.mem.eql(u8, lower, "date")) return .date;
+        if (std.mem.eql(u8, lower, "datetime") or std.mem.eql(u8, lower, "timestamp")) return .datetime;
+        if (std.mem.eql(u8, lower, "varchar")) return .{ .varchar = 0 };
+        return .{ .passthrough = sql_name };
     }
 };
 

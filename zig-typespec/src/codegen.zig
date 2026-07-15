@@ -205,9 +205,16 @@ pub const Codegen = struct {
     }
 
     /// Render a single column definition (shared by CREATE TABLE and ALTER TABLE paths).
+    /// When skip_name is true, the column name is not emitted (used by PG ALTER COLUMN TYPE).
     pub fn emitColumnDef(self: Codegen, w: *Writer, col: typed_ast_mod.TypedColumn) !void {
-        try self.backend.quoteIdent(w, col.name);
-        try w.writeAll(" ");
+        return self.emitColumnDefEx(w, col, false);
+    }
+
+    pub fn emitColumnDefEx(self: Codegen, w: *Writer, col: typed_ast_mod.TypedColumn, skip_name: bool) !void {
+        if (!skip_name) {
+            try self.backend.quoteIdent(w, col.name);
+            try w.writeAll(" ");
+        }
         try col.sql_type.toSql(self.dialect, w);
 
         if (col.flags.unsigned) try self.backend.emitUnsigned(w);
