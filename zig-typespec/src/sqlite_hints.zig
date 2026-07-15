@@ -1,69 +1,112 @@
+const std = @import("std");
+
 // ─── SQLite Column Name Heuristics ──────────────────────────────
 // Used by type_map.zig reverseLookupSqlite and reverse_codegen.zig
 // to disambiguate SQLite's lossy type affinity system.
+//
+// All rules are data-driven via COLUMN_RULES table.
+// To add a new hint: add one rule entry to COLUMN_RULES.
 
-/// Boolean column name patterns: is_*, has_*, can_*, etc.
+pub const SqlHintType = enum { boolean, json, text };
+
+pub const MatchKind = enum { prefix, suffix, exact };
+
+pub const ColumnRule = struct {
+    pattern: []const u8,
+    kind: MatchKind,
+    hint: SqlHintType,
+};
+
+/// Canonical rule table. Add new hints here — no code changes needed.
+pub const COLUMN_RULES = [_]ColumnRule{
+    // Boolean patterns
+    .{ .pattern = "is_", .kind = .prefix, .hint = .boolean },
+    .{ .pattern = "has_", .kind = .prefix, .hint = .boolean },
+    .{ .pattern = "can_", .kind = .prefix, .hint = .boolean },
+    .{ .pattern = "should_", .kind = .prefix, .hint = .boolean },
+    .{ .pattern = "was_", .kind = .prefix, .hint = .boolean },
+    .{ .pattern = "did_", .kind = .prefix, .hint = .boolean },
+    .{ .pattern = "enable", .kind = .prefix, .hint = .boolean },
+    .{ .pattern = "active", .kind = .prefix, .hint = .boolean },
+    .{ .pattern = "deleted", .kind = .exact, .hint = .boolean },
+    .{ .pattern = "is_deleted", .kind = .exact, .hint = .boolean },
+    .{ .pattern = "is_removed", .kind = .exact, .hint = .boolean },
+    .{ .pattern = "is_enabled", .kind = .exact, .hint = .boolean },
+    .{ .pattern = "is_active", .kind = .exact, .hint = .boolean },
+    .{ .pattern = "is_valid", .kind = .exact, .hint = .boolean },
+    // JSON patterns
+    .{ .pattern = "settings", .kind = .exact, .hint = .json },
+    .{ .pattern = "data", .kind = .exact, .hint = .json },
+    .{ .pattern = "metadata", .kind = .exact, .hint = .json },
+    .{ .pattern = "config", .kind = .exact, .hint = .json },
+    .{ .pattern = "extra", .kind = .exact, .hint = .json },
+    .{ .pattern = "params", .kind = .exact, .hint = .json },
+    .{ .pattern = "options", .kind = .exact, .hint = .json },
+    .{ .pattern = "json", .kind = .exact, .hint = .json },
+    .{ .pattern = "props", .kind = .exact, .hint = .json },
+    .{ .pattern = "attrs", .kind = .exact, .hint = .json },
+    .{ .pattern = "properties", .kind = .exact, .hint = .json },
+    .{ .pattern = "_json", .kind = .suffix, .hint = .json },
+    .{ .pattern = "_data", .kind = .suffix, .hint = .json },
+    .{ .pattern = "_meta", .kind = .suffix, .hint = .json },
+    .{ .pattern = "_config", .kind = .suffix, .hint = .json },
+    .{ .pattern = "_settings", .kind = .suffix, .hint = .json },
+    .{ .pattern = "_extra", .kind = .suffix, .hint = .json },
+    .{ .pattern = "_options", .kind = .suffix, .hint = .json },
+    // Text patterns
+    .{ .pattern = "description", .kind = .exact, .hint = .text },
+    .{ .pattern = "content", .kind = .exact, .hint = .text },
+    .{ .pattern = "note", .kind = .exact, .hint = .text },
+    .{ .pattern = "notes", .kind = .exact, .hint = .text },
+    .{ .pattern = "bio", .kind = .exact, .hint = .text },
+    .{ .pattern = "summary", .kind = .exact, .hint = .text },
+    .{ .pattern = "body", .kind = .exact, .hint = .text },
+    .{ .pattern = "text", .kind = .exact, .hint = .text },
+    .{ .pattern = "detail", .kind = .exact, .hint = .text },
+    .{ .pattern = "remark", .kind = .exact, .hint = .text },
+    .{ .pattern = "remarks", .kind = .exact, .hint = .text },
+    .{ .pattern = "message", .kind = .exact, .hint = .text },
+    .{ .pattern = "memo", .kind = .exact, .hint = .text },
+    .{ .pattern = "address", .kind = .exact, .hint = .text },
+    .{ .pattern = "_desc", .kind = .suffix, .hint = .text },
+    .{ .pattern = "_text", .kind = .suffix, .hint = .text },
+    .{ .pattern = "_content", .kind = .suffix, .hint = .text },
+    .{ .pattern = "_note", .kind = .suffix, .hint = .text },
+    .{ .pattern = "_body", .kind = .suffix, .hint = .text },
+    .{ .pattern = "_remark", .kind = .suffix, .hint = .text },
+};
+
+/// Match a column name against a single rule.
+fn matchRule(name: []const u8, rule: ColumnRule) bool {
+    return switch (rule.kind) {
+        .prefix => std.mem.startsWith(u8, name, rule.pattern),
+        .suffix => std.mem.endsWith(u8, name, rule.pattern),
+        .exact => std.mem.eql(u8, name, rule.pattern),
+    };
+}
+
+/// Look up the SQLite hint type for a column name.
+/// Returns null if no rule matches.
+pub fn lookupHint(name: []const u8) ?SqlHintType {
+    for (&COLUMN_RULES) |rule| {
+        if (matchRule(name, rule)) return rule.hint;
+    }
+    return null;
+}
+
+/// Boolean column name patterns (delegates to lookup table).
 pub fn isBooleanColumnName(name: []const u8) bool {
-    return std.mem.startsWith(u8, name, "is_") or
-        std.mem.startsWith(u8, name, "has_") or
-        std.mem.startsWith(u8, name, "can_") or
-        std.mem.startsWith(u8, name, "should_") or
-        std.mem.startsWith(u8, name, "was_") or
-        std.mem.startsWith(u8, name, "did_") or
-        std.mem.startsWith(u8, name, "enable") or
-        std.mem.startsWith(u8, name, "active") or
-        std.mem.eql(u8, name, "deleted") or
-        std.mem.eql(u8, name, "is_deleted") or
-        std.mem.eql(u8, name, "is_removed") or
-        std.mem.eql(u8, name, "is_enabled") or
-        std.mem.eql(u8, name, "is_active") or
-        std.mem.eql(u8, name, "is_valid");
+    return lookupHint(name) == .boolean;
 }
 
-/// JSON column name patterns: settings, data, metadata, etc.
+/// JSON column name patterns (delegates to lookup table).
 pub fn isJsonColumnName(name: []const u8) bool {
-    return std.mem.eql(u8, name, "settings") or
-        std.mem.eql(u8, name, "data") or
-        std.mem.eql(u8, name, "metadata") or
-        std.mem.eql(u8, name, "config") or
-        std.mem.eql(u8, name, "extra") or
-        std.mem.eql(u8, name, "params") or
-        std.mem.eql(u8, name, "options") or
-        std.mem.eql(u8, name, "json") or
-        std.mem.eql(u8, name, "props") or
-        std.mem.eql(u8, name, "attrs") or
-        std.mem.eql(u8, name, "properties") or
-        std.mem.endsWith(u8, name, "_json") or
-        std.mem.endsWith(u8, name, "_data") or
-        std.mem.endsWith(u8, name, "_meta") or
-        std.mem.endsWith(u8, name, "_config") or
-        std.mem.endsWith(u8, name, "_settings") or
-        std.mem.endsWith(u8, name, "_extra") or
-        std.mem.endsWith(u8, name, "_options");
+    return lookupHint(name) == .json;
 }
 
-/// Long text column name patterns: description, content, note, etc.
+/// Long text column name patterns (delegates to lookup table).
 pub fn isTextColumnName(name: []const u8) bool {
-    return std.mem.eql(u8, name, "description") or
-        std.mem.eql(u8, name, "content") or
-        std.mem.eql(u8, name, "note") or
-        std.mem.eql(u8, name, "notes") or
-        std.mem.eql(u8, name, "bio") or
-        std.mem.eql(u8, name, "summary") or
-        std.mem.eql(u8, name, "body") or
-        std.mem.eql(u8, name, "text") or
-        std.mem.eql(u8, name, "detail") or
-        std.mem.eql(u8, name, "remark") or
-        std.mem.eql(u8, name, "remarks") or
-        std.mem.eql(u8, name, "message") or
-        std.mem.eql(u8, name, "memo") or
-        std.mem.eql(u8, name, "address") or
-        std.mem.endsWith(u8, name, "_desc") or
-        std.mem.endsWith(u8, name, "_text") or
-        std.mem.endsWith(u8, name, "_content") or
-        std.mem.endsWith(u8, name, "_note") or
-        std.mem.endsWith(u8, name, "_body") or
-        std.mem.endsWith(u8, name, "_remark");
+    return lookupHint(name) == .text;
 }
 
 /// Check if a SQL type string is a datetime/timestamp type.
@@ -79,4 +122,64 @@ pub fn isCurrentTimestamp(dv: []const u8) bool {
     return std.mem.eql(u8, dv, "CURRENT_TIMESTAMP") or std.mem.eql(u8, dv, "now()");
 }
 
-const std = @import("std");
+// ─── Unit Tests ──────────────────────────────────────────────
+
+const testing = std.testing;
+
+test "hints: boolean column names" {
+    try testing.expect(isBooleanColumnName("is_active"));
+    try testing.expect(isBooleanColumnName("has_data"));
+    try testing.expect(isBooleanColumnName("can_edit"));
+    try testing.expect(isBooleanColumnName("should_notify"));
+    try testing.expect(isBooleanColumnName("was_deleted"));
+    try testing.expect(isBooleanColumnName("did_migrate"));
+    try testing.expect(isBooleanColumnName("enabled"));
+    try testing.expect(isBooleanColumnName("active"));
+    try testing.expect(isBooleanColumnName("deleted"));
+    try testing.expect(!isBooleanColumnName("name"));
+    try testing.expect(!isBooleanColumnName("description"));
+}
+
+test "hints: json column names" {
+    try testing.expect(isJsonColumnName("settings"));
+    try testing.expect(isJsonColumnName("data"));
+    try testing.expect(isJsonColumnName("metadata"));
+    try testing.expect(isJsonColumnName("config_json"));
+    try testing.expect(isJsonColumnName("user_settings"));
+    try testing.expect(isJsonColumnName("extra_options"));
+    try testing.expect(!isJsonColumnName("name"));
+    try testing.expect(!isJsonColumnName("is_active"));
+}
+
+test "hints: text column names" {
+    try testing.expect(isTextColumnName("description"));
+    try testing.expect(isTextColumnName("content"));
+    try testing.expect(isTextColumnName("bio"));
+    try testing.expect(isTextColumnName("long_text"));
+    try testing.expect(isTextColumnName("body_content"));
+    try testing.expect(!isTextColumnName("name"));
+    try testing.expect(!isTextColumnName("is_active"));
+}
+
+test "hints: lookupHint returns correct type" {
+    try testing.expectEqual(SqlHintType.boolean, lookupHint("is_active").?);
+    try testing.expectEqual(SqlHintType.json, lookupHint("settings").?);
+    try testing.expectEqual(SqlHintType.text, lookupHint("description").?);
+    try testing.expect(lookupHint("name") == null);
+}
+
+test "hints: datetime and timestamp" {
+    try testing.expect(isDatetimeSqlType("datetime"));
+    try testing.expect(isDatetimeSqlType("timestamp"));
+    try testing.expect(isDatetimeSqlType("timestamp without time zone"));
+    try testing.expect(isDatetimeSqlType(" timestamp "));
+    try testing.expect(!isDatetimeSqlType("date"));
+    try testing.expect(!isDatetimeSqlType("text"));
+}
+
+test "hints: current timestamp" {
+    try testing.expect(isCurrentTimestamp("CURRENT_TIMESTAMP"));
+    try testing.expect(isCurrentTimestamp("now()"));
+    try testing.expect(!isCurrentTimestamp("2024-01-01"));
+    try testing.expect(!isCurrentTimestamp("NULL"));
+}
