@@ -4,9 +4,12 @@ const ast_mod = @import("ast.zig");
 const codegen = @import("codegen.zig");
 const typed_ast = @import("typed_ast.zig");
 const dialect_mod = @import("dialect.zig");
+const dialect_enum = @import("dialect_enum.zig");
 const utils = @import("utils.zig");
 const Field = ast_mod.Field;
 const TypeInfo = ast_mod.TypeInfo;
+
+const Dialect = dialect_enum.Dialect;
 
 // ─── Helpers ───────────────────────────────────────────────
 
@@ -31,7 +34,7 @@ pub fn generateFromDiff(
     d: diff_mod.SchemaDiff,
     old_ast: ast_mod.ResolvedAst,
     new_ast: ast_mod.ResolvedAst,
-    dialect: codegen.Dialect,
+    dialect: Dialect,
 ) ![]const u8 {
     _ = old_ast;
     var aw = std.Io.Writer.Allocating.init(alloc);
@@ -74,8 +77,7 @@ pub fn generateFromDiff(
                     };
                     const single_typed = try tr.resolve(single_resolved, dialect);
                     if (single_typed.tables.len > 0) {
-                        const sql = try cg.generateSingleTypedTable(single_typed.tables[0]);
-                        try w.writeAll(sql);
+                        try cg.generateTypedTable(w, single_typed.tables[0]);
                     }
                     try w.writeAll("\n\n");
                 }

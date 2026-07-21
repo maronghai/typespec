@@ -32,12 +32,12 @@ pub fn reverseCheck(alloc: std.mem.Allocator, sql_expr: []const u8, col_name: []
 /// Convert a CheckConstraint to TPS bracket/brace syntax string.
 fn checkConstraintToTps(alloc: std.mem.Allocator, cc: CheckConstraint) ?[]const u8 {
     return switch (cc.kind) {
-        .range => std.fmt.allocPrint(alloc, "[{s}]", .{cc.expr}),
-        .range_upper_exclusive => std.fmt.allocPrint(alloc, "[{s})", .{cc.expr}),
-        .range_lower_exclusive => std.fmt.allocPrint(alloc, "({s}]", .{cc.expr}),
-        .range_both_exclusive => std.fmt.allocPrint(alloc, "({s})", .{cc.expr}),
-        .in_list => std.fmt.allocPrint(alloc, "{{{s}}}", .{cc.expr}),
-        .comparison => std.fmt.allocPrint(alloc, "{{{s}}}", .{cc.expr}),
+        .range => std.fmt.allocPrint(alloc, "[{s}]", .{cc.expr}) catch null,
+        .range_upper_exclusive => std.fmt.allocPrint(alloc, "[{s})", .{cc.expr}) catch null,
+        .range_lower_exclusive => std.fmt.allocPrint(alloc, "({s}]", .{cc.expr}) catch null,
+        .range_both_exclusive => std.fmt.allocPrint(alloc, "({s})", .{cc.expr}) catch null,
+        .in_list => std.fmt.allocPrint(alloc, "{{{s}}}", .{cc.expr}) catch null,
+        .comparison => std.fmt.allocPrint(alloc, "{{{s}}}", .{cc.expr}) catch null,
     };
 }
 

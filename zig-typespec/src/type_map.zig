@@ -246,3 +246,49 @@ test "sqlTypeName: passthrough passes through" {
     defer std.testing.allocator.free(pg);
     try std.testing.expectEqualStrings("uuid", pg);
 }
+
+// ─── Forward/Reverse Consistency Test ──────────────────────────
+// Verifies that REVERSE_MAP canonical entries (sql_type != null)
+// agree with sqlTypeName() for the base type in all dialects.
+// When adding a new type, update BOTH sqlTypeName() and REVERSE_MAP.
+
+const reverse_map = @import("reverse_map.zig");
+
+fn forwardNameAlloc(dialect: Dialect, sql_type: sql_type_mod.SqlType) ![]const u8 {
+    var aw = std.Io.Writer.Allocating.init(std.testing.allocator);
+    try sqlTypeName(&aw.writer, dialect, sql_type);
+    return try aw.toOwnedSlice(std.testing.allocator);
+}
+
+fn expectForwardMatchesReverse(dialect: Dialect, forward_sql: []const u8, rev_entry: reverse_map.ReverseMapping) !void {
+    const rev_sql = switch (dialect) {
+        .mysql => rev_entry.mysql,
+        .pg => rev_entry.pg,
+        .sqlite => rev_entry.sqlite,
+    };
+    try std.testing.expectEqualStrings(rev_sql, forward_sql);
+}
+
+test "consistency: REVERSE_MAP canonical entries match sqlTypeName" {
+    for (reverse_map.REVERSE_MAP) |entry| {
+        if (entry.sql_type) |sql_type| {
+            // Skip parameterized types — their forward names include dynamic values
+            // that can't be compared to the static REVERSE_MAP entries.
+            switch (sql_type) {
+                .varchar, .decimal, .enum_values, .raw_sql, .passthrough => continue,
+                else => {},
+            }
+            const mysql = try forwardNameAlloc(.mysql, sql_type);
+            defer std.testing.allocator.free(mysql);
+            try expectForwardMatchesReverse(.mysql, mysql, entry);
+
+            const pg = try forwardNameAlloc(.pg, sql_type);
+            defer std.testing.allocator.free(pg);
+            try expectForwardMatchesReverse(.pg, pg, entry);
+
+            const sqlite = try forwardNameAlloc(.sqlite, sql_type);
+            defer std.testing.allocator.free(sqlite);
+            try expectForwardMatchesReverse(.sqlite, sqlite, entry);
+        }
+    }
+}

@@ -67,7 +67,9 @@ pub const Codegen = struct {
         return try out.toOwnedSlice(self.alloc);
     }
 
-    fn generateTypedTable(self: Codegen, w: *Writer, table: typed_ast_mod.TypedTable) !void {
+    /// Emit a full CREATE TABLE statement for one table to the given writer.
+    /// Used by both forward codegen (generateFromTypedAst) and migration generation.
+    pub fn generateTypedTable(self: Codegen, w: *Writer, table: typed_ast_mod.TypedTable) !void {
         try w.writeAll("CREATE TABLE ");
         try self.backend.quoteIdent(w, table.name);
         try w.writeAll(" (\n");
