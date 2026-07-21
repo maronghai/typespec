@@ -1,5 +1,4 @@
 const std = @import("std");
-const type_map = @import("type_map.zig");
 const type_registry = @import("type_registry.zig");
 const dialect_enum = @import("dialect_enum.zig");
 const ast_mod = @import("ast.zig");
@@ -13,8 +12,9 @@ const Dialect = dialect_enum.Dialect;
 // Each variant carries enough information to render to any SQL dialect
 // or to non-SQL formats (JSON Schema, Prisma, etc.).
 //
-// Rendering: SqlType.toSql() delegates to type_map.sqlTypeName()
-// which is the single source of truth for dialect-specific type names.
+// toSql() is self-contained — no delegation to type_map.zig.
+// type_map.zig re-exports SqlType for backward compatibility and
+// provides helper functions (lookupCustomType, isNumericTpsType, etc.).
 
 pub const SqlType = union(enum) {
     int,
@@ -34,9 +34,102 @@ pub const SqlType = union(enum) {
     passthrough: []const u8,
 
     /// Render this SqlType to a dialect-specific SQL type string.
-    /// Delegates to type_map.sqlTypeName() — the single source of truth.
+    /// Self-contained — the single source of truth for SqlType → SQL rendering.
     pub fn toSql(self: SqlType, dialect: Dialect, w: *Writer) !void {
-        return type_map.sqlTypeName(w, dialect, self);
+        switch (self) {
+            .int => {
+                try w.writeAll(switch (dialect) {
+                    .mysql => "int",
+                    .pg => "integer",
+                    .sqlite => "INTEGER",
+                });
+            },
+            .bigint => {
+                try w.writeAll(switch (dialect) {
+                    .mysql => "bigint",
+                    .pg => "bigint",
+                    .sqlite => "INTEGER",
+                });
+            },
+            .decimal => |ds| {
+                const name = switch (dialect) {
+                    .mysql => "decimal",
+                    .pg => "numeric",
+                    .sqlite => "NUMERIC",
+                };
+                try w.print("{s}({d}, {d})", .{ name, ds.precision, ds.scale });
+            },
+            .varchar => |n| {
+                if (n > 0) {
+                    try w.print("varchar({d})", .{n});
+                } else {
+                    try w.writeAll(switch (dialect) {
+                        .mysql => "varchar(255)",
+                        .pg => "varchar(255)",
+                        .sqlite => "TEXT",
+                    });
+                }
+            },
+            .text => {
+                try w.writeAll(switch (dialect) {
+                    .mysql => "text",
+                    .pg => "text",
+                    .sqlite => "TEXT",
+                });
+            },
+            .blob => {
+                try w.writeAll(switch (dialect) {
+                    .mysql => "blob",
+                    .pg => "bytea",
+                    .sqlite => "BLOB",
+                });
+            },
+            .json => {
+                try w.writeAll(switch (dialect) {
+                    .mysql => "json",
+                    .pg => "json",
+                    .sqlite => "TEXT",
+                });
+            },
+            .datetime => {
+                try w.writeAll(switch (dialect) {
+                    .mysql => "datetime",
+                    .pg => "timestamp",
+                    .sqlite => "TEXT",
+                });
+            },
+            .date => {
+                try w.writeAll(switch (dialect) {
+                    .mysql => "date",
+                    .pg => "date",
+                    .sqlite => "TEXT",
+                });
+            },
+            .boolean => {
+                try w.writeAll(switch (dialect) {
+                    .mysql => "boolean",
+                    .pg => "boolean",
+                    .sqlite => "INTEGER",
+                });
+            },
+            .enum_values => |vals| {
+                switch (dialect) {
+                    .mysql => {
+                        try w.writeAll("ENUM(");
+                        for (vals, 0..) |v, vi| {
+                            if (vi > 0) try w.writeAll(", ");
+                            try w.print("'{s}'", .{v});
+                        }
+                        try w.writeAll(")");
+                    },
+                    .pg, .sqlite => {
+                        try w.writeAll("TEXT");
+                    },
+                }
+            },
+            .raw_sql => |sql| try w.writeAll(sql),
+            .passthrough => |t| try w.writeAll(t),
+        }
     }
 
     /// Render this SqlType to a JSON Schema type object (dialect-agnostic).
@@ -44,7 +137,6 @@ pub const SqlType = union(enum) {
         switch (self) {
             .int, .bigint => try w.writeAll("{\"type\":\"integer\"}"),
             .decimal => |ds| {
-                // multipleOf = 10^(-scale), e.g. scale=2 → 0.01
                 var multiple_of: f64 = 1.0;
                 var i: usize = 0;
                 while (i < ds.scale) : (i += 1) {
@@ -82,14 +174,14 @@ pub const SqlType = union(enum) {
     }
 
     /// Build a SqlType from a TypeInfo + dialect (resolves single-char TPS symbols).
+    /// Uses lookupSqlTypeDirect to avoid the stringly-typed round-trip.
     pub fn fromTypeInfo(type_info: TypeInfo, dialect: Dialect) SqlType {
         return switch (type_info) {
             .none => .{ .varchar = 0 },
             .simple => |s| {
                 if (s.len == 1) {
-                    // Use type_registry for single-char types
-                    if (type_registry.lookupSqlType(s, dialect)) |sql_type_name| {
-                        return inferSqlTypeFromName(sql_type_name);
+                    if (type_registry.lookupSqlTypeDirect(s, dialect)) |sql_type| {
+                        return sql_type;
                     }
                     return .{ .passthrough = s };
                 } else {
@@ -106,61 +198,12 @@ pub const SqlType = union(enum) {
             .raw_sql => |sql| .{ .raw_sql = sql },
         };
     }
-
-    /// Infer SqlType variant from a SQL type name string (used by registry lookup).
-    fn inferSqlTypeFromName(sql_name: []const u8) SqlType {
-        // Handle precision-bearing types first: decimal(...)/numeric(...)  /NUMERIC(...)
-        if (std.mem.indexOf(u8, sql_name, "(")) |open| {
-            if (std.mem.endsWith(u8, sql_name, ")")) {
-                const close = sql_name.len - 1;
-                const type_prefix = sql_name[0..open];
-                const interior = sql_name[open + 1 .. close];
-                var parts = std.mem.splitScalar(u8, interior, ',');
-                const p_str = std.mem.trim(u8, parts.next() orelse "16", " ");
-                const s_str = std.mem.trim(u8, parts.next() orelse "2", " ");
-                const precision = std.fmt.parseInt(usize, p_str, 10) catch 16;
-                const scale = std.fmt.parseInt(usize, s_str, 10) catch 2;
-                // Check if it's a decimal/numeric type
-                if (std.mem.eql(u8, type_prefix, "decimal") or
-                    std.mem.eql(u8, type_prefix, "numeric") or
-                    std.mem.eql(u8, type_prefix, "NUMERIC"))
-                {
-                    return .{ .decimal = .{ .precision = precision, .scale = scale } };
-                }
-                // Check if it's a varchar type
-                if (std.mem.eql(u8, type_prefix, "varchar") or
-                    std.mem.eql(u8, type_prefix, "VARCHAR"))
-                {
-                    return .{ .varchar = precision };
-                }
-            }
-        }
-        // Handle simple types (case-insensitive for common names)
-        const lower = blk: {
-            var buf: [32]u8 = undefined;
-            const len = @min(sql_name.len, 32);
-            for (sql_name[0..len], 0..) |c, i| {
-                buf[i] = std.ascii.toLower(c);
-            }
-            break :blk buf[0..len];
-        };
-        if (std.mem.eql(u8, lower, "int") or std.mem.eql(u8, lower, "integer")) return .int;
-        if (std.mem.eql(u8, lower, "bigint")) return .bigint;
-        if (std.mem.eql(u8, lower, "text")) return .text;
-        if (std.mem.eql(u8, lower, "boolean")) return .boolean;
-        if (std.mem.eql(u8, lower, "blob") or std.mem.eql(u8, lower, "bytea")) return .blob;
-        if (std.mem.eql(u8, lower, "json")) return .json;
-        if (std.mem.eql(u8, lower, "date")) return .date;
-        if (std.mem.eql(u8, lower, "datetime") or std.mem.eql(u8, lower, "timestamp")) return .datetime;
-        if (std.mem.eql(u8, lower, "varchar")) return .{ .varchar = 0 };
-        return .{ .passthrough = sql_name };
-    }
 };
 
 // ─── Tests ──────────────────────────────────────────────────────
 
 test "SqlType basic roundtrip" {
-    const int_type = SqlType{ .int };
+    const int_type = SqlType{.int};
     var aw = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer aw.deinit();
     try int_type.toSql(.mysql, &aw.writer);

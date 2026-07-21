@@ -23,7 +23,7 @@ pub fn main(init: std.process.Init) !void {
             std.process.exit(1);
         }
         const file_data = try compiler.readStdin(init.io, alloc);
-        return compiler.handleCompile(init.io, alloc, file_data, "<stdin>", null, false, .mysql, .sql);
+        return compiler.handleCompile(init.io, alloc, file_data, "<stdin>", null, false, .mysql);
     }
 
     const parsed = cli.parseArgs(alloc, arg_list) catch |err| {
@@ -75,7 +75,10 @@ fn dispatch(io: std.Io, alloc: std.mem.Allocator, parsed: cli.ParsedArgs) !void 
             else
                 try compiler.readStdin(io, alloc);
             const name = cmd.input orelse "<stdin>";
-            return compiler.handleCompile(io, alloc, file_data, name, cmd.output, cmd.trace, parsed.dialect, parsed.target);
+            return switch (parsed.target) {
+                .sql => compiler.handleCompile(io, alloc, file_data, name, cmd.output, cmd.trace, parsed.dialect),
+                .json_schema => compiler.handleCompileJsonSchema(io, alloc, file_data, name, cmd.output, cmd.trace, parsed.dialect),
+            };
         },
         .diff => |cmd| return compiler.handleDiff(io, alloc, cmd.old, cmd.new, parsed.dialect),
         .migrate => |cmd| return compiler.handleMigrate(io, alloc, cmd.old, cmd.new, cmd.output, parsed.dialect),

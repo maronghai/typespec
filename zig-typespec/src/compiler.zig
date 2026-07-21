@@ -7,6 +7,7 @@ const std = @import("std");
 pub const compilePipeline = @import("pipeline_forward.zig").compilePipeline;
 pub const compileToAst = @import("pipeline_forward.zig").compileToAst;
 pub const handleCompile = @import("pipeline_forward.zig").handleCompile;
+pub const handleCompileJsonSchema = @import("pipeline_forward.zig").handleCompileJsonSchema;
 pub const PipelineResult = @import("pipeline_forward.zig").PipelineResult;
 
 pub const handleDiff = @import("pipeline_diff.zig").handleDiff;

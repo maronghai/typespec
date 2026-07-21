@@ -84,8 +84,7 @@ pub const ColumnFlags = packed struct {
 // ─── SqlType: Dialect-agnostic structured type representation ──
 //
 // Defined in sql_type.zig, re-exported here for backward compatibility.
-// SqlType.toSql() delegates to type_map.sqlTypeName() — the single source
-// of truth for dialect-specific type name rendering.
+// SqlType.toSql() is self-contained in sql_type.zig (no delegation).
 
 pub const SqlType = sql_type_mod.SqlType;
 

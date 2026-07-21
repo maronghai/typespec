@@ -86,15 +86,31 @@ pub const Codegen = struct {
 
         var needs_comma = false;
 
-        // Columns
+        try emitColumnDefs(self, w, table, &needs_comma);
+        try emitInlineIndexes(self, w, table, &needs_comma);
+        for (table.indexes) |idx| {
+            try self.backend.emitIndex(w, idx, &needs_comma);
+        }
+        try emitConstraints(self, w, table, &needs_comma);
+
+        if (needs_comma) try w.writeAll("\n");
+
+        try self.backend.emitTableFooter(w, table.engine, null, table.comment);
+        try emitTableMetadata(self, w, table);
+        try emitStandaloneIndexes(self, w, table);
+        try emitInlineColumnStandaloneIndexes(self, w, table);
+    }
+
+    fn emitColumnDefs(self: Codegen, w: *Writer, table: typed_ast_mod.TypedTable, needs_comma: *bool) !void {
         for (table.columns) |col| {
-            if (needs_comma) try w.writeAll(",\n");
-            needs_comma = true;
+            if (needs_comma.*) try w.writeAll(",\n");
+            needs_comma.* = true;
             try w.writeAll("  ");
             try self.emitColumnDef(w, col);
         }
+    }
 
-        // Inline indexes (delegated entirely to backend)
+    fn emitInlineIndexes(self: Codegen, w: *Writer, table: typed_ast_mod.TypedTable, needs_comma: *bool) !void {
         for (table.columns) |col| {
             if (col.flags.inline_unique) {
                 var dominated = false;
@@ -110,7 +126,7 @@ pub const Codegen = struct {
                     if (dominated) break;
                 }
                 if (!dominated) {
-                    try self.backend.emitInlineIndex(w, col.name, true, &needs_comma);
+                    try self.backend.emitInlineIndex(w, col.name, true, needs_comma);
                 }
             }
             if (col.flags.inline_index) {
@@ -125,20 +141,16 @@ pub const Codegen = struct {
                     if (dominated) break;
                 }
                 if (!dominated) {
-                    try self.backend.emitInlineIndex(w, col.name, false, &needs_comma);
+                    try self.backend.emitInlineIndex(w, col.name, false, needs_comma);
                 }
             }
         }
+    }
 
-        // Standalone indexes (via table-level vtable method)
-        for (table.indexes) |idx| {
-            try self.backend.emitIndex(w, idx, &needs_comma);
-        }
-
-        // FKs
+    fn emitConstraints(self: Codegen, w: *Writer, table: typed_ast_mod.TypedTable, needs_comma: *bool) !void {
         for (table.fks) |fk| {
-            if (needs_comma) try w.writeAll(",\n");
-            needs_comma = true;
+            if (needs_comma.*) try w.writeAll(",\n");
+            needs_comma.* = true;
             try w.writeAll("  FOREIGN KEY (");
             for (fk.fields, 0..) |f, fi| {
                 if (fi > 0) try w.writeAll(", ");
@@ -165,13 +177,9 @@ pub const Codegen = struct {
                 }
             }
         }
+    }
 
-        if (needs_comma) try w.writeAll("\n");
-
-        // Table footer (delegated to backend)
-        try self.backend.emitTableFooter(w, table.engine, null, table.comment);
-
-        // Table and column comments (delegated to backend)
+    fn emitTableMetadata(self: Codegen, w: *Writer, table: typed_ast_mod.TypedTable) !void {
         if (table.comment) |c| {
             try self.backend.emitTableComment(w, table.name, c);
         }
@@ -180,24 +188,22 @@ pub const Codegen = struct {
                 try self.backend.emitColumnComment(w, table.name, col.name, c);
             }
         }
-
-        // TPS type metadata comments for roundtrip preservation (dialect-specific)
         for (table.columns) |col| {
             if (col.tps_type) |tps| {
                 try self.backend.emitTpsTypeMetadata(w, col.name, tps);
             }
         }
+    }
 
-        // Standalone CREATE INDEX (delegated to backend)
+    fn emitStandaloneIndexes(self: Codegen, w: *Writer, table: typed_ast_mod.TypedTable) !void {
         for (table.indexes) |idx| {
             try self.backend.emitStandaloneIndex(w, table.name, idx);
         }
+    }
 
-        // Standalone CREATE INDEX for inline regular indexes (PG/SQLite only)
-        // MySQL handles them inline via emitInlineIndex; PG/SQLite emitInlineIndex is no-op for non-unique
+    fn emitInlineColumnStandaloneIndexes(self: Codegen, w: *Writer, table: typed_ast_mod.TypedTable) !void {
         for (table.columns) |col| {
             if (col.flags.inline_index) {
-                // Skip if already covered by a standalone index
                 var dominated = false;
                 for (table.indexes) |idx| {
                     for (idx.fields) |f| {

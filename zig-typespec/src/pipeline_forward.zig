@@ -5,12 +5,11 @@ const ast_mod = @import("ast.zig");
 const semantic = @import("semantic.zig");
 const codegen = @import("codegen.zig");
 const typed_ast = @import("typed_ast.zig");
-const json_schema = @import("json_schema.zig");
 const diag = @import("diagnostic.zig");
 const io_mod = @import("io.zig");
-const cli = @import("cli.zig");
 
 // ─── Forward Pipeline: .tps → SQL ─────────────────────────────
+// No dependency on cli.zig — output format dispatch is the caller's responsibility.
 
 /// Intermediate results from the compilation pipeline.
 /// Returned by compilePipeline so trace mode can inspect each stage
@@ -68,7 +67,8 @@ pub fn compileToAst(io: std.Io, alloc: std.mem.Allocator, path: []const u8) !ast
     return pipeline.resolved;
 }
 
-pub fn handleCompile(io: std.Io, alloc: std.mem.Allocator, file_data: []const u8, input_name: []const u8, output_path: ?[]const u8, trace: bool, dialect: codegen.Dialect, target: cli.Target) !void {
+/// Compile .tps to SQL DDL (the default output path).
+pub fn handleCompile(io: std.Io, alloc: std.mem.Allocator, file_data: []const u8, input_name: []const u8, output_path: ?[]const u8, trace: bool, dialect: codegen.Dialect) !void {
     _ = input_name;
 
     const pipeline = try compilePipeline(io, alloc, file_data);
@@ -76,21 +76,35 @@ pub fn handleCompile(io: std.Io, alloc: std.mem.Allocator, file_data: []const u8
     var tr = typed_ast.TypeResolver.init(alloc);
     const typed = try tr.resolve(pipeline.resolved, dialect);
 
-    const output = switch (target) {
-        .json_schema => try json_schema.generate(alloc, typed),
-        .sql => blk: {
-            var cg = codegen.Codegen.init(alloc, dialect);
-            break :blk try cg.generateFromTypedAst(typed);
-        },
-    };
+    var cg = codegen.Codegen.init(alloc, dialect);
+    const output = try cg.generateFromTypedAst(typed);
 
     if (trace) {
         tokenizer.Tokenizer.diagnosticTrace(pipeline.lines);
         parser.diagnosticTrace(pipeline.tree);
         semantic.diagnosticTrace(pipeline.resolved);
-        if (target == .sql) {
-            codegen.diagnosticTrace(output);
-        }
+        codegen.diagnosticTrace(output);
+    }
+
+    try io_mod.writeOutput(io, output, output_path);
+}
+
+/// Compile .tps to JSON Schema (alternative output path).
+pub fn handleCompileJsonSchema(io: std.Io, alloc: std.mem.Allocator, file_data: []const u8, input_name: []const u8, output_path: ?[]const u8, trace: bool, dialect: codegen.Dialect) !void {
+    const json_schema = @import("json_schema.zig");
+    _ = input_name;
+
+    const pipeline = try compilePipeline(io, alloc, file_data);
+
+    var tr = typed_ast.TypeResolver.init(alloc);
+    const typed = try tr.resolve(pipeline.resolved, dialect);
+
+    const output = try json_schema.generate(alloc, typed);
+
+    if (trace) {
+        tokenizer.Tokenizer.diagnosticTrace(pipeline.lines);
+        parser.diagnosticTrace(pipeline.tree);
+        semantic.diagnosticTrace(pipeline.resolved);
     }
 
     try io_mod.writeOutput(io, output, output_path);

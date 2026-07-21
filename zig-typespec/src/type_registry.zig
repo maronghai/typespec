@@ -1,5 +1,6 @@
 const std = @import("std");
 const dialect_enum = @import("dialect_enum.zig");
+const sql_type_mod = @import("sql_type.zig");
 const Dialect = dialect_enum.Dialect;
 
 // ─── Type Registry: Single source of truth for TPS types ─────
@@ -42,6 +43,34 @@ pub const CORE_TYPES = [_]TypeEntry{
 /// Look up SQL type name for a TPS symbol in a given dialect.
 pub fn lookupSqlType(tps_symbol: []const u8, dialect: Dialect) ?[]const u8 {
     for (&CORE_TYPES) |entry| {
+        if (std.mem.eql(u8, entry.tps, tps_symbol)) {
+            return switch (dialect) {
+                .mysql => entry.mysql,
+                .pg => entry.pg,
+                .sqlite => entry.sqlite,
+            };
+        }
+    }
+    return null;
+}
+
+/// Look up SqlType variant directly for a TPS symbol in a given dialect.
+/// Avoids the stringly-typed round-trip (TPS → SQL string → SqlType).
+pub fn lookupSqlTypeDirect(tps_symbol: []const u8, dialect: Dialect) ?sql_type_mod.SqlType {
+    const SYMBOL_MAP = [_]struct { tps: []const u8, mysql: sql_type_mod.SqlType, pg: sql_type_mod.SqlType, sqlite: sql_type_mod.SqlType }{
+        .{ .tps = "n", .mysql = .int, .pg = .int, .sqlite = .int },
+        .{ .tps = "N", .mysql = .bigint, .pg = .bigint, .sqlite = .int },
+        .{ .tps = "m", .mysql = .{ .decimal = .{ .precision = 16, .scale = 2 } }, .pg = .{ .decimal = .{ .precision = 16, .scale = 2 } }, .sqlite = .{ .decimal = .{ .precision = 16, .scale = 2 } } },
+        .{ .tps = "M", .mysql = .{ .decimal = .{ .precision = 20, .scale = 6 } }, .pg = .{ .decimal = .{ .precision = 20, .scale = 6 } }, .sqlite = .{ .decimal = .{ .precision = 20, .scale = 6 } } },
+        .{ .tps = "S", .mysql = .text, .pg = .text, .sqlite = .text },
+        .{ .tps = "b", .mysql = .boolean, .pg = .boolean, .sqlite = .boolean },
+        .{ .tps = "B", .mysql = .blob, .pg = .blob, .sqlite = .blob },
+        .{ .tps = "j", .mysql = .json, .pg = .json, .sqlite = .json },
+        .{ .tps = "d", .mysql = .date, .pg = .date, .sqlite = .date },
+        .{ .tps = "t", .mysql = .datetime, .pg = .datetime, .sqlite = .datetime },
+        .{ .tps = "s", .mysql = .{ .varchar = 0 }, .pg = .{ .varchar = 0 }, .sqlite = .{ .varchar = 0 } },
+    };
+    for (&SYMBOL_MAP) |entry| {
         if (std.mem.eql(u8, entry.tps, tps_symbol)) {
             return switch (dialect) {
                 .mysql => entry.mysql,
