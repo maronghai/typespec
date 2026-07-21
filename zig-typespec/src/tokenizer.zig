@@ -4,6 +4,7 @@ pub const LineType = enum {
     Schema,
     Template,
     Table,
+    View,
     Field,
     FK,
     Index,
@@ -52,6 +53,12 @@ pub const Tokenizer = struct {
                 continue;
             }
             const lt = classifyLine(trimmed);
+            // View lines: parse as [&, name, =, query...] — query is everything after first =
+            if (lt == .View) {
+                const view_tokens = try tokenizeViewLine(alloc, trimmed);
+                try result.append(alloc, .{ .line_type = lt, .tokens = view_tokens, .raw = line, .trimmed = trimmed, .line_no = i + 1, .offset = line_offset });
+                continue;
+            }
             const toks = try tokenizeLine(alloc, trimmed);
             try result.append(alloc, .{ .line_type = lt, .tokens = toks, .raw = line, .trimmed = trimmed, .line_no = i + 1, .offset = line_offset });
         }
@@ -62,6 +69,7 @@ pub const Tokenizer = struct {
         if (line[0] == '$') return .Schema;
         if (line[0] == '%') return .Template;
         if (line[0] == '#') return .Table;
+        if (line[0] == '&') return .View;
         if (line[0] == '>') return .FK;
         if (line[0] == '!' and (line.len == 1 or line[1] == ' ')) return .CompositePK;
         if (line[0] == '^') return .Engine;
@@ -95,6 +103,41 @@ pub const Tokenizer = struct {
         return try tokens.toOwnedSlice(alloc);
     }
 
+    /// Tokenize a view line: `& name = SELECT ...` → [& , name, =, query]
+    /// The query is everything after the first `=`, kept as a single token.
+    fn tokenizeViewLine(alloc: std.mem.Allocator, line: []const u8) ![]const []const u8 {
+        var tokens = try std.ArrayList([]const u8).initCapacity(alloc, 4);
+        // & marker
+        try tokens.append(alloc, line[0..1]);
+        // Find first space after &
+        const rest = std.mem.trimStart(u8, line[1..], " ");
+        if (rest.len == 0) return try tokens.toOwnedSlice(alloc);
+        // Find end of name (space or =)
+        var name_end: usize = 0;
+        while (name_end < rest.len and rest[name_end] != ' ' and rest[name_end] != '=') : (name_end += 1) {}
+        try tokens.append(alloc, rest[0..name_end]);
+        // Skip to = sign
+        var eq_pos = name_end;
+        while (eq_pos < rest.len and rest[eq_pos] != '=') : (eq_pos += 1) {}
+        if (eq_pos < rest.len) {
+            try tokens.append(alloc, rest[eq_pos .. eq_pos + 1]); // =
+            const query = std.mem.trimStart(u8, rest[eq_pos + 1 ..], " ");
+            if (query.len > 0) {
+                // Strip trailing comment (-- ...)
+                var qend = query.len;
+                var i: usize = 0;
+                while (i + 1 < query.len) : (i += 1) {
+                    if (query[i] == '-' and query[i + 1] == '-') {
+                        qend = i;
+                        break;
+                    }
+                }
+                try tokens.append(alloc, std.mem.trimEnd(u8, query[0..qend], " "));
+            }
+        }
+        return try tokens.toOwnedSlice(alloc);
+    }
+
     fn splitToken(alloc: std.mem.Allocator, tokens: *std.ArrayList([]const u8), tok: []const u8) !void {
         // Comment - keep as is
         if (tok[0] == ':') {
@@ -103,7 +146,7 @@ pub const Tokenizer = struct {
         }
 
         // Split leading structural markers: #base → #, base
-        if (tok.len > 1 and (tok[0] == '#' or tok[0] == '%' or tok[0] == '$' or tok[0] == '@' or tok[0] == '^' or tok[0] == '~')) {
+        if (tok.len > 1 and (tok[0] == '#' or tok[0] == '%' or tok[0] == '$' or tok[0] == '@' or tok[0] == '^' or tok[0] == '~' or tok[0] == '&')) {
             try tokens.append(alloc, tok[0..1]);
             try splitToken(alloc, tokens, tok[1..]);
             return;
@@ -206,6 +249,10 @@ test "classifyLine: % is Template" {
 
 test "classifyLine: # is Table" {
     try std.testing.expectEqual(LineType.Table, Tokenizer.classifyLine("# user"));
+}
+
+test "classifyLine: & is View" {
+    try std.testing.expectEqual(LineType.View, Tokenizer.classifyLine("& active_users = SELECT id FROM users"));
 }
 
 test "classifyLine: > is FK" {

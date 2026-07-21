@@ -36,9 +36,17 @@ pub const TableMetadataDiff = struct {
     }
 };
 
+pub const ViewAction = enum { create, drop, modify };
+
+pub const ViewDiff = struct {
+    name: []const u8,
+    action: ViewAction,
+};
+
 pub const SchemaDiff = struct {
     table_diffs: []const TableDiff,
     dropped_tables: [][]const u8,
+    view_diffs: []const ViewDiff,
 };
 
 pub const TableDiff = struct {
@@ -69,6 +77,7 @@ const optionalStrEq = utils.optionalStrEq;
 pub fn diff(old: ast_mod.ResolvedAst, new: ast_mod.ResolvedAst, alloc: std.mem.Allocator) !SchemaDiff {
     var table_diffs = try std.ArrayList(TableDiff).initCapacity(alloc, 8);
     var dropped_tables = try std.ArrayList([]const u8).initCapacity(alloc, 4);
+    var view_diffs = try std.ArrayList(ViewDiff).initCapacity(alloc, 4);
 
     // Build name→table maps
     var old_map = std.StringHashMap(usize).init(alloc);
@@ -110,9 +119,38 @@ pub fn diff(old: ast_mod.ResolvedAst, new: ast_mod.ResolvedAst, alloc: std.mem.A
         }
     }
 
+    // Views: build name→view maps
+    var old_view_map = std.StringHashMap(usize).init(alloc);
+    for (old.views, 0..) |v, i| try old_view_map.put(v.name, i);
+    var new_view_map = std.StringHashMap(usize).init(alloc);
+    for (new.views, 0..) |v, i| try new_view_map.put(v.name, i);
+
+    // Views in new but not old → create
+    for (new.views) |new_view| {
+        if (!old_view_map.contains(new_view.name)) {
+            try view_diffs.append(alloc, .{ .name = new_view.name, .action = .create });
+        }
+    }
+    // Views in old but not new → drop
+    for (old.views) |old_view| {
+        if (!new_view_map.contains(old_view.name)) {
+            try view_diffs.append(alloc, .{ .name = old_view.name, .action = .drop });
+        }
+    }
+    // Views in both → check for query change
+    for (old.views) |old_view| {
+        if (new_view_map.get(old_view.name)) |new_idx| {
+            const new_view = new.views[new_idx];
+            if (!std.mem.eql(u8, old_view.query, new_view.query)) {
+                try view_diffs.append(alloc, .{ .name = old_view.name, .action = .modify });
+            }
+        }
+    }
+
     return .{
         .table_diffs = try table_diffs.toOwnedSlice(alloc),
         .dropped_tables = try dropped_tables.toOwnedSlice(alloc),
+        .view_diffs = try view_diffs.toOwnedSlice(alloc),
     };
 }
 
@@ -265,6 +303,7 @@ fn makeResolvedAst(_: std.mem.Allocator, tables: []const ast_mod.ResolvedTable) 
         .schema_charset = null,
         .custom_types = &.{},
         .tables = tables,
+        .views = &.{},
         .sql_comments = &.{},
     };
 }

@@ -33,21 +33,31 @@ pub const Codegen = struct {
             try self.backend.emitCreateDatabase(w, name, typed.schema_charset);
         }
 
-        // Interleave tables and sql_comments by line number
+        // Interleave tables, views, and sql_comments by line number
         var ti: usize = 0;
+        var vi: usize = 0;
         var ci: usize = 0;
-        while (ti < typed.tables.len or ci < typed.sql_comments.len) {
+        while (ti < typed.tables.len or vi < typed.views.len or ci < typed.sql_comments.len) {
             const table_line = if (ti < typed.tables.len) typed.tables[ti].line_no else std.math.maxInt(usize);
+            const view_line = if (vi < typed.views.len) typed.views[vi].line_no else std.math.maxInt(usize);
             const comment_line = if (ci < typed.sql_comments.len) typed.sql_comments[ci].line_no else std.math.maxInt(usize);
 
-            if (comment_line < table_line) {
+            const min_line = @min(table_line, view_line, comment_line);
+
+            if (comment_line == min_line) {
                 try w.writeAll(typed.sql_comments[ci].text);
                 try w.writeAll("\n");
                 ci += 1;
-            } else if (ti < typed.tables.len) {
+            } else if (view_line == min_line) {
+                try self.generateTypedView(w, typed.views[vi]);
+                vi += 1;
+                if (ti < typed.tables.len or vi < typed.views.len or ci < typed.sql_comments.len) {
+                    try w.writeAll("\n");
+                }
+            } else if (table_line == min_line) {
                 try self.generateTypedTable(w, typed.tables[ti]);
                 ti += 1;
-                if (ti < typed.tables.len or ci < typed.sql_comments.len) {
+                if (ti < typed.tables.len or vi < typed.views.len or ci < typed.sql_comments.len) {
                     try w.writeAll("\n");
                 }
             }
@@ -205,6 +215,14 @@ pub const Codegen = struct {
         }
     }
 
+    /// Emit a CREATE VIEW statement.
+    pub fn generateTypedView(self: Codegen, w: *Writer, view: typed_ast_mod.TypedView) !void {
+        try self.backend.emitCreateView(w, view.name, view.query);
+        if (view.comment) |c| {
+            try self.backend.emitTableComment(w, view.name, c);
+        }
+    }
+
     /// Render a single column definition (shared by CREATE TABLE and ALTER TABLE paths).
     /// When skip_name is true, the column name is not emitted (used by PG ALTER COLUMN TYPE).
     pub fn emitColumnDef(self: Codegen, w: *Writer, col: typed_ast_mod.TypedColumn) !void {
@@ -352,6 +370,7 @@ test "codegen: simple MySQL table" {
         .schema_name = null,
         .schema_charset = null,
         .tables = tables,
+        .views = &.{},
         .sql_comments = &.{},
     };
 
@@ -388,6 +407,7 @@ test "codegen: PostgreSQL table uses double quotes" {
         .schema_name = null,
         .schema_charset = null,
         .tables = tables,
+        .views = &.{},
         .sql_comments = &.{},
     };
 
@@ -467,6 +487,7 @@ test "codegen: SQLite AUTOINCREMENT in PRIMARY KEY" {
         .schema_name = null,
         .schema_charset = null,
         .tables = tables,
+        .views = &.{},
         .sql_comments = &.{},
     };
 
@@ -498,6 +519,7 @@ test "codegen: PG standalone COMMENT ON TABLE" {
         .schema_name = null,
         .schema_charset = null,
         .tables = tables,
+        .views = &.{},
         .sql_comments = &.{},
     };
 
@@ -529,6 +551,7 @@ test "codegen: SQLite COMMENT uses -- style" {
         .schema_name = null,
         .schema_charset = null,
         .tables = tables,
+        .views = &.{},
         .sql_comments = &.{},
     };
 
@@ -593,6 +616,7 @@ test "codegen: PG uses double quotes, no backticks" {
         .schema_name = null,
         .schema_charset = null,
         .tables = tables,
+        .views = &.{},
         .sql_comments = &.{},
     };
 
@@ -626,6 +650,7 @@ test "codegen: MySQL ENGINE in table footer" {
         .schema_name = null,
         .schema_charset = null,
         .tables = tables,
+        .views = &.{},
         .sql_comments = &.{},
     };
 
@@ -657,6 +682,7 @@ test "codegen: MySQL UNSIGNED column" {
         .schema_name = null,
         .schema_charset = null,
         .tables = tables,
+        .views = &.{},
         .sql_comments = &.{},
     };
 
@@ -691,6 +717,7 @@ test "codegen: PG COMMENT ON TABLE and COLUMN" {
         .schema_name = null,
         .schema_charset = null,
         .tables = tables,
+        .views = &.{},
         .sql_comments = &.{},
     };
 
@@ -721,6 +748,7 @@ test "codegen: SQLite uses -- comments" {
         .schema_name = null,
         .schema_charset = null,
         .tables = tables,
+        .views = &.{},
         .sql_comments = &.{},
     };
 
@@ -762,6 +790,7 @@ test "codegen: multiple tables separated by blank line" {
         .schema_name = null,
         .schema_charset = null,
         .tables = tables,
+        .views = &.{},
         .sql_comments = &.{},
     };
 

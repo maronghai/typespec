@@ -32,11 +32,10 @@ fn beginAlterTable(w: anytype, backend: dialect_mod.DialectBackend, table_name: 
 pub fn generateFromDiff(
     alloc: std.mem.Allocator,
     d: diff_mod.SchemaDiff,
-    old_ast: ast_mod.ResolvedAst,
-    new_ast: ast_mod.ResolvedAst,
+    new_typed: typed_ast.TypedAst,
+    new_resolved: ast_mod.ResolvedAst,
     dialect: Dialect,
 ) ![]const u8 {
-    _ = old_ast;
     var aw = std.Io.Writer.Allocating.init(alloc);
     const w = &aw.writer;
 
@@ -59,20 +58,46 @@ pub fn generateFromDiff(
         try w.writeAll(";\n\n");
     }
 
+    // 2. View diffs (create, drop, modify)
+    for (d.view_diffs) |vd| {
+        has_operations = true;
+        switch (vd.action) {
+            .drop => {
+                try w.writeAll("DROP VIEW IF EXISTS ");
+                try backend.quoteIdent(w, vd.name);
+                try w.writeAll(";\n\n");
+            },
+            .create, .modify => {
+                // For modify: drop then recreate (no ALTER VIEW in most dialects)
+                if (vd.action == .modify) {
+                    try w.writeAll("DROP VIEW IF EXISTS ");
+                    try backend.quoteIdent(w, vd.name);
+                    try w.writeAll(";\n\n");
+                }
+                // Find the view query from the new typed AST
+                if (findTypedView(new_typed, vd.name)) |view| {
+                    try backend.emitCreateView(w, view.name, view.query);
+                    try w.writeAll("\n");
+                }
+            },
+        }
+    }
+
     // 2. Table diffs (create or alter)
     for (d.table_diffs) |td| {
         switch (td.action) {
             .create => {
                 // New table — emit CREATE TABLE using the new AST table
                 has_operations = true;
-                if (findResolvedTable(new_ast, td.name)) |table| {
+                if (findResolvedTable(new_resolved, td.name)) |table| {
                     var single_tables = try std.ArrayList(ast_mod.ResolvedTable).initCapacity(alloc, 1);
                     try single_tables.append(alloc, table);
                     const single_resolved = ast_mod.ResolvedAst{
-                        .schema_name = new_ast.schema_name,
-                        .schema_charset = new_ast.schema_charset,
-                        .custom_types = new_ast.custom_types,
+                        .schema_name = new_resolved.schema_name,
+                        .schema_charset = new_resolved.schema_charset,
+                        .custom_types = new_resolved.custom_types,
                         .tables = try single_tables.toOwnedSlice(alloc),
+                        .views = &.{},
                         .sql_comments = &.{},
                     };
                     const single_typed = try tr.resolve(single_resolved, dialect);
@@ -95,7 +120,7 @@ pub fn generateFromDiff(
                             if (fd.new_field) |nf| {
                                 try emitComma(w, &sub_needs_comma);
                                 try w.writeAll("ADD COLUMN ");
-                                const typed_col = try tr.resolveColumn(nf, dialect, new_ast.custom_types);
+                                const typed_col = try tr.resolveColumn(nf, dialect, new_resolved.custom_types);
                                 try cg.emitColumnDef(w, typed_col);
                             }
                         },
@@ -110,7 +135,7 @@ pub fn generateFromDiff(
                                 try emitComma(w, &sub_needs_comma);
                                 try backend.emitAlterModifyColumn(w, nf.name);
                                 if (backend.modify_needs_column_def) {
-                                    const typed_col = try tr.resolveColumn(nf, dialect, new_ast.custom_types);
+                                    const typed_col = try tr.resolveColumn(nf, dialect, new_resolved.custom_types);
                                     try cg.emitColumnDefEx(w, typed_col, backend.modify_column_def_skips_name);
                                 }
                             }
@@ -122,7 +147,7 @@ pub fn generateFromDiff(
                                 try backend.emitAlterRenameColumn(w, old_name, fd.name);
                                 if (backend.rename_needs_column_def) {
                                     if (fd.new_field) |nf| {
-                                        const typed_col = try tr.resolveColumn(nf, dialect, new_ast.custom_types);
+                                        const typed_col = try tr.resolveColumn(nf, dialect, new_resolved.custom_types);
                                         try cg.emitColumnDef(w, typed_col);
                                     }
                                 }
@@ -270,6 +295,13 @@ fn findResolvedTable(ast: ast_mod.ResolvedAst, name: []const u8) ?ast_mod.Resolv
     return null;
 }
 
+fn findTypedView(typed: typed_ast.TypedAst, name: []const u8) ?typed_ast.TypedView {
+    for (typed.views) |view| {
+        if (std.mem.eql(u8, view.name, name)) return view;
+    }
+    return null;
+}
+
 // ─── Unit Tests ─────────────────────────────────────────────
 
 const testing = std.testing;
@@ -280,6 +312,17 @@ fn emptyResolvedAst() ast_mod.ResolvedAst {
         .schema_charset = null,
         .custom_types = &.{},
         .tables = &.{},
+        .views = &.{},
+        .sql_comments = &.{},
+    };
+}
+
+fn emptyTypedAst() typed_ast.TypedAst {
+    return .{
+        .schema_name = null,
+        .schema_charset = null,
+        .tables = &.{},
+        .views = &.{},
         .sql_comments = &.{},
     };
 }
@@ -289,8 +332,9 @@ test "migrate: empty diff produces BEGIN/COMMIT wrapper" {
     const d = diff_mod.SchemaDiff{
         .table_diffs = &.{},
         .dropped_tables = &.{},
+        .view_diffs = &.{},
     };
-    const sql = try generateFromDiff(alloc, d, emptyResolvedAst(), emptyResolvedAst(), .mysql);
+    const sql = try generateFromDiff(alloc, d, emptyTypedAst(), emptyResolvedAst(), .mysql);
     try testing.expect(std.mem.indexOf(u8, sql, "BEGIN;") != null);
     try testing.expect(std.mem.indexOf(u8, sql, "COMMIT;") != null);
 }
@@ -301,8 +345,9 @@ test "migrate: dropped table generates DROP TABLE" {
     const d = diff_mod.SchemaDiff{
         .table_diffs = &.{},
         .dropped_tables = dropped,
+        .view_diffs = &.{},
     };
-    const sql = try generateFromDiff(alloc, d, emptyResolvedAst(), emptyResolvedAst(), .mysql);
+    const sql = try generateFromDiff(alloc, d, emptyTypedAst(), emptyResolvedAst(), .mysql);
     try testing.expect(std.mem.indexOf(u8, sql, "DROP TABLE IF EXISTS") != null);
     try testing.expect(std.mem.indexOf(u8, sql, "users") != null);
 }
@@ -313,8 +358,9 @@ test "migrate: dropped table with PG dialect uses double quotes" {
     const d = diff_mod.SchemaDiff{
         .table_diffs = &.{},
         .dropped_tables = dropped,
+        .view_diffs = &.{},
     };
-    const sql = try generateFromDiff(alloc, d, emptyResolvedAst(), emptyResolvedAst(), .pg);
+    const sql = try generateFromDiff(alloc, d, emptyTypedAst(), emptyResolvedAst(), .pg);
     try testing.expect(std.mem.indexOf(u8, sql, "\"accounts\"") != null);
 }
 
@@ -324,8 +370,9 @@ test "migrate: dropped table with SQLite dialect uses double quotes" {
     const d = diff_mod.SchemaDiff{
         .table_diffs = &.{},
         .dropped_tables = dropped,
+        .view_diffs = &.{},
     };
-    const sql = try generateFromDiff(alloc, d, emptyResolvedAst(), emptyResolvedAst(), .sqlite);
+    const sql = try generateFromDiff(alloc, d, emptyTypedAst(), emptyResolvedAst(), .sqlite);
     try testing.expect(std.mem.indexOf(u8, sql, "\"logs\"") != null);
 }
 
@@ -335,7 +382,7 @@ test "migrate: migration header present" {
         .table_diffs = &.{},
         .dropped_tables = &.{},
     };
-    const sql = try generateFromDiff(alloc, d, emptyResolvedAst(), emptyResolvedAst(), .mysql);
+    const sql = try generateFromDiff(alloc, d, emptyTypedAst(), emptyResolvedAst(), .mysql);
     try testing.expect(std.mem.indexOf(u8, sql, "-- Migration: schema diff") != null);
     try testing.expect(std.mem.indexOf(u8, sql, "-- Generated by zig-typespec migrate") != null);
 }
@@ -346,8 +393,9 @@ test "migrate: multiple dropped tables" {
     const d = diff_mod.SchemaDiff{
         .table_diffs = &.{},
         .dropped_tables = dropped,
+        .view_diffs = &.{},
     };
-    const sql = try generateFromDiff(alloc, d, emptyResolvedAst(), emptyResolvedAst(), .mysql);
+    const sql = try generateFromDiff(alloc, d, emptyTypedAst(), emptyResolvedAst(), .mysql);
     // Count DROP TABLE statements
     var count: usize = 0;
     var search_sql = sql;

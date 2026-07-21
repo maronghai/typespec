@@ -7,18 +7,47 @@ const io_mod = @import("io.zig");
 
 // ─── Reverse Pipeline: SQL → .tps ─────────────────────────────
 
-/// Auto-detect SQL dialect from content patterns.
-/// Returns SQLite if content has SQLite-specific patterns, otherwise MySQL.
+/// Auto-detect SQL dialect from content patterns using scoring.
+/// Each pattern match adds +1 to the corresponding dialect score.
+/// Highest score wins; ties default to MySQL.
 pub fn detectSqlDialect(sql: []const u8) codegen.Dialect {
-    const sqlite_patterns = [_][]const u8{
-        "AUTOINCREMENT",
-        "INTEGER PRIMARY KEY",
-    };
-    for (sqlite_patterns) |pat| {
-        if (std.mem.indexOf(u8, sql, pat) != null) return .sqlite;
+    var scores = [3]u8{ 0, 0, 0 }; // mysql, pg, sqlite
+
+    // MySQL-specific patterns
+    if (std.mem.indexOf(u8, sql, "ENGINE=") != null) scores[0] += 1;
+    if (std.mem.indexOf(u8, sql, "CHARACTER SET") != null) scores[0] += 1;
+    if (std.mem.indexOf(u8, sql, "DEFAULT CHARSET") != null) scores[0] += 1;
+    if (std.mem.indexOf(u8, sql, "AUTO_INCREMENT") != null) scores[0] += 1;
+    if (std.mem.indexOf(u8, sql, "UNSIGNED") != null) scores[0] += 1;
+    if (std.mem.indexOf(u8, sql, "FULLTEXT INDEX") != null) scores[0] += 1;
+    if (std.mem.indexOf(u8, sql, "COMMENT '") != null) scores[0] += 1;
+
+    // PostgreSQL-specific patterns
+    if (std.mem.indexOf(u8, sql, "GENERATED ALWAYS AS IDENTITY") != null) scores[1] += 2;
+    if (std.mem.indexOf(u8, sql, "COMMENT ON") != null) scores[1] += 1;
+    if (std.mem.indexOf(u8, sql, "CREATE EXTENSION") != null) scores[1] += 2;
+    if (std.mem.indexOf(u8, sql, "ENCODING=") != null) scores[1] += 1;
+    if (std.mem.indexOf(u8, sql, "CREATE TYPE") != null) scores[1] += 1;
+    if (std.mem.indexOf(u8, sql, "IF NOT EXISTS\n  (") != null) scores[1] += 1; // PG style serial
+
+    // SQLite-specific patterns
+    if (std.mem.indexOf(u8, sql, "AUTOINCREMENT") != null) scores[2] += 2;
+    if (std.mem.indexOf(u8, sql, "INTEGER PRIMARY KEY") != null) scores[2] += 2;
+    if (std.mem.indexOf(u8, sql, "WITHOUT ROWID") != null) scores[2] += 2;
+    if (std.mem.indexOf(u8, sql, "STRICT") != null) scores[2] += 1;
+    if (std.mem.indexOf(u8, sql, "CREATE TABLE \"") != null) scores[2] += 1;
+
+    // Determine winner (ties → MySQL)
+    var best: usize = 0;
+    for (scores, 0..) |s, i| {
+        if (s > scores[best]) best = i;
     }
-    if (std.mem.indexOf(u8, sql, "CREATE TABLE \"") != null) return .sqlite;
-    return .mysql;
+
+    return switch (best) {
+        1 => .pg,
+        2 => .sqlite,
+        else => .mysql,
+    };
 }
 
 pub fn handleReverse(io: std.Io, alloc: std.mem.Allocator, file_data: []const u8, input_name: []const u8, output_path: ?[]const u8, with_templates: bool, dialect: codegen.Dialect) !void {
@@ -75,4 +104,76 @@ pub fn handleReverse(io: std.Io, alloc: std.mem.Allocator, file_data: []const u8
         try rcg.generate(schema);
 
     try io_mod.writeOutput(io, tps, output_path);
+}
+
+// ─── Unit Tests ─────────────────────────────────────────────
+
+const testing = std.testing;
+
+test "detectSqlDialect: MySQL patterns" {
+    const sql =
+        \\CREATE TABLE `user` (
+        \\  `id` int NOT NULL AUTO_INCREMENT,
+        \\  PRIMARY KEY (`id`)
+        \\) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    ;
+    try testing.expectEqual(codegen.Dialect.mysql, detectSqlDialect(sql));
+}
+
+test "detectSqlDialect: PostgreSQL patterns" {
+    const sql =
+        \\CREATE TABLE "user" (
+        \\  "id" integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+        \\);
+        \\COMMENT ON TABLE "user" IS 'User accounts';
+    ;
+    try testing.expectEqual(codegen.Dialect.pg, detectSqlDialect(sql));
+}
+
+test "detectSqlDialect: SQLite patterns" {
+    const sql =
+        \\CREATE TABLE "user" (
+        \\  "id" INTEGER PRIMARY KEY AUTOINCREMENT
+        \\);
+    ;
+    try testing.expectEqual(codegen.Dialect.sqlite, detectSqlDialect(sql));
+}
+
+test "detectSqlDialect: SQLite STRICT" {
+    const sql =
+        \\CREATE TABLE "config" (
+        \\  "key" TEXT NOT NULL,
+        \\  "value" TEXT
+        \\) STRICT;
+    ;
+    try testing.expectEqual(codegen.Dialect.sqlite, detectSqlDialect(sql));
+}
+
+test "detectSqlDialect: PostgreSQL CREATE EXTENSION" {
+    const sql =
+        \\CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+        \\CREATE TABLE "items" (
+        \\  "id" integer NOT NULL
+        \\);
+    ;
+    try testing.expectEqual(codegen.Dialect.pg, detectSqlDialect(sql));
+}
+
+test "detectSqlDialect: MySQL UNSIGNED and FULLTEXT" {
+    const sql =
+        \\CREATE TABLE `products` (
+        \\  `id` int UNSIGNED NOT NULL AUTO_INCREMENT,
+        \\  FULLTEXT INDEX `idx_search` (`name`)
+        \\);
+    ;
+    try testing.expectEqual(codegen.Dialect.mysql, detectSqlDialect(sql));
+}
+
+test "detectSqlDialect: ambiguous defaults to MySQL" {
+    const sql =
+        \\CREATE TABLE items (
+        \\  id int NOT NULL
+        \\);
+    ;
+    try testing.expectEqual(codegen.Dialect.mysql, detectSqlDialect(sql));
 }

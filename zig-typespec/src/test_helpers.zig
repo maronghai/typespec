@@ -21,6 +21,7 @@ pub fn makeTestAst(_: std.mem.Allocator, tables: []const ast_mod.Table, template
         .schema = null,
         .templates = templates,
         .tables = tables,
+        .views = &.{},
         .sql_comments = &.{},
     };
 }

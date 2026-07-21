@@ -93,7 +93,15 @@ pub const TypedAst = struct {
     schema_name: ?[]const u8,
     schema_charset: ?[]const u8,
     tables: []const TypedTable,
+    views: []const TypedView,
     sql_comments: []const SqlComment,
+};
+
+pub const TypedView = struct {
+    name: []const u8,
+    query: []const u8,
+    comment: ?[]const u8,
+    line_no: usize,
 };
 
 pub const TypedTable = struct {
@@ -154,8 +162,22 @@ pub const TypeResolver = struct {
             .schema_name = resolved.schema_name,
             .schema_charset = resolved.schema_charset,
             .tables = try tables.toOwnedSlice(self.alloc),
+            .views = try self.resolveViews(resolved.views),
             .sql_comments = resolved.sql_comments,
         };
+    }
+
+    fn resolveViews(self: *TypeResolver, views: []const ast_mod.View) ![]const TypedView {
+        var result = try std.ArrayList(TypedView).initCapacity(self.alloc, views.len);
+        for (views) |v| {
+            try result.append(self.alloc, .{
+                .name = v.name,
+                .query = v.query,
+                .comment = v.comment,
+                .line_no = v.line_no,
+            });
+        }
+        return try result.toOwnedSlice(self.alloc);
     }
 
     pub fn resolveColumn(self: *TypeResolver, field: Field, dialect: Dialect, custom_types: []const ast_mod.CustomType) !TypedColumn {

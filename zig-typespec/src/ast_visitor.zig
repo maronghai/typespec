@@ -222,6 +222,7 @@ test "visitor: count all AST nodes" {
         .schema = schema,
         .templates = templates,
         .tables = tables,
+        .views = &.{},
         .sql_comments = &.{},
     };
 
@@ -255,6 +256,7 @@ test "visitor: empty AST" {
         .schema = null,
         .templates = &.{},
         .tables = &.{},
+        .views = &.{},
         .sql_comments = &.{},
     };
 
@@ -312,6 +314,7 @@ test "visitor: walk FKs and indexes" {
         .schema = null,
         .templates = &.{},
         .tables = try alloc.dupe(Table, &.{table}),
+        .views = &.{},
         .sql_comments = &.{},
     };
 
@@ -354,6 +357,7 @@ test "visitor: selective callbacks" {
             .indexes = &.{},
             .line_no = 1,
         }}),
+        .views = &.{},
         .sql_comments = &.{},
     };
 

@@ -33,6 +33,23 @@ pub fn formatDiff(alloc: std.mem.Allocator, d: SchemaDiff, dialect: Dialect) ![]
         has_changes = true;
     }
 
+    for (d.view_diffs) |vd| {
+        switch (vd.action) {
+            .create => {
+                try w.print("-- CREATE VIEW {c}{s}{c}\n", .{ q, vd.name, q });
+                has_changes = true;
+            },
+            .drop => {
+                try w.print("-- DROP VIEW {c}{s}{c}\n", .{ q, vd.name, q });
+                has_changes = true;
+            },
+            .modify => {
+                try w.print("-- ALTER VIEW {c}{s}{c} (query changed)\n", .{ q, vd.name, q });
+                has_changes = true;
+            },
+        }
+    }
+
     for (d.table_diffs) |td| {
         if (td.action == .create) {
             try w.print("-- CREATE TABLE {c}{s}{c}\n", .{ q, td.name, q });
@@ -138,6 +155,23 @@ pub fn printDiff(d: SchemaDiff, dialect: Dialect) void {
     for (d.dropped_tables) |tname| {
         std.debug.print("-- DROP TABLE {c}{s}{c}\n", .{ q, tname, q });
         has_changes = true;
+    }
+
+    for (d.view_diffs) |vd| {
+        switch (vd.action) {
+            .create => {
+                std.debug.print("-- CREATE VIEW {c}{s}{c}\n", .{ q, vd.name, q });
+                has_changes = true;
+            },
+            .drop => {
+                std.debug.print("-- DROP VIEW {c}{s}{c}\n", .{ q, vd.name, q });
+                has_changes = true;
+            },
+            .modify => {
+                std.debug.print("-- ALTER VIEW {c}{s}{c} (query changed)\n", .{ q, vd.name, q });
+                has_changes = true;
+            },
+        }
     }
 
     for (d.table_diffs) |td| {

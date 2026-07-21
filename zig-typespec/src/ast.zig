@@ -161,10 +161,19 @@ pub const SqlComment = struct {
     line_no: usize,
 };
 
+pub const View = struct {
+    name: []const u8,
+    query: []const u8,
+    comment: ?[]const u8,
+    line_no: usize,
+    loc: ?SourceLocation = null,
+};
+
 pub const Ast = struct {
     schema: ?Schema,
     templates: []const Template,
     tables: []const Table,
+    views: []const View,
     sql_comments: []const SqlComment,
 };
 
@@ -186,6 +195,7 @@ pub const ResolvedAst = struct {
     /// Custom type definitions from ~ directives
     custom_types: []const CustomType,
     tables: []const ResolvedTable,
+    views: []const View,
     sql_comments: []const SqlComment,
 };
 

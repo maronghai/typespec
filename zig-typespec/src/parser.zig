@@ -71,6 +71,7 @@ pub const Parser = struct {
         var schema: ?Schema = null;
         var templates = try std.ArrayList(Template).initCapacity(self.alloc, 8);
         var tables = try std.ArrayList(Table).initCapacity(self.alloc, 8);
+        var views = try std.ArrayList(ast_mod.View).initCapacity(self.alloc, 8);
         var sql_comments = try std.ArrayList(SqlComment).initCapacity(self.alloc, 8);
         var custom_types = try std.ArrayList(ast_mod.CustomType).initCapacity(self.alloc, 8);
 
@@ -213,6 +214,47 @@ pub const Parser = struct {
                     cur_indexes.clearRetainingCapacity();
                     in_block = .table;
                 },
+                .View => {
+                    // Flush previous block
+                    if (in_block == .template) {
+                        try self.flushTemplate(&templates, cur_name, cur_parents_buf, cur_parents_len, &cur_fields, cur_line_no, cur_loc);
+                        cur_fields = try std.ArrayList(Field).initCapacity(self.alloc, 16);
+                        cur_parents_buf = try self.alloc.alloc([]const u8, 4);
+                        cur_parents_len = 0;
+                    } else if (in_block == .table) {
+                        try self.flushTable(&tables, cur_name, cur_comment, cur_template_ref, cur_engine, &cur_fields, &cur_fks, &cur_indexes, cur_line_no, cur_loc);
+                    }
+                    in_block = .none;
+
+                    // Parse view: tokens are [&, name, =, query]
+                    if (line.tokens.len >= 4) {
+                        const view_name = try self.alloc.dupe(u8, line.tokens[1]);
+                        // Find query token (after =)
+                        var query: []const u8 = "";
+                        for (line.tokens, 0..) |tok, ti| {
+                            if (std.mem.eql(u8, tok, "=") and ti + 1 < line.tokens.len) {
+                                query = try self.alloc.dupe(u8, line.tokens[ti + 1]);
+                                break;
+                            }
+                        }
+                        try views.append(self.alloc, .{
+                            .name = view_name,
+                            .query = query,
+                            .comment = null,
+                            .line_no = line.line_no,
+                            .loc = Parser.locFromLine(line, line.tokens[0]),
+                        });
+                    } else if (line.tokens.len == 2) {
+                        // `& name` without query — will produce empty query
+                        try views.append(self.alloc, .{
+                            .name = try self.alloc.dupe(u8, line.tokens[1]),
+                            .query = "",
+                            .comment = null,
+                            .line_no = line.line_no,
+                            .loc = Parser.locFromLine(line, line.tokens[0]),
+                        });
+                    }
+                },
                 .Field => {
                     if (in_block != .none) {
                         const fld = parse_field.parseField(self.alloc, line) catch |err| {
@@ -341,6 +383,7 @@ pub const Parser = struct {
             .schema = final_schema,
             .templates = try templates.toOwnedSlice(self.alloc),
             .tables = try tables.toOwnedSlice(self.alloc),
+            .views = try views.toOwnedSlice(self.alloc),
             .sql_comments = try sql_comments.toOwnedSlice(self.alloc),
         };
     }

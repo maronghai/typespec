@@ -56,6 +56,8 @@ pub const DialectBackend = struct {
     /// Emits the comment SQL. Caller must set up ALTER TABLE state first for inline comments.
     emitAlterTableComment: *const fn (w: *Writer, table_name: []const u8, comment: []const u8) anyerror!void,
     emitAlterEngine: *const fn (w: *Writer, engine: ?[]const u8) anyerror!void,
+    // ── View support ──
+    emitCreateView: *const fn (w: *Writer, name: []const u8, query: []const u8) anyerror!void,
     // ── P0: ALTER behavioral flags (eliminate dialect checks in caller) ──
     /// MySQL CHANGE COLUMN requires the full column definition after the rename.
     rename_needs_column_def: bool,
@@ -280,6 +282,7 @@ const mysql_backend = DialectBackend{
     .commentResult = mysqlCommentResult,
     .emitAlterTableComment = mysqlEmitAlterTableComment,
     .emitAlterEngine = mysqlEmitAlterEngine,
+    .emitCreateView = mysqlEmitCreateView,
     .rename_needs_column_def = true,
     .modify_needs_column_def = true,
     .modify_column_def_skips_name = false,
@@ -564,6 +567,7 @@ const pg_backend = DialectBackend{
     .commentResult = pgCommentResult,
     .emitAlterTableComment = pgEmitAlterTableComment,
     .emitAlterEngine = pgSqliteEmitAlterEngineWarning,
+    .emitCreateView = pgEmitCreateView,
     .rename_needs_column_def = false,
     .modify_needs_column_def = true,
     .modify_column_def_skips_name = true,
@@ -600,6 +604,7 @@ const sqlite_backend = DialectBackend{
     .commentResult = sqliteCommentResult,
     .emitAlterTableComment = sqliteEmitAlterTableComment,
     .emitAlterEngine = pgSqliteEmitAlterEngineWarning,
+    .emitCreateView = sqliteEmitCreateView,
     .rename_needs_column_def = false,
     .modify_needs_column_def = false,
     .modify_column_def_skips_name = false,
@@ -722,4 +727,31 @@ pub fn emitCheckExpr(w: *Writer, field_name: []const u8, ck: CheckConstraint) !v
             }
         },
     }
+}
+
+// ─── View backends ─────────────────────────────────────────────
+
+fn mysqlEmitCreateView(w: *Writer, name: []const u8, query: []const u8) anyerror!void {
+    try w.writeAll("CREATE OR REPLACE VIEW ");
+    try mysqlQuoteIdent(w, name);
+    try w.writeAll(" AS\n");
+    try w.writeAll(query);
+    try w.writeAll(";\n");
+}
+
+fn pgEmitCreateView(w: *Writer, name: []const u8, query: []const u8) anyerror!void {
+    try w.writeAll("CREATE OR REPLACE VIEW ");
+    try pgSqliteQuoteIdent(w, name);
+    try w.writeAll(" AS\n");
+    try w.writeAll(query);
+    try w.writeAll(";\n");
+}
+
+fn sqliteEmitCreateView(w: *Writer, name: []const u8, query: []const u8) anyerror!void {
+    // SQLite does not support CREATE OR REPLACE VIEW
+    try w.writeAll("CREATE VIEW ");
+    try pgSqliteQuoteIdent(w, name);
+    try w.writeAll(" AS\n");
+    try w.writeAll(query);
+    try w.writeAll(";\n");
 }
