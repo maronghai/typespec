@@ -28,6 +28,7 @@ balance   m =0
 - [Type System](#type-system)
 - [Schema Syntax](#schema-syntax)
 - [Template System](#template-system)
+- [Views](#views)
 - [Examples](#examples)
 - [Migration](#migration)
 - [Reverse Engineering](#reverse-engineering)
@@ -55,6 +56,7 @@ balance   m =0
 | `% user base + soft` | merge fields from multiple parents | Template mixins |
 | Suffix inference | `_id`→int, `_at`→datetime | Explicit type every time |
 | `migrate` | `ALTER TABLE ... ADD/MODIFY/DROP/RENAME COLUMN` | AST-level diff, not text diff |
+| `& view = SELECT ...` | `CREATE VIEW ... AS SELECT ...` | Inline view definition |
 
 **Average compression: 3-5x per field** — common declarations shrink dramatically.
 
@@ -169,6 +171,7 @@ See [schema.md](schema.md) for complete syntax reference.
 | `#name` | Table with template | `#base user` |
 | `%` | Template definition | `% base` |
 | `% >` | Template inheritance | `% audit > base` |
+| `&` | View | `& active_users = SELECT ...` |
 | `...` | Template slot (insertion point) | `...` |
 
 ### Field Modifiers
@@ -365,6 +368,32 @@ key s128 *
 value S
 ```
 
+## Views
+
+Define views inline with `&`:
+
+```asm
+# user
+id   n++
+name s32 *
+active b =1
+
+& active_users = SELECT id, name FROM user WHERE active = 1
+```
+
+Generates:
+
+```sql
+CREATE TABLE `user` (
+  `id` int AUTO_INCREMENT PRIMARY KEY,
+  `name` varchar(32) NOT NULL,
+  `active` boolean DEFAULT 1
+);
+CREATE VIEW `active_users` AS SELECT id, name FROM user WHERE active = 1;
+```
+
+Views are supported in all three dialects (MySQL, PostgreSQL, SQLite) and in schema diff/migration.
+
 ## Examples
 
 A full e-commerce schema with 21 tables: see [examples/complex-ecommerce.tps](examples/complex-ecommerce.tps) (426 lines → [430 lines SQL](examples/complex-ecommerce.sql)).
@@ -442,6 +471,9 @@ typespec migrate old.tps new.tps -d pg -o migration_pg.sql
 |--------|--------|
 | New table | `CREATE TABLE` |
 | Dropped table | `DROP TABLE IF EXISTS` |
+| New view | `CREATE VIEW` |
+| Dropped view | `DROP VIEW IF EXISTS` |
+| Modified view | `DROP VIEW` + `CREATE VIEW` |
 | Added column | `ALTER TABLE ... ADD COLUMN` |
 | Dropped column | `ALTER TABLE ... DROP COLUMN` |
 | Modified column | `ALTER TABLE ... MODIFY COLUMN` |
@@ -507,6 +539,7 @@ This ensures `typespec -d sqlite schema.tps | typespec reverse -d sqlite` produc
 | CHECK constraints (range, IN list, comparison) | ✅ |
 | MySQL COMMENT / PG COMMENT ON / SQLite comments | ✅ |
 | ENUM types | ✅ |
+| CREATE VIEW | ✅ |
 | Template extraction (`-t` flag) | ✅ |
 | Score-based template ranking (cross-table coverage) | ✅ |
 
