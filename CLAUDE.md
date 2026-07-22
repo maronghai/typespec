@@ -14,6 +14,8 @@ cd zig-typespec && zig build -Doptimize=ReleaseSafe   # Build (release)
 cd zig-typespec && zig build test                     # Unit tests (inline Zig test blocks)
 cd zig-typespec && zig fmt --check src/               # Formatting check
 cd zig-typespec && zig build bench                    # Benchmark (per-stage pipeline timing)
+cd zig-typespec && zig build bench -- --save           # Save current timing as baseline
+cd zig-typespec && zig build bench -- --check          # Check for regressions vs baseline (>20% = exit 1)
 ```
 
 ### Golden File Tests (shell-based, compare compiler output against .sql golden files)
@@ -71,6 +73,8 @@ Run a single golden test by filter: `bash tests/test.sh 01` (matches test name s
 
 - **Dialect-Aware Diff** ([diff_semantic.zig](zig-typespec/src/diff_semantic.zig)): Type equivalence checking uses canonical TPS symbol mapping — different symbols that resolve to the same SQL type are equivalent (e.g. `N4` ↔ `4`), but distinct types like `n` (int) vs `N` (bigint) are NOT equivalent. Diff engine accepts optional `Dialect` parameter.
 
+- **Two-Pass FK Diffing** ([diff_fks.zig](zig-typespec/src/diff_fks.zig)): First pass matches identical FKs (structure + actions). Second pass matches structurally identical FKs with different actions → `modify` (single ALTER TABLE with DROP+ADD). Remaining unmatched FKs → `drop`/`add`. Produces minimal migration SQL.
+
 - **Reverse Lookup Vtable**: `DialectBackend.reverseLookup` (optional) allows dialect-specific reverse engineering (e.g. SQLite's heuristic-based INTEGER/TEXT disambiguation). Fallback to general REVERSE_MAP matching when vtable is null.
 
 - **Unified ReverseResult**: `dialect.zig` defines the single `ReverseResult` struct (`tps`, `omit`, `score`, `is_parameterized`). Both `type_registry.zig` and `reverse_column.zig` re-export it — zero duplication across the reverse pipeline.
@@ -117,7 +121,7 @@ Run a single golden test by filter: `bash tests/test.sh 01` (matches test name s
 | `type_registry.zig` | TPS symbol → SqlType direct mapping (lookupSqlTypeDirect) + CORE_TYPES; re-exports dialect.ReverseResult |
 | `type_resolver.zig` | ResolvedAst → TypedAst type resolution |
 | `diff_indexes.zig` | Index diffing |
-| `diff_fks.zig` | FK diffing |
+| `diff_fks.zig` | FK diffing — two-pass matching: exact (structure+actions) → structural (structure only, actions changed → modify) |
 | `diff_semantic.zig` | Dialect-aware type equivalence (canonical TPS symbol mapping; n≠N, b≠B) |
 | `parse_template.zig` | Template header parsing + slot detection + flush logic |
 | `parse_table.zig` | Table header parsing + engine token stripping + view line parsing |

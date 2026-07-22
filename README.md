@@ -480,6 +480,7 @@ typespec migrate old.tps new.tps -d pg -o migration_pg.sql
 | Renamed column | `CHANGE COLUMN` (MySQL) / `RENAME COLUMN TO` (PG) |
 | Added/dropped index | `ADD INDEX` / `DROP INDEX` |
 | Added/dropped FK | `ADD FOREIGN KEY` / `DROP FOREIGN KEY` |
+| Modified FK (action only) | `DROP FOREIGN KEY` + `ADD FOREIGN KEY` in single `ALTER TABLE` |
 | No changes | Empty `BEGIN`/`COMMIT` |
 
 All operations are wrapped in a transaction. The diff engine works at the AST level — it detects field renames, type changes, and structural differences rather than comparing raw SQL text.
