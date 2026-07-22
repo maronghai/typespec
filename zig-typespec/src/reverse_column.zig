@@ -10,12 +10,7 @@ const Dialect = sp.Dialect;
 // Extracted from reverse_codegen.zig for single-responsibility.
 // Handles writing TPS column definitions from SQL column metadata.
 
-pub const TypeResult = struct {
-    tps: []const u8,
-    omit: bool,
-    /// Confidence score 0-100. Higher = more certain.
-    score: u8 = 100,
-};
+pub const TypeResult = dialect_mod.ReverseResult;
 
 pub fn reverseType(sql_type: []const u8, col_name: []const u8, is_auto_inc: bool, is_default_ts: bool, dialect: Dialect) TypeResult {
     const r = reverse_map.reverseLookup(sql_type, col_name, is_auto_inc, is_default_ts, dialect);

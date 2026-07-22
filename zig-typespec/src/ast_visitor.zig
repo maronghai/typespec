@@ -13,6 +13,11 @@ const ResolvedTable = ast_mod.ResolvedTable;
 // ─── AST Visitor Pattern ───────────────────────────────────────
 // Provides generic traversal for the AST without manual traversal
 // code in each pass. Visitors implement specific callbacks.
+//
+// Note: visitField receives *const Field (read-only). For semantic passes
+// that need mutable field access (autofk, suffix_inference), use manual
+// iteration over PassContext.tables — the walker pattern is designed for
+// read-only analysis passes like validate_type_modifiers.
 
 pub fn AstVisitor(comptime Context: type) type {
     return struct {

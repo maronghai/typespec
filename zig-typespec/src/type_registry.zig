@@ -1,5 +1,6 @@
 const std = @import("std");
 const dialect_enum = @import("dialect_enum.zig");
+const dialect_mod = @import("dialect.zig");
 const sql_type_mod = @import("sql_type.zig");
 const Dialect = dialect_enum.Dialect;
 
@@ -53,13 +54,7 @@ pub fn lookupSqlType(tps_symbol: []const u8, dialect: Dialect) ?[]const u8 {
 
 /// Look up TPS symbol for a SQL type in a given dialect.
 /// Returns .{ .tps, .omit } where omit indicates the symbol should be omitted in reverse output.
-pub const ReverseResult = struct {
-    tps: []const u8,
-    omit: bool,
-    /// Whether this entry is a parameterized type (varchar, decimal) that
-    /// requires special handling in reverse lookup.
-    is_parameterized: bool = false,
-};
+pub const ReverseResult = dialect_mod.ReverseResult;
 
 pub fn lookupTpsSymbol(sql_type: []const u8, dialect: Dialect) ?ReverseResult {
     // Parameterized types: check prefix matches

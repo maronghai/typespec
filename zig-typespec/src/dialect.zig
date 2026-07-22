@@ -15,6 +15,9 @@ pub const ReverseResult = struct {
     omit: bool,
     /// Confidence score 0-100. Higher = more certain.
     score: u8 = 100,
+    /// Whether this entry is a parameterized type (varchar, decimal) that
+    /// requires special handling in reverse lookup.
+    is_parameterized: bool = false,
 };
 
 // ─── canOmitType: shared helper for reverse lookup ────────────
