@@ -1,5 +1,6 @@
 const ast_mod = @import("ast.zig");
 const dialect_enum = @import("dialect_enum.zig");
+const diag = @import("diagnostic.zig");
 
 pub const Dialect = dialect_enum.Dialect;
 pub const IndexKind = ast_mod.IndexType;
@@ -69,7 +70,7 @@ pub const SqlDiagnostic = struct {
 
 pub const SqlParseResult = struct {
     schema: SqlSchema,
-    diagnostics: []const SqlDiagnostic,
+    diagnostics: []const diag.Diagnostic,
 };
 
 pub const CreateDbResult = struct {

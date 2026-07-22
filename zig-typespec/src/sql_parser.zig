@@ -1,6 +1,7 @@
 const std = @import("std");
 const common = @import("sql_parser_common.zig");
 const ast_mod = @import("ast.zig");
+const diag = @import("diagnostic.zig");
 const sql_parser_create = @import("sql_parser_create.zig");
 const sql_parser_fk = @import("sql_parser_fk.zig");
 const sql_parser_index = @import("sql_parser_index.zig");
@@ -21,7 +22,7 @@ pub const SqlForeignKey = common.SqlForeignKey;
 pub const SqlCheck = common.SqlCheck;
 pub const SqlTable = common.SqlTable;
 pub const SqlSchema = common.SqlSchema;
-pub const SqlDiagnostic = common.SqlDiagnostic;
+pub const SqlDiagnostic = diag.Diagnostic;
 pub const SqlParseResult = common.SqlParseResult;
 
 // ─── SQL DDL Parser ──────────────────────────────────────────────
@@ -30,7 +31,7 @@ pub const SqlParser = struct {
     alloc: std.mem.Allocator,
     src: []const u8,
     pos: usize,
-    diagnostics: std.ArrayList(SqlDiagnostic),
+    diagnostics: diag.DiagnosticCollector,
     dialect: Dialect,
 
     pub fn init(alloc: std.mem.Allocator, src: []const u8, dialect: Dialect) !SqlParser {
@@ -38,7 +39,7 @@ pub const SqlParser = struct {
             .alloc = alloc,
             .src = src,
             .pos = 0,
-            .diagnostics = try std.ArrayList(SqlDiagnostic).initCapacity(alloc, 8),
+            .diagnostics = try diag.DiagnosticCollector.init(alloc),
             .dialect = dialect,
         };
     }
@@ -83,26 +84,26 @@ pub const SqlParser = struct {
         const lc = self.lineColAt(pos);
         const msg = std.fmt.allocPrint(self.alloc, fmt, args) catch return;
         const src_line = self.getSourceLine(lc.line);
-        self.diagnostics.append(self.alloc, .{
+        self.diagnostics.record(.{
             .severity = .@"error",
             .line_no = lc.line,
             .col = lc.col,
             .message = msg,
-            .context = src_line,
-        }) catch {};
+            .source_line = src_line,
+        });
     }
 
     pub fn reportErrorAt(self: *SqlParser, at_pos: usize, comptime fmt: []const u8, args: anytype) void {
         const lc = self.lineColAt(at_pos);
         const msg = std.fmt.allocPrint(self.alloc, fmt, args) catch return;
         const src_line = self.getSourceLine(lc.line);
-        self.diagnostics.append(self.alloc, .{
+        self.diagnostics.record(.{
             .severity = .@"error",
             .line_no = lc.line,
             .col = lc.col,
             .message = msg,
-            .context = src_line,
-        }) catch {};
+            .source_line = src_line,
+        });
     }
 
     pub fn reportWarning(self: *SqlParser, comptime fmt: []const u8, args: anytype) void {
@@ -110,13 +111,13 @@ pub const SqlParser = struct {
         const lc = self.lineColAt(pos);
         const msg = std.fmt.allocPrint(self.alloc, fmt, args) catch return;
         const src_line = self.getSourceLine(lc.line);
-        self.diagnostics.append(self.alloc, .{
+        self.diagnostics.record(.{
             .severity = .warning,
             .line_no = lc.line,
             .col = lc.col,
             .message = msg,
-            .context = src_line,
-        }) catch {};
+            .source_line = src_line,
+        });
     }
 
     pub fn parse(self: *SqlParser) !SqlParseResult {

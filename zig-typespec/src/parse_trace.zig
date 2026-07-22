@@ -35,8 +35,8 @@ pub fn diagnosticTrace(tree: Ast) void {
                     continue;
                 }
                 std.debug.print("    {s: <20} ", .{field.name});
-                ast_mod.fmtTypeInfo(field.type_info);
-                ast_mod.fmtModifiers(field.modifiers);
+                trace.fmtTypeInfo(field.type_info);
+                trace.fmtModifiers(field.modifiers);
                 if (field.default_val) |dv| std.debug.print(" ={s}", .{dv.value});
                 if (field.check) |ck| std.debug.print(" [{s}]", .{ck.expr});
                 if (field.comment) |c| std.debug.print(" {s}", .{c});
@@ -56,8 +56,8 @@ pub fn diagnosticTrace(tree: Ast) void {
             for (table.fields) |field| {
                 if (std.mem.eql(u8, field.name, "...")) continue;
                 std.debug.print("    {s: <20} ", .{field.name});
-                ast_mod.fmtTypeInfo(field.type_info);
-                ast_mod.fmtModifiers(field.modifiers);
+                trace.fmtTypeInfo(field.type_info);
+                trace.fmtModifiers(field.modifiers);
                 if (field.default_val) |dv| std.debug.print(" ={s}", .{dv.value});
                 if (field.check) |ck| std.debug.print(" [{s}]", .{ck.expr});
                 if (field.fk) |fk| {

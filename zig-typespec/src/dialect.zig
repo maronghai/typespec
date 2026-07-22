@@ -75,6 +75,8 @@ pub const DialectBackend = struct {
     emitCreateView: *const fn (w: *Writer, name: []const u8, query: []const u8) anyerror!void,
     /// Render a SqlType to dialect-specific SQL type string. Single source of truth for type rendering.
     renderType: *const fn (w: *Writer, sql_type: SqlType) anyerror!void,
+    /// Render a FOREIGN KEY constraint (inline or standalone). Single source of truth for FK rendering.
+    emitForeignKey: *const fn (w: *Writer, fk: ast_mod.FkDecl) anyerror!void,
 
     // ── Optional methods (null = no-op for this dialect) ──
     /// CREATE DATABASE — only MySQL/PG implement; SQLite has no concept of databases.

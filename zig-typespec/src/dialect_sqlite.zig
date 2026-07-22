@@ -14,6 +14,10 @@ const SqlType = sql_type_mod.SqlType;
 
 // ─── SQLite Backend ────────────────────────────────────────────
 
+fn sqliteEmitForeignKey(w: *Writer, fk: ast_mod.FkDecl) anyerror!void {
+    try common.emitForeignKeyShared(w, fk, common.quoteIdentDoubleQuote);
+}
+
 fn sqliteEmitAlterModifyColumn(w: *Writer, _: []const u8) anyerror!void {
     try w.writeAll("-- WARNING: MODIFY COLUMN not supported in SQLite; requires table recreation\n");
 }
@@ -95,7 +99,7 @@ fn sqliteEmitConfidenceComment(w: *Writer, confidence: []const u8) anyerror!void
 
 fn sqliteRenderType(w: *Writer, sql_type: SqlType) anyerror!void {
     switch (sql_type) {
-        .int, .bigint => try w.writeAll("INTEGER"),
+        .int, .bigint, .smallint, .serial => try w.writeAll("INTEGER"),
         .decimal => |ds| try w.print("NUMERIC({d}, {d})", .{ ds.precision, ds.scale }),
         .varchar => |n| {
             if (n > 0) {
@@ -109,7 +113,9 @@ fn sqliteRenderType(w: *Writer, sql_type: SqlType) anyerror!void {
         .json => try w.writeAll("TEXT"),
         .datetime => try w.writeAll("TEXT"),
         .date => try w.writeAll("TEXT"),
+        .timestamptz => try w.writeAll("TEXT"),
         .boolean => try w.writeAll("INTEGER"),
+        .uuid => try w.writeAll("TEXT"),
         .enum_values => try w.writeAll("TEXT"),
         .raw_sql => |sql| try w.writeAll(sql),
         .passthrough => |t| try w.writeAll(t),
@@ -233,6 +239,7 @@ pub const sqlite_backend = DialectBackend{
     .emitAlterEngine = common.emitAlterEngineWarning,
     .emitCreateView = sqliteEmitCreateView,
     .renderType = sqliteRenderType,
+    .emitForeignKey = sqliteEmitForeignKey,
     // Optional: SQLite implements emitTpsTypeMetadata, emitConfidenceComment, reverseLookup
     .emitTpsTypeMetadata = sqliteEmitTpsTypeMetadata,
     .emitConfidenceComment = sqliteEmitConfidenceComment,

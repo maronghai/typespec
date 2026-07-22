@@ -19,6 +19,7 @@ const Dialect = dialect_enum.Dialect;
 pub const SqlType = union(enum) {
     int,
     bigint,
+    smallint,
     decimal: struct { precision: usize, scale: usize },
     varchar: usize, // 0 = TEXT
     text,
@@ -26,7 +27,10 @@ pub const SqlType = union(enum) {
     json,
     datetime,
     date,
+    timestamptz,
     boolean,
+    uuid,
+    serial,
     enum_values: []const []const u8,
     /// Raw SQL pass-through (custom type override).
     raw_sql: []const u8,
@@ -43,7 +47,7 @@ pub const SqlType = union(enum) {
     /// Render this SqlType to a JSON Schema type object (dialect-agnostic).
     pub fn toJsonSchema(self: SqlType, w: *Writer) !void {
         switch (self) {
-            .int, .bigint => try w.writeAll("{\"type\":\"integer\"}"),
+            .int, .bigint, .smallint, .serial => try w.writeAll("{\"type\":\"integer\"}"),
             .decimal => |ds| {
                 var multiple_of: f64 = 1.0;
                 var i: usize = 0;
@@ -66,9 +70,10 @@ pub const SqlType = union(enum) {
             .text => try w.writeAll("{\"type\":\"string\"}"),
             .blob => try w.writeAll("{\"type\":\"string\",\"contentEncoding\":\"base64\"}"),
             .json => try w.writeAll("{\"type\":\"object\"}"),
-            .datetime => try w.writeAll("{\"type\":\"string\",\"format\":\"date-time\"}"),
+            .datetime, .timestamptz => try w.writeAll("{\"type\":\"string\",\"format\":\"date-time\"}"),
             .date => try w.writeAll("{\"type\":\"string\",\"format\":\"date\"}"),
             .boolean => try w.writeAll("{\"type\":\"boolean\"}"),
+            .uuid => try w.writeAll("{\"type\":\"string\",\"format\":\"uuid\"}"),
             .enum_values => |vals| {
                 try w.writeAll("{\"type\":\"string\",\"enum\":[");
                 for (vals, 0..) |v, vi| {

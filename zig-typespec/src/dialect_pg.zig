@@ -8,8 +8,13 @@ const CommentResult = dialect.CommentResult;
 const IndexDecl = ast_mod.IndexDecl;
 const Writer = std.Io.Writer;
 const SqlType = sql_type_mod.SqlType;
+const emitForeignKeyShared = common.emitForeignKeyShared;
 
 // ─── PostgreSQL Backend ────────────────────────────────────────
+
+fn pgEmitForeignKey(w: *Writer, fk: ast_mod.FkDecl) anyerror!void {
+    try emitForeignKeyShared(w, fk, common.quoteIdentDoubleQuote);
+}
 
 fn pgEmitCreateDatabase(w: *Writer, name: []const u8, charset: ?[]const u8) anyerror!void {
     if (charset != null) {
@@ -82,6 +87,7 @@ fn pgRenderType(w: *Writer, sql_type: SqlType) anyerror!void {
     switch (sql_type) {
         .int => try w.writeAll("integer"),
         .bigint => try w.writeAll("bigint"),
+        .smallint => try w.writeAll("smallint"),
         .decimal => |ds| try w.print("numeric({d}, {d})", .{ ds.precision, ds.scale }),
         .varchar => |n| {
             if (n > 0) {
@@ -95,7 +101,10 @@ fn pgRenderType(w: *Writer, sql_type: SqlType) anyerror!void {
         .json => try w.writeAll("json"),
         .datetime => try w.writeAll("timestamp"),
         .date => try w.writeAll("date"),
+        .timestamptz => try w.writeAll("timestamptz"),
         .boolean => try w.writeAll("boolean"),
+        .uuid => try w.writeAll("uuid"),
+        .serial => try w.writeAll("serial"),
         .enum_values => try w.writeAll("TEXT"),
         .raw_sql => |sql| try w.writeAll(sql),
         .passthrough => |t| try w.writeAll(t),
@@ -138,6 +147,7 @@ pub const pg_backend = DialectBackend{
     .emitAlterEngine = common.emitAlterEngineWarning,
     .emitCreateView = pgEmitCreateView,
     .renderType = pgRenderType,
+    .emitForeignKey = pgEmitForeignKey,
     // Optional: PG implements emitCreateDatabase, emitAutoIncrement
     .emitCreateDatabase = pgEmitCreateDatabase,
     .emitAutoIncrement = pgEmitAutoIncrement,

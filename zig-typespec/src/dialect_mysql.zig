@@ -1,5 +1,6 @@
 const std = @import("std");
 const dialect = @import("dialect.zig");
+const common = @import("dialect_common.zig");
 const ast_mod = @import("ast.zig");
 const sql_type_mod = @import("sql_type.zig");
 const DialectBackend = dialect.DialectBackend;
@@ -9,6 +10,10 @@ const Writer = std.Io.Writer;
 const SqlType = sql_type_mod.SqlType;
 
 // ─── MySQL Backend ─────────────────────────────────────────────
+
+fn mysqlEmitForeignKey(w: *Writer, fk: ast_mod.FkDecl) anyerror!void {
+    try common.emitForeignKeyShared(w, fk, mysqlQuoteIdent);
+}
 
 fn mysqlQuoteIdent(w: *Writer, name: []const u8) anyerror!void {
     try w.print("`{s}`", .{name});
@@ -196,6 +201,7 @@ fn mysqlRenderType(w: *Writer, sql_type: SqlType) anyerror!void {
     switch (sql_type) {
         .int => try w.writeAll("int"),
         .bigint => try w.writeAll("bigint"),
+        .smallint => try w.writeAll("smallint"),
         .decimal => |ds| try w.print("decimal({d}, {d})", .{ ds.precision, ds.scale }),
         .varchar => |n| {
             if (n > 0) {
@@ -209,7 +215,10 @@ fn mysqlRenderType(w: *Writer, sql_type: SqlType) anyerror!void {
         .json => try w.writeAll("json"),
         .datetime => try w.writeAll("datetime"),
         .date => try w.writeAll("date"),
+        .timestamptz => try w.writeAll("timestamp"),
         .boolean => try w.writeAll("boolean"),
+        .uuid => try w.writeAll("char(36)"),
+        .serial => try w.writeAll("int"),
         .enum_values => |vals| {
             try w.writeAll("ENUM(");
             for (vals, 0..) |v, vi| {
@@ -259,6 +268,7 @@ pub const mysql_backend = DialectBackend{
     .emitAlterEngine = mysqlEmitAlterEngine,
     .emitCreateView = mysqlEmitCreateView,
     .renderType = mysqlRenderType,
+    .emitForeignKey = mysqlEmitForeignKey,
     // Optional: MySQL implements emitCreateDatabase, emitUnsigned, emitAutoIncrement
     .emitCreateDatabase = mysqlEmitCreateDatabase,
     .emitUnsigned = mysqlEmitUnsigned,

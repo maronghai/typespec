@@ -141,34 +141,8 @@ pub const Codegen = struct {
         for (table.fks) |fk| {
             if (needs_comma.*) try w.writeAll(",\n");
             needs_comma.* = true;
-            try w.writeAll("  FOREIGN KEY (");
-            for (fk.fields, 0..) |f, fi| {
-                if (fi > 0) try w.writeAll(", ");
-                try self.backend.quoteIdent(w, f);
-            }
-            try w.writeAll(") REFERENCES ");
-            try self.backend.quoteIdent(w, fk.ref_table);
-            try w.writeAll("(");
-            for (fk.ref_fields, 0..) |f, fi| {
-                if (fi > 0) try w.writeAll(", ");
-                try self.backend.quoteIdent(w, f);
-            }
-            try w.writeAll(")");
-            for (fk.actions) |action| {
-                try w.writeAll(" ");
-                switch (action.trigger) {
-                    .on_delete => try w.writeAll("ON DELETE"),
-                    .on_update => try w.writeAll("ON UPDATE"),
-                }
-                try w.writeAll(" ");
-                switch (action.action) {
-                    .cascade => try w.writeAll("CASCADE"),
-                    .set_null => try w.writeAll("SET NULL"),
-                    .set_default => try w.writeAll("SET DEFAULT"),
-                    .restrict => try w.writeAll("RESTRICT"),
-                    .no_action => try w.writeAll("NO ACTION"),
-                }
-            }
+            try w.writeAll("  ");
+            try self.backend.emitForeignKey(w, fk);
         }
     }
 

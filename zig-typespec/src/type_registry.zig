@@ -21,6 +21,7 @@ pub fn lookupSqlTypeDirect(tps_symbol: []const u8, dialect: Dialect) ?sql_type_m
     const SYMBOL_MAP = [_]struct { tps: []const u8, mysql: sql_type_mod.SqlType, pg: sql_type_mod.SqlType, sqlite: sql_type_mod.SqlType }{
         .{ .tps = "n", .mysql = .int, .pg = .int, .sqlite = .int },
         .{ .tps = "N", .mysql = .bigint, .pg = .bigint, .sqlite = .int },
+        .{ .tps = "i", .mysql = .smallint, .pg = .smallint, .sqlite = .smallint },
         .{ .tps = "m", .mysql = .{ .decimal = .{ .precision = 16, .scale = 2 } }, .pg = .{ .decimal = .{ .precision = 16, .scale = 2 } }, .sqlite = .{ .decimal = .{ .precision = 16, .scale = 2 } } },
         .{ .tps = "M", .mysql = .{ .decimal = .{ .precision = 20, .scale = 6 } }, .pg = .{ .decimal = .{ .precision = 20, .scale = 6 } }, .sqlite = .{ .decimal = .{ .precision = 20, .scale = 6 } } },
         .{ .tps = "S", .mysql = .text, .pg = .text, .sqlite = .text },
@@ -29,7 +30,10 @@ pub fn lookupSqlTypeDirect(tps_symbol: []const u8, dialect: Dialect) ?sql_type_m
         .{ .tps = "j", .mysql = .json, .pg = .json, .sqlite = .json },
         .{ .tps = "d", .mysql = .date, .pg = .date, .sqlite = .date },
         .{ .tps = "t", .mysql = .datetime, .pg = .datetime, .sqlite = .datetime },
+        .{ .tps = "T", .mysql = .timestamptz, .pg = .timestamptz, .sqlite = .timestamptz },
         .{ .tps = "s", .mysql = .{ .varchar = 0 }, .pg = .{ .varchar = 0 }, .sqlite = .{ .varchar = 0 } },
+        .{ .tps = "u", .mysql = .uuid, .pg = .uuid, .sqlite = .{ .passthrough = "TEXT" } },
+        .{ .tps = "p", .mysql = .serial, .pg = .serial, .sqlite = .{ .passthrough = "INTEGER" } },
     };
     for (&SYMBOL_MAP) |entry| {
         if (std.mem.eql(u8, entry.tps, tps_symbol)) {

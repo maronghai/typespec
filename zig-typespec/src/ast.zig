@@ -180,8 +180,6 @@ pub const Ast = struct {
     sql_comments: []const SqlComment,
 };
 
-// ─── Resolved AST (post-semantic analysis) ──────────────────────
-
 pub const ResolvedTable = struct {
     name: []const u8,
     comment: ?[]const u8,
@@ -201,44 +199,3 @@ pub const ResolvedAst = struct {
     views: []const View,
     sql_comments: []const SqlComment,
 };
-
-// ─── Diagnostic helpers for AST types ────────────────────────
-
-pub fn fmtTypeInfo(ti: TypeInfo) void {
-    switch (ti) {
-        .none => std.debug.print("--", .{}),
-        .simple => |s| std.debug.print("{s}", .{s}),
-        .raw_sql => |s| std.debug.print("{s}", .{s}),
-        .int_explicit => |n| std.debug.print("int({d})", .{n}),
-        .decimal_explicit => |ds| std.debug.print("decimal({d},{d})", .{ ds.precision, ds.scale }),
-        .varchar_explicit => |n| {
-            if (n > 0) {
-                std.debug.print("s{d}", .{n});
-            } else {
-                std.debug.print("s", .{});
-            }
-        },
-        .enum_type => |vals| {
-            std.debug.print("e(", .{});
-            for (vals, 0..) |v, vi| {
-                if (vi > 0) std.debug.print(",", .{});
-                std.debug.print("{s}", .{v});
-            }
-            std.debug.print(")", .{});
-        },
-    }
-}
-
-pub fn fmtModifiers(mods: []const Modifier) void {
-    for (mods) |mod| {
-        switch (mod.kind) {
-            .auto_inc_pk => std.debug.print(" ++", .{}),
-            .auto_inc => std.debug.print(" +", .{}),
-            .primary_key => std.debug.print(" !", .{}),
-            .not_null => std.debug.print(" *", .{}),
-            .unsigned => std.debug.print(" u", .{}),
-            .inline_unique => std.debug.print(" @u", .{}),
-            .inline_index => std.debug.print(" @", .{}),
-        }
-    }
-}

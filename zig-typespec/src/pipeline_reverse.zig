@@ -78,12 +78,12 @@ pub fn handleReverse(io: std.Io, alloc: std.mem.Allocator, file_data: []const u8
 
     for (result.diagnostics) |d| {
         diagnostics.record(.{
-            .severity = if (d.severity == .@"error") .@"error" else .warning,
+            .severity = d.severity,
             .line_no = d.line_no,
             .col = d.col,
             .file = input_name,
             .message = d.message,
-            .source_line = d.context,
+            .source_line = d.source_line,
         });
     }
 

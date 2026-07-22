@@ -146,6 +146,43 @@ pub fn emitIndexFields(w: *Writer, idx: IndexDecl) !void {
     }
 }
 
+// ─── Shared FK Rendering ────────────────────────────────────
+// Single source of truth for FOREIGN KEY constraint rendering.
+// Each dialect backend passes its own quoteIdent function pointer.
+
+pub const QuoteIdentFn = *const fn (w: *Writer, name: []const u8) anyerror!void;
+
+pub fn emitForeignKeyShared(w: *Writer, fk: ast_mod.FkDecl, quoteIdent: QuoteIdentFn) anyerror!void {
+    try w.writeAll("FOREIGN KEY (");
+    for (fk.fields, 0..) |f, fi| {
+        if (fi > 0) try w.writeAll(", ");
+        try quoteIdent(w, f);
+    }
+    try w.writeAll(") REFERENCES ");
+    try quoteIdent(w, fk.ref_table);
+    try w.writeAll("(");
+    for (fk.ref_fields, 0..) |f, fi| {
+        if (fi > 0) try w.writeAll(", ");
+        try quoteIdent(w, f);
+    }
+    try w.writeAll(")");
+    for (fk.actions) |action| {
+        try w.writeAll(" ");
+        switch (action.trigger) {
+            .on_delete => try w.writeAll("ON DELETE"),
+            .on_update => try w.writeAll("ON UPDATE"),
+        }
+        try w.writeAll(" ");
+        switch (action.action) {
+            .cascade => try w.writeAll("CASCADE"),
+            .set_null => try w.writeAll("SET NULL"),
+            .set_default => try w.writeAll("SET DEFAULT"),
+            .restrict => try w.writeAll("RESTRICT"),
+            .no_action => try w.writeAll("NO ACTION"),
+        }
+    }
+}
+
 // ─── Inline Column Comment No-ops ────────────────────────────
 // Both PG and SQLite handle column comments via standalone statements,
 // not inline in column definitions.

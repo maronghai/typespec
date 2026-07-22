@@ -297,7 +297,8 @@ fn emitFkDiffs(
                 if (fk_diff.new_fk) |fk| {
                     try beginAlterTable(w, backend, td.name, table_has_ops);
                     try emitComma(w, sub_needs_comma);
-                    try emitFkAdd(w, backend, fk);
+                    try w.writeAll("ADD ");
+                    try backend.emitForeignKey(w, fk);
                 }
             },
             .drop => {
@@ -315,40 +316,10 @@ fn emitFkDiffs(
                 }
                 if (fk_diff.new_fk) |new_fk| {
                     try emitComma(w, sub_needs_comma);
-                    try emitFkAdd(w, backend, new_fk);
+                    try w.writeAll("ADD ");
+                    try backend.emitForeignKey(w, new_fk);
                 }
             },
-        }
-    }
-}
-
-fn emitFkAdd(w: anytype, backend: dialect_mod.DialectBackend, fk: ast_mod.FkDecl) !void {
-    try w.writeAll("ADD FOREIGN KEY (");
-    for (fk.fields, 0..) |f, fi| {
-        if (fi > 0) try w.writeAll(", ");
-        try backend.quoteIdent(w, f);
-    }
-    try w.writeAll(") REFERENCES ");
-    try backend.quoteIdent(w, fk.ref_table);
-    try w.writeAll("(");
-    for (fk.ref_fields, 0..) |f, fi| {
-        if (fi > 0) try w.writeAll(", ");
-        try backend.quoteIdent(w, f);
-    }
-    try w.writeAll(")");
-    for (fk.actions) |action| {
-        try w.writeAll(" ");
-        switch (action.trigger) {
-            .on_delete => try w.writeAll("ON DELETE"),
-            .on_update => try w.writeAll("ON UPDATE"),
-        }
-        try w.writeAll(" ");
-        switch (action.action) {
-            .cascade => try w.writeAll("CASCADE"),
-            .set_null => try w.writeAll("SET NULL"),
-            .set_default => try w.writeAll("SET DEFAULT"),
-            .restrict => try w.writeAll("RESTRICT"),
-            .no_action => try w.writeAll("NO ACTION"),
         }
     }
 }

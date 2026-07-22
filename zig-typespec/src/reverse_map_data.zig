@@ -64,6 +64,10 @@ pub const REVERSE_MAP = [_]ReverseMapping{
     // ─── PostgreSQL types → reverse to core types ───
     .{ .tps = "n", .mysql = "serial", .pg = "serial", .sqlite = "INTEGER", .rev_priority = 20 },
     .{ .tps = "N", .mysql = "bigserial", .pg = "bigserial", .sqlite = "INTEGER", .rev_priority = 20 },
+    .{ .tps = "i", .mysql = "smallint", .pg = "smallint", .sqlite = "INTEGER", .rev_priority = 10, .sql_type = .smallint },
+    .{ .tps = "T", .mysql = "timestamp with time zone", .pg = "timestamptz", .sqlite = "TEXT", .rev_priority = 10, .sql_type = .timestamptz },
+    .{ .tps = "u", .mysql = "uuid", .pg = "uuid", .sqlite = "TEXT", .rev_priority = 10, .sql_type = .uuid },
+    .{ .tps = "p", .mysql = "serial", .pg = "serial", .sqlite = "INTEGER", .rev_priority = 10, .sql_type = .serial },
     .{ .tps = "m", .mysql = "numeric", .pg = "numeric", .sqlite = "NUMERIC", .rev_priority = 20 },
     .{ .tps = "s", .mysql = "varchar", .pg = "varchar", .sqlite = "TEXT", .rev_priority = 20 },
     .{ .tps = "b", .mysql = "boolean", .pg = "boolean", .sqlite = "INTEGER", .rev_priority = 15 },

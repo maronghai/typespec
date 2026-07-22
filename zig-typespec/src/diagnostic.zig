@@ -150,6 +150,11 @@ pub const DiagnosticCollector = struct {
         }
     }
 
+    /// Take ownership of the diagnostics slice (for returning from parsers).
+    pub fn toOwnedSlice(self: *DiagnosticCollector, alloc: std.mem.Allocator) ![]const Diagnostic {
+        return try self.diagnostics.toOwnedSlice(alloc);
+    }
+
     /// Print a summary line after all diagnostics.
     pub fn printSummary(self: *const DiagnosticCollector) void {
         const errs = self.errorCount();

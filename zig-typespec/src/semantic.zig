@@ -433,8 +433,8 @@ pub fn diagnosticTrace(resolved: ResolvedAst) void {
             for (table.fields) |field| {
                 if (std.mem.eql(u8, field.name, "...")) continue;
                 std.debug.print("    {s: <24} ", .{field.name});
-                ast_mod.fmtTypeInfo(field.type_info);
-                ast_mod.fmtModifiers(field.modifiers);
+                trace.fmtTypeInfo(field.type_info);
+                trace.fmtModifiers(field.modifiers);
                 if (field.default_val) |dv| std.debug.print(" DEFAULT {s}", .{dv.value});
                 if (field.check) |ck| std.debug.print(" CHECK({s})", .{ck.expr});
                 if (field.fk) |fk| {
