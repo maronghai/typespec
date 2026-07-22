@@ -131,6 +131,7 @@ One character = one type. Case matters.
 |--------|-----------------|---------------------|-------------|
 | `n` | int | integer | 32-bit integer |
 | `N` | bigint | bigint | 64-bit integer |
+| `i` | smallint | smallint | 16-bit integer |
 | `\d+` | int(n) | integer | Integer with display width (PG ignores width) |
 | `\d+,\d+` | decimal(m,n) | numeric(m,n) | Fixed-point number |
 | `m` | decimal(16,2) | numeric(16,2) | Standard currency |
@@ -143,6 +144,9 @@ One character = one type. Case matters.
 | `j` | json | json | JSON document |
 | `d` | date | date | Date only |
 | `t` | datetime | timestamp | Date + time |
+| `T` | timestamp | timestamptz | Timestamp with time zone |
+| `U` | char(36) | uuid | UUID type |
+| `p` | int | serial | Auto-incrementing integer |
 | `e(...)` | ENUM('...') | text + CHECK | Enumeration |
 
 **Suffix inference** — no type symbol needed:
@@ -186,7 +190,7 @@ See [schema.md](schema.md) for complete syntax reference.
 | `=` | DEFAULT value | any | `status 1 =0` |
 | `*` | NOT NULL | any | `name s32 *` |
 | `*=` | NOT NULL + DEFAULT | any | `status 1 *=0` |
-| `u` | UNSIGNED | n, N, \d+ | `count nu` |
+| `u` | UNSIGNED | n, N, i, \d+ | `count nu` |
 | `@u` | UNIQUE INDEX (inline) | any | `email s128 * @u` |
 | `@` | INDEX (inline) | any | `name s32 @` |
 | `@f` | FULLTEXT INDEX (inline) | any | `content S @f` |
@@ -425,7 +429,12 @@ template_def  = "%", [name], {WS, parent_ref}, newline, field_list
 parent_ref    = ">", WS, parent_name, {WS, "+", WS, parent_name}
               | parent_name, {WS, "+", WS, parent_name}
 type_symbol   = numeric_type | money_type | string_type | enum_type | atomic_type
+numeric_type  = "n" | "N" | "i" | decimal_type | int_explicit
+decimal_type  = "m" | "M"
+string_type   = "s" | varchar_explicit | "S"
+varchar_explicit = "s", positive_int
 enum_type     = "e", "(", (word | quoted_word), {",", (word | quoted_word)}, ")"
+atomic_type   = "b" | "B" | "j" | "d" | "t" | "T" | "U" | "p"
 quoted_word   = "'", word, "'"
 modifier      = "++" | "+" | "!" | "*=" | "*" | "=" | "u" | "@u" | "@"
 foreign_key_decl = ">", field_name, WS, ref_table, [".", ref_field],
@@ -449,6 +458,7 @@ See [schema.md §10](schema.md#10-grammar--diagnostics) for grammar notes and [t
 8. **DB-agnostic core** — symbols map to SQL standards; the compiler handles dialects
 9. **FK actions as postfix** — `-C`/`-N`/`C`/`N` appended to FK reference, no extra syntax
 10. **AST-level diff** — migration uses semantic comparison, not SQL text diff; detects renames, not just adds/drops
+11. **Lowercase for core, uppercase for variants** — `n`/`s`/`b`/`j`/`d`/`t` are core; `N`/`M`/`S`/`B`/`T`/`U` are variants. `i` and `p` are lowercase exceptions for smallint and serial.
 
 ## Migration
 
@@ -552,8 +562,8 @@ This ensures `typespec -d sqlite schema.tps | typespec reverse -d sqlite` produc
 
 ## FAQ
 
-**Q: What's the difference between `n` and `N`?**
-`n` = INT (32-bit, up to 2.1 billion). `N` = BIGINT (64-bit, up to 9.2 quintillion).
+**Q: What's the difference between `n`, `N`, and `i`?**
+`n` = INT (32-bit, up to 2.1 billion). `N` = BIGINT (64-bit, up to 9.2 quintillion). `i` = SMALLINT (16-bit, up to 32,767).
 
 **Q: What's the difference between `m` and `M`?**
 `m` = DECIMAL(16,2) (up to 999,999,999,999.99). `M` = DECIMAL(20,6) (high-precision).
@@ -580,9 +590,15 @@ Type differences between dialects:
 | Symbol | MySQL | PostgreSQL | SQLite |
 |--------|-------|-----------|--------|
 | `n` | `int` | `integer` | `INTEGER` |
+| `N` | `bigint` | `bigint` | `INTEGER` |
+| `i` | `smallint` | `smallint` | `INTEGER` |
 | `m` | `decimal(16,2)` | `numeric(16,2)` | `NUMERIC` |
+| `M` | `decimal(20,6)` | `numeric(20,6)` | `NUMERIC` |
 | `B` | `blob` | `bytea` | `BLOB` |
 | `t` | `datetime` | `timestamp` | `TEXT` |
+| `T` | `timestamp` | `timestamptz` | `TEXT` |
+| `U` | `char(36)` | `uuid` | `TEXT` |
+| `p` | `int` | `serial` | `INTEGER` |
 | `b` | `boolean` | `boolean` | `INTEGER` |
 | `e(...)` | `ENUM(...)` | `text` + `CHECK` | `TEXT` + `CHECK` |
 | `s32` | `varchar(32)` | `varchar(32)` | `TEXT` |
@@ -607,7 +623,10 @@ Use an explicit type to override suffix inference. For example, `point_at s32` �
 No. `+`/`++` only work on numeric types (`n`, `N`, `\d+`) and datetime types (`t`, `d`).
 
 **Q: How do I use UNSIGNED?**
-Fuse `u` with a numeric type: `nu` → `int UNSIGNED`, `Nu` → `bigint UNSIGNED`, `12u` → `int(12) UNSIGNED`.
+Fuse `u` with a numeric type: `nu` → `int UNSIGNED`, `Nu` → `bigint UNSIGNED`, `iu` → `smallint UNSIGNED`, `12u` → `int(12) UNSIGNED`.
+
+**Q: How do I use UUID or serial types?**
+Use `U` for UUID and `p` for serial: `token U` → uuid (PG: native uuid; MySQL: char(36)), `id p` → serial (PG: serial; MySQL/SQLite: int).
 
 ## License
 
