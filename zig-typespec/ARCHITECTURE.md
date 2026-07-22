@@ -54,9 +54,23 @@ TypeSpec is a compiler that transforms `.tps` schema files into SQL DDL. It cons
 | `parser.zig` | `parse_fk.zig` | Foreign key parsing (inline + standalone, actions) |
 | `parser.zig` | `parse_check.zig` | CHECK constraint classification (range, IN, comparison) |
 | `parser.zig` | `parse_index.zig` | Index + composite PK parsing |
+| `parser.zig` | `parse_template.zig` | Template header parsing + slot detection |
+| `parser.zig` | `parse_table.zig` | Table header parsing + engine token stripping |
 | `diff.zig` | `diff_fields.zig` | Field-level diffing + rename detection + equality helpers |
 | `diff.zig` | `diff_indexes.zig` | Index diffing |
 | `diff.zig` | `diff_fks.zig` | FK diffing |
+| `diff.zig` | `diff_semantic.zig` | Dialect-aware type equivalence (canonical TPS symbol mapping) |
+| `diff.zig` | `diff_format.zig` | Human-readable diff formatting |
+| `sql_parser.zig` | `sql_parser_helpers.zig` | Identifier/literal/word parsing, whitespace/comment skipping, trailing comment capture |
+| `sql_parser.zig` | `sql_parser_alter.zig` | ALTER TABLE statement parsing |
+| `sql_parser.zig` | `sql_parser_comment.zig` | COMMENT ON TABLE/COLUMN parsing |
+| `sql_parser.zig` | `sql_parser_create.zig` | CREATE DATABASE/TABLE/column parsing |
+| `sql_parser.zig` | `sql_parser_fk.zig` | Foreign key parsing (reverse pipeline) |
+| `sql_parser.zig` | `sql_parser_index.zig` | Index declaration parsing (reverse pipeline) |
+| `sql_parser.zig` | `sql_parser_check.zig` | CHECK constraint parsing (reverse pipeline) |
+| `reverse_codegen.zig` | `reverse_column.zig` | Column reverse engineering (type mapping, suffix, inline index detection) |
+| `reverse_codegen.zig` | `reverse_fk.zig` | FK reverse classification |
+| `reverse_codegen.zig` | `reverse_check.zig` | CHECK constraint reverse engineering |
 
 ## Forward Pipeline
 
@@ -113,7 +127,7 @@ Input (.tps text)
 Input (SQL DDL text)
     │
     ▼
-[1] SQL Parser (sql_parser.zig, 793 lines + 5 sql_parser_*.zig modules)
+[1] SQL Parser (sql_parser.zig, 413 lines + 8 sql_parser_*.zig modules)
     Recursive-descent DDL parsing (independent of forward tokenizer)
     Output: SqlSchema (tables, columns, indexes, FKs, checks)
     │
@@ -152,7 +166,7 @@ Input (SQL DDL text)
 
 ## DialectBackend Vtable
 
-26 function pointers + 3 behavioral flags for dialect-specific SQL generation:
+22 core + 6 optional function pointers + 3 behavioral flags for dialect-specific SQL generation (28 total methods):
 
 ```zig
 DialectBackend = struct {
@@ -188,6 +202,8 @@ DialectBackend = struct {
     emitAlterEngine:        fn(w, engine) -> !void,
     // View support
     emitCreateView:         fn(w, name, query) -> !void,
+    // Reverse engineering (optional)
+    reverseLookup:          fn(sql_type, col_name, is_auto_inc, is_default_ts) -> ?ReverseResult,
     // Behavioral flags (eliminate dialect checks in caller)
     rename_needs_column_def: bool,     // MySQL CHANGE COLUMN
     modify_needs_column_def: bool,     // MySQL/PG MODIFY COLUMN
@@ -279,7 +295,7 @@ TypeSpec uses a three-layer type mapping system:
 2. **DialectBackend vtable**: 26 function pointers + 3 behavioral flags cover all dialect differences. Adding a new dialect requires < 100 lines. codegen.zig is fully dialect-agnostic (zero `switch(dialect)` in production code).
 3. **Self-contained SqlType**: `SqlType.toSql()` in `sql_type.zig` is the single source of truth for type rendering. No delegation to `type_map.zig`. Adding a new type = add variant to union + add case to `toSql()` + add to `type_registry.zig`.
 4. **Direct type lookup**: `type_registry.lookupSqlTypeDirect()` returns `SqlType` variants directly, avoiding the stringly-typed round-trip (TPS symbol → SQL string → SqlType).
-5. **AST-level diff**: Semantic comparison, not text diff. Detects renames by signature matching.
+5. **AST-level diff**: Semantic comparison, not text diff. Detects renames by signature matching. Dialect-aware type equivalence (`diff_semantic.zig`) uses canonical TPS symbol mapping — different symbols that resolve to the same SQL type are equivalent (e.g., `N4` ↔ `4` in MySQL), but distinct types like `n` (int) vs `N` (bigint) are NOT equivalent.
 6. **Arena allocation**: All modules take `std.mem.Allocator`. Arena-style usage for command-lifetime memory.
 7. **God function decomposition**: Large functions (>100 lines) are split into focused sub-functions. `migrate.zig:generateFromDiff` (258→7 sub-fns), `codegen.zig:generateTypedTable` (135→5 sub-fns), `reverse_codegen.zig:generateInner` (215→4 sub-fns).
 8. **Pipeline-CLI separation**: `pipeline_forward.zig` has no dependency on `cli.zig`. Output format dispatch (SQL vs JSON Schema) is the caller's responsibility.
@@ -327,9 +343,10 @@ No code changes needed — users define types in `.tps` files. For built-in supp
 2. Add type mappings to `CORE_TYPES` in `type_registry.zig`
 3. Add reverse mappings to `REVERSE_MAP` in `reverse_map.zig`
 4. Update `SqlType.toSql()` in `sql_type.zig` with new dialect case
-5. Create `DialectBackend` instance in `dialect.zig` (implement all 26 methods + 3 flags)
-6. Register in `getBackend()` switch
-7. Add golden file tests in `tests/`
+5. Create `DialectBackend` instance in `dialect_<name>.zig` (implement all 22 core methods + optional methods + 3 flags)
+6. Register in `getBackend()` switch in `dialect.zig`
+7. Optionally implement `reverseLookup` for dialect-specific reverse engineering (e.g., SQLite's heuristic-based type disambiguation)
+8. Add golden file tests in `tests/`
 
 No changes needed in `codegen.zig` — it is fully dialect-agnostic.
 
@@ -337,14 +354,14 @@ No changes needed in `codegen.zig` — it is fully dialect-agnostic.
 
 | Layer | Files | Count | Coverage |
 |-------|-------|-------|----------|
-| Unit tests | `type_map.zig`, `type_registry.zig`, `sql_type.zig`, `tokenizer.zig`, `parser.zig`, `diff.zig`, `semantic.zig`, `template.zig`, `sql_parser_test.zig` | ~150 | Core logic |
+| Unit tests | `type_map.zig`, `type_registry.zig`, `sql_type.zig`, `tokenizer.zig`, `parser.zig`, `diff.zig`, `diff_semantic.zig`, `semantic.zig`, `template.zig`, `reverse_column.zig`, `sql_parser_test.zig` | ~160 | Core logic |
 | MySQL golden | `tests/test.sh` | 84 | Full pipeline |
 | PG golden | `tests/test_postgres.sh` | 82 | Full pipeline |
 | SQLite golden | `tests/test_sqlite.sh` | 24 | Full pipeline |
 | Migrate golden | `tests/test_migrate.sh` | 34 | Diff + migration SQL |
-| Reverse golden | `tests/test_reverse.sh` | 15 | SQL → .tps |
+| Reverse golden | `tests/test_reverse.sh` | 13 | SQL → .tps |
 | Diff golden | `tests/test_diff.sh` | 12 | Schema comparison |
 | Error recovery | `tests/test_error_recovery.sh` | 9 | Parse error handling |
 | JSON Schema | `tests/test_json_schema.sh` | 1 | JSON Schema output |
 | Roundtrip | `tests/test_roundtrip.sh` | 20 | Forward → reverse fidelity |
-| **Total** | | **~430+** | |
+| **Total** | | **~440+** | |

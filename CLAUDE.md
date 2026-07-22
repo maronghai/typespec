@@ -68,16 +68,19 @@ Run a single golden test by filter: `bash tests/test.sh 01` (matches test name s
 
 - **Self-contained SqlType** ([sql_type.zig](zig-typespec/src/sql_type.zig)): `SqlType.toSql()` is the single source of truth for type rendering — no delegation to `type_map.zig`. `type_registry.lookupSqlTypeDirect()` returns `SqlType` variants directly, avoiding stringly-typed round-trips.
 
-- **Dialect-Aware Diff** ([diff_semantic.zig](zig-typespec/src/diff_semantic.zig)): Type equivalence checking considers dialect-specific canonical forms (e.g. MySQL `n`/`N` both → int). Diff engine accepts optional `Dialect` parameter to avoid false-positive type changes across equivalent symbols.
+- **Dialect-Aware Diff** ([diff_semantic.zig](zig-typespec/src/diff_semantic.zig)): Type equivalence checking uses canonical TPS symbol mapping — different symbols that resolve to the same SQL type are equivalent (e.g. `N4` ↔ `4`), but distinct types like `n` (int) vs `N` (bigint) are NOT equivalent. Diff engine accepts optional `Dialect` parameter.
 
-- **Reverse Lookup Vtable**: `DialectBackend.reverseLookup` allows dialect-specific reverse engineering (e.g. SQLite's heuristic-based INTEGER/TEXT disambiguation). Fallback to general REVERSE_MAP matching when vtable is null.
+- **Reverse Lookup Vtable**: `DialectBackend.reverseLookup` (optional) allows dialect-specific reverse engineering (e.g. SQLite's heuristic-based INTEGER/TEXT disambiguation). Fallback to general REVERSE_MAP matching when vtable is null.
 
 ### Module Roles (by size, largest first)
 
 | Module | Role |
 |--------|------|
 | `codegen.zig` | TypedAst → SQL DDL text, 5 sub-functions (emitColumnDefs, emitInlineIndexes, emitConstraints, emitTableMetadata, emitStandaloneIndexes) + shared `isDominatedByExplicitIndex()` |
-| `sql_parser.zig` | Recursive-descent SQL DDL parser (reverse pipeline) |
+| `sql_parser.zig` | Recursive-descent SQL DDL parser (reverse pipeline), delegates to 8 sub-modules |
+| `sql_parser_helpers.zig` | Identifier/literal/word parsing, whitespace/comment skipping, trailing comment capture |
+| `sql_parser_alter.zig` | ALTER TABLE statement parsing |
+| `sql_parser_comment.zig` | COMMENT ON TABLE/COLUMN parsing |
 | `semantic.zig` | Pass manager + template resolution orchestration |
 | `diff.zig` | Table-level diff orchestration + SchemaDiff types (accepts optional Dialect for semantic comparison) |
 | `parser.zig` | Token-level `.tps` parser → AST (delegates to parse_*.zig modules; main dispatch + error recovery) |
@@ -111,7 +114,7 @@ Run a single golden test by filter: `bash tests/test.sh 01` (matches test name s
 | `type_resolver.zig` | ResolvedAst → TypedAst type resolution |
 | `diff_indexes.zig` | Index diffing |
 | `diff_fks.zig` | FK diffing |
-| `diff_semantic.zig` | Dialect-aware type equivalence (canonical TPS symbol mapping per dialect) |
+| `diff_semantic.zig` | Dialect-aware type equivalence (canonical TPS symbol mapping; n≠N, b≠B) |
 | `parse_template.zig` | Template header parsing + slot detection + flush logic |
 | `parse_table.zig` | Table header parsing + engine token stripping + view line parsing |
 | `json_schema.zig` | JSON Schema output (dialect-agnostic) |
