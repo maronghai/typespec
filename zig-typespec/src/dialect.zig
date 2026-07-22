@@ -2,10 +2,12 @@ const std = @import("std");
 const ast_mod = @import("ast.zig");
 const dialect_enum = @import("dialect_enum.zig");
 const common = @import("dialect_common.zig");
+const sql_type_mod = @import("sql_type.zig");
 const Writer = std.Io.Writer;
 const IndexDecl = ast_mod.IndexDecl;
 const CheckConstraint = ast_mod.CheckConstraint;
 const Dialect = dialect_enum.Dialect;
+const SqlType = sql_type_mod.SqlType;
 
 // ─── DialectBackend: vtable for dialect-specific SQL generation ─
 //
@@ -25,41 +27,45 @@ pub const CommentResult = enum {
 };
 
 pub const DialectBackend = struct {
-    // ── Original 5 methods ──
+    // ── Core methods (all dialects must implement) ──
     quoteIdent: *const fn (w: *Writer, name: []const u8) anyerror!void,
     emitIndex: *const fn (w: *Writer, idx: IndexDecl, needs_comma: *bool) anyerror!void,
-    emitCreateDatabase: *const fn (w: *Writer, name: []const u8, charset: ?[]const u8) anyerror!void,
-    emitUnsigned: *const fn (w: *Writer) anyerror!void,
     emitTimestampModifier: *const fn (w: *Writer, with_on_update: bool) anyerror!void,
-    // ── New methods (v0.4.8) ──
     emitTableFooter: *const fn (w: *Writer, engine: ?[]const u8, charset: ?[]const u8, comment: ?[]const u8) anyerror!void,
     emitTableComment: *const fn (w: *Writer, table_name: []const u8, comment: []const u8) anyerror!void,
     emitColumnComment: *const fn (w: *Writer, table_name: []const u8, col_name: []const u8, comment: []const u8) anyerror!void,
-    emitAutoIncrement: *const fn (w: *Writer) anyerror!void,
     emitPrimaryKey: *const fn (w: *Writer, auto_increment: bool) anyerror!void,
     emitInlineIndex: *const fn (w: *Writer, col_name: []const u8, is_unique: bool, needs_comma: *bool) anyerror!void,
     emitStandaloneIndex: *const fn (w: *Writer, table_name: []const u8, idx: IndexDecl) anyerror!void,
     emitInlineColumnComment: *const fn (w: *Writer, comment: []const u8) anyerror!void,
     emitEnumTypeCheck: *const fn (w: *Writer, col_name: []const u8, enum_values: []const []const u8) anyerror!void,
     emitInlineColumnStandaloneIndex: *const fn (w: *Writer, table_name: []const u8, col_name: []const u8) anyerror!void,
-    // ── P0: dialect-specific metadata comments ──
-    emitTpsTypeMetadata: *const fn (w: *Writer, col_name: []const u8, tps_type: []const u8) anyerror!void,
-    emitConfidenceComment: *const fn (w: *Writer, confidence: []const u8) anyerror!void,
-    // ── P0: ALTER TABLE migration methods (unified, no switch needed) ──
     emitAlterDropColumn: *const fn (w: *Writer, col_name: []const u8) anyerror!void,
     emitAlterModifyColumn: *const fn (w: *Writer, col_name: []const u8) anyerror!void,
     emitAlterRenameColumn: *const fn (w: *Writer, old_name: []const u8, new_name: []const u8) anyerror!void,
     emitAlterAddIndex: *const fn (w: *Writer, table_name: []const u8, idx: IndexDecl) anyerror!void,
     emitAlterDropIndex: *const fn (w: *Writer, idx: IndexDecl) anyerror!void,
     emitAlterDropFk: *const fn (w: *Writer, fk: ast_mod.FkDecl) anyerror!void,
-    /// Returns the comment operation type without emitting (for state setup).
     commentResult: *const fn () CommentResult,
-    /// Emits the comment SQL. Caller must set up ALTER TABLE state first for inline comments.
     emitAlterTableComment: *const fn (w: *Writer, table_name: []const u8, comment: []const u8) anyerror!void,
     emitAlterEngine: *const fn (w: *Writer, engine: ?[]const u8) anyerror!void,
-    // ── View support ──
     emitCreateView: *const fn (w: *Writer, name: []const u8, query: []const u8) anyerror!void,
-    // ── P0: ALTER behavioral flags (eliminate dialect checks in caller) ──
+    /// Render a SqlType to dialect-specific SQL type string. Single source of truth for type rendering.
+    renderType: *const fn (w: *Writer, sql_type: SqlType) anyerror!void,
+
+    // ── Optional methods (null = no-op for this dialect) ──
+    /// CREATE DATABASE — only MySQL/PG implement; SQLite has no concept of databases.
+    emitCreateDatabase: ?*const fn (w: *Writer, name: []const u8, charset: ?[]const u8) anyerror!void = null,
+    /// UNSIGNED modifier — only MySQL uses; PG/SQLite have no UNSIGNED.
+    emitUnsigned: ?*const fn (w: *Writer) anyerror!void = null,
+    /// AUTO_INCREMENT keyword — only MySQL uses; PG uses GENERATED AS IDENTITY (via emitAutoIncrement is not called for PG), SQLite uses PRIMARY KEY AUTOINCREMENT.
+    emitAutoIncrement: ?*const fn (w: *Writer) anyerror!void = null,
+    /// SQLite-specific TPS type metadata comment (e.g. `-- @tps col_type`).
+    emitTpsTypeMetadata: ?*const fn (w: *Writer, col_name: []const u8, tps_type: []const u8) anyerror!void = null,
+    /// SQLite-specific confidence comment (e.g. ` -- [score:42]`).
+    emitConfidenceComment: ?*const fn (w: *Writer, confidence: []const u8) anyerror!void = null,
+
+    // ── Behavioral flags (eliminate dialect checks in caller) ──
     /// MySQL CHANGE COLUMN requires the full column definition after the rename.
     rename_needs_column_def: bool,
     /// MODIFY COLUMN: MySQL/PG need column def, SQLite just emits a warning.
@@ -256,24 +262,99 @@ fn mysqlEmitAlterEngine(w: *Writer, engine: ?[]const u8) anyerror!void {
     try w.print("ENGINE={s}", .{engine orelse "InnoDB"});
 }
 
+// ─── Type Rendering (SqlType → dialect-specific SQL string) ───
+
+fn mysqlRenderType(w: *Writer, sql_type: SqlType) anyerror!void {
+    switch (sql_type) {
+        .int => try w.writeAll("int"),
+        .bigint => try w.writeAll("bigint"),
+        .decimal => |ds| try w.print("decimal({d}, {d})", .{ ds.precision, ds.scale }),
+        .varchar => |n| {
+            if (n > 0) {
+                try w.print("varchar({d})", .{n});
+            } else {
+                try w.writeAll("varchar(255)");
+            }
+        },
+        .text => try w.writeAll("text"),
+        .blob => try w.writeAll("blob"),
+        .json => try w.writeAll("json"),
+        .datetime => try w.writeAll("datetime"),
+        .date => try w.writeAll("date"),
+        .boolean => try w.writeAll("boolean"),
+        .enum_values => |vals| {
+            try w.writeAll("ENUM(");
+            for (vals, 0..) |v, vi| {
+                if (vi > 0) try w.writeAll(", ");
+                try w.print("'{s}'", .{v});
+            }
+            try w.writeAll(")");
+        },
+        .raw_sql => |sql| try w.writeAll(sql),
+        .passthrough => |t| try w.writeAll(t),
+    }
+}
+
+fn pgRenderType(w: *Writer, sql_type: SqlType) anyerror!void {
+    switch (sql_type) {
+        .int => try w.writeAll("integer"),
+        .bigint => try w.writeAll("bigint"),
+        .decimal => |ds| try w.print("numeric({d}, {d})", .{ ds.precision, ds.scale }),
+        .varchar => |n| {
+            if (n > 0) {
+                try w.print("varchar({d})", .{n});
+            } else {
+                try w.writeAll("varchar(255)");
+            }
+        },
+        .text => try w.writeAll("text"),
+        .blob => try w.writeAll("bytea"),
+        .json => try w.writeAll("json"),
+        .datetime => try w.writeAll("timestamp"),
+        .date => try w.writeAll("date"),
+        .boolean => try w.writeAll("boolean"),
+        .enum_values => try w.writeAll("TEXT"),
+        .raw_sql => |sql| try w.writeAll(sql),
+        .passthrough => |t| try w.writeAll(t),
+    }
+}
+
+fn sqliteRenderType(w: *Writer, sql_type: SqlType) anyerror!void {
+    switch (sql_type) {
+        .int, .bigint => try w.writeAll("INTEGER"),
+        .decimal => |ds| try w.print("NUMERIC({d}, {d})", .{ ds.precision, ds.scale }),
+        .varchar => |n| {
+            if (n > 0) {
+                try w.print("varchar({d})", .{n});
+            } else {
+                try w.writeAll("TEXT");
+            }
+        },
+        .text => try w.writeAll("TEXT"),
+        .blob => try w.writeAll("BLOB"),
+        .json => try w.writeAll("TEXT"),
+        .datetime => try w.writeAll("TEXT"),
+        .date => try w.writeAll("TEXT"),
+        .boolean => try w.writeAll("INTEGER"),
+        .enum_values => try w.writeAll("TEXT"),
+        .raw_sql => |sql| try w.writeAll(sql),
+        .passthrough => |t| try w.writeAll(t),
+    }
+}
+
 const mysql_backend = DialectBackend{
     .quoteIdent = mysqlQuoteIdent,
     .emitIndex = mysqlEmitIndex,
-    .emitCreateDatabase = mysqlEmitCreateDatabase,
-    .emitUnsigned = mysqlEmitUnsigned,
     .emitTimestampModifier = mysqlEmitTimestampModifier,
     .emitTableFooter = mysqlEmitTableFooter,
     .emitTableComment = mysqlEmitTableComment,
     .emitColumnComment = mysqlEmitColumnComment,
-    .emitAutoIncrement = mysqlEmitAutoIncrement,
     .emitPrimaryKey = mysqlEmitPrimaryKey,
     .emitInlineIndex = mysqlEmitInlineIndex,
     .emitStandaloneIndex = mysqlEmitStandaloneIndex,
     .emitInlineColumnComment = mysqlEmitInlineColumnComment,
     .emitEnumTypeCheck = mysqlEmitEnumTypeCheck,
     .emitInlineColumnStandaloneIndex = mysqlNoopInlineColumnIndex,
-    .emitTpsTypeMetadata = mysqlNoopTpsTypeMetadata,
-    .emitConfidenceComment = mysqlNoopConfidenceComment,
     .emitAlterDropColumn = mysqlEmitAlterDropColumn,
     .emitAlterModifyColumn = mysqlEmitAlterModifyColumn,
     .emitAlterRenameColumn = mysqlEmitAlterRenameColumn,
@@ -284,6 +365,12 @@ const mysql_backend = DialectBackend{
     .emitAlterTableComment = mysqlEmitAlterTableComment,
     .emitAlterEngine = mysqlEmitAlterEngine,
     .emitCreateView = mysqlEmitCreateView,
+    .renderType = mysqlRenderType,
+    // Optional: MySQL implements emitCreateDatabase, emitUnsigned, emitAutoIncrement
+    .emitCreateDatabase = mysqlEmitCreateDatabase,
+    .emitUnsigned = mysqlEmitUnsigned,
+    .emitAutoIncrement = mysqlEmitAutoIncrement,
+    // emitTpsTypeMetadata and emitConfidenceComment default to null (no-op)
     .rename_needs_column_def = true,
     .modify_needs_column_def = true,
     .modify_column_def_skips_name = false,
@@ -437,21 +524,16 @@ fn sqliteEmitPrimaryKey(w: *Writer, auto_increment: bool) anyerror!void {
 const pg_backend = DialectBackend{
     .quoteIdent = common.quoteIdentDoubleQuote,
     .emitIndex = common.emitIndex,
-    .emitCreateDatabase = pgEmitCreateDatabase,
-    .emitUnsigned = common.emitUnsigned,
     .emitTimestampModifier = common.emitTimestampModifier,
     .emitTableFooter = common.emitTableFooter,
     .emitTableComment = pgEmitTableComment,
     .emitColumnComment = pgEmitColumnComment,
-    .emitAutoIncrement = pgEmitAutoIncrement,
     .emitPrimaryKey = common.emitPrimaryKeyNormal,
     .emitInlineIndex = common.emitInlineIndexUnique,
     .emitStandaloneIndex = common.emitStandaloneIndex,
     .emitInlineColumnComment = common.noopInlineColumnCommentPG,
     .emitEnumTypeCheck = common.emitEnumTypeCheck,
     .emitInlineColumnStandaloneIndex = common.emitInlineColumnStandaloneIndex,
-    .emitTpsTypeMetadata = pgNoopTpsTypeMetadata,
-    .emitConfidenceComment = pgNoopConfidenceComment,
     .emitAlterDropColumn = common.emitAlterDropColumn,
     .emitAlterModifyColumn = pgEmitAlterModifyColumn,
     .emitAlterRenameColumn = common.emitAlterRenameColumn,
@@ -462,6 +544,11 @@ const pg_backend = DialectBackend{
     .emitAlterTableComment = pgEmitAlterTableComment,
     .emitAlterEngine = common.emitAlterEngineWarning,
     .emitCreateView = pgEmitCreateView,
+    .renderType = pgRenderType,
+    // Optional: PG implements emitCreateDatabase, emitAutoIncrement
+    .emitCreateDatabase = pgEmitCreateDatabase,
+    .emitAutoIncrement = pgEmitAutoIncrement,
+    // emitUnsigned, emitTpsTypeMetadata, emitConfidenceComment default to null (no-op)
     .rename_needs_column_def = false,
     .modify_needs_column_def = true,
     .modify_column_def_skips_name = true,
@@ -469,26 +556,19 @@ const pg_backend = DialectBackend{
 
 // ─── SQLite Backend ────────────────────────────────────────────
 
-fn sqliteEmitCreateDatabase(_: *Writer, _: []const u8, _: ?[]const u8) anyerror!void {}
-
 const sqlite_backend = DialectBackend{
     .quoteIdent = common.quoteIdentDoubleQuote,
     .emitIndex = common.emitIndex,
-    .emitCreateDatabase = sqliteEmitCreateDatabase,
-    .emitUnsigned = common.emitUnsigned,
     .emitTimestampModifier = common.emitTimestampModifier,
     .emitTableFooter = common.emitTableFooter,
     .emitTableComment = sqliteEmitTableComment,
     .emitColumnComment = sqliteEmitColumnComment,
-    .emitAutoIncrement = sqliteEmitAutoIncrement,
     .emitPrimaryKey = sqliteEmitPrimaryKey,
     .emitInlineIndex = common.emitInlineIndexUnique,
     .emitStandaloneIndex = common.emitStandaloneIndex,
     .emitInlineColumnComment = common.noopInlineColumnCommentSQLite,
     .emitEnumTypeCheck = common.emitEnumTypeCheck,
     .emitInlineColumnStandaloneIndex = common.emitInlineColumnStandaloneIndex,
-    .emitTpsTypeMetadata = sqliteEmitTpsTypeMetadata,
-    .emitConfidenceComment = sqliteEmitConfidenceComment,
     .emitAlterDropColumn = sqliteNoopAlterDropColumn,
     .emitAlterModifyColumn = sqliteEmitAlterModifyColumn,
     .emitAlterRenameColumn = common.emitAlterRenameColumn,
@@ -499,6 +579,11 @@ const sqlite_backend = DialectBackend{
     .emitAlterTableComment = sqliteEmitAlterTableComment,
     .emitAlterEngine = common.emitAlterEngineWarning,
     .emitCreateView = sqliteEmitCreateView,
+    .renderType = sqliteRenderType,
+    // Optional: SQLite implements emitTpsTypeMetadata, emitConfidenceComment
+    .emitTpsTypeMetadata = sqliteEmitTpsTypeMetadata,
+    .emitConfidenceComment = sqliteEmitConfidenceComment,
+    // emitCreateDatabase, emitUnsigned, emitAutoIncrement default to null (no-op)
     .rename_needs_column_def = false,
     .modify_needs_column_def = false,
     .modify_column_def_skips_name = false,
@@ -508,22 +593,6 @@ const sqlite_backend = DialectBackend{
 
 fn mysqlNoopInlineColumnIndex(_: *Writer, _: []const u8, _: []const u8) anyerror!void {
     // MySQL handles inline indexes via emitInlineIndex — no standalone needed
-}
-
-fn mysqlNoopTpsTypeMetadata(_: *Writer, _: []const u8, _: []const u8) anyerror!void {
-    // MySQL: no TPS type metadata comments needed
-}
-
-fn mysqlNoopConfidenceComment(_: *Writer, _: []const u8) anyerror!void {
-    // MySQL: no confidence comments needed
-}
-
-fn pgNoopTpsTypeMetadata(_: *Writer, _: []const u8, _: []const u8) anyerror!void {
-    // PG: no TPS type metadata comments needed
-}
-
-fn pgNoopConfidenceComment(_: *Writer, _: []const u8) anyerror!void {
-    // PG: no confidence comments needed
 }
 
 fn sqliteEmitTpsTypeMetadata(w: *Writer, col_name: []const u8, tps_type: []const u8) anyerror!void {

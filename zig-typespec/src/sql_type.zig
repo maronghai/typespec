@@ -34,102 +34,10 @@ pub const SqlType = union(enum) {
     passthrough: []const u8,
 
     /// Render this SqlType to a dialect-specific SQL type string.
-    /// Self-contained — the single source of truth for SqlType → SQL rendering.
+    /// Convenience wrapper — delegates to DialectBackend.renderType (the single source of truth).
     pub fn toSql(self: SqlType, dialect: Dialect, w: *Writer) !void {
-        switch (self) {
-            .int => {
-                try w.writeAll(switch (dialect) {
-                    .mysql => "int",
-                    .pg => "integer",
-                    .sqlite => "INTEGER",
-                });
-            },
-            .bigint => {
-                try w.writeAll(switch (dialect) {
-                    .mysql => "bigint",
-                    .pg => "bigint",
-                    .sqlite => "INTEGER",
-                });
-            },
-            .decimal => |ds| {
-                const name = switch (dialect) {
-                    .mysql => "decimal",
-                    .pg => "numeric",
-                    .sqlite => "NUMERIC",
-                };
-                try w.print("{s}({d}, {d})", .{ name, ds.precision, ds.scale });
-            },
-            .varchar => |n| {
-                if (n > 0) {
-                    try w.print("varchar({d})", .{n});
-                } else {
-                    try w.writeAll(switch (dialect) {
-                        .mysql => "varchar(255)",
-                        .pg => "varchar(255)",
-                        .sqlite => "TEXT",
-                    });
-                }
-            },
-            .text => {
-                try w.writeAll(switch (dialect) {
-                    .mysql => "text",
-                    .pg => "text",
-                    .sqlite => "TEXT",
-                });
-            },
-            .blob => {
-                try w.writeAll(switch (dialect) {
-                    .mysql => "blob",
-                    .pg => "bytea",
-                    .sqlite => "BLOB",
-                });
-            },
-            .json => {
-                try w.writeAll(switch (dialect) {
-                    .mysql => "json",
-                    .pg => "json",
-                    .sqlite => "TEXT",
-                });
-            },
-            .datetime => {
-                try w.writeAll(switch (dialect) {
-                    .mysql => "datetime",
-                    .pg => "timestamp",
-                    .sqlite => "TEXT",
-                });
-            },
-            .date => {
-                try w.writeAll(switch (dialect) {
-                    .mysql => "date",
-                    .pg => "date",
-                    .sqlite => "TEXT",
-                });
-            },
-            .boolean => {
-                try w.writeAll(switch (dialect) {
-                    .mysql => "boolean",
-                    .pg => "boolean",
-                    .sqlite => "INTEGER",
-                });
-            },
-            .enum_values => |vals| {
-                switch (dialect) {
-                    .mysql => {
-                        try w.writeAll("ENUM(");
-                        for (vals, 0..) |v, vi| {
-                            if (vi > 0) try w.writeAll(", ");
-                            try w.print("'{s}'", .{v});
-                        }
-                        try w.writeAll(")");
-                    },
-                    .pg, .sqlite => {
-                        try w.writeAll("TEXT");
-                    },
-                }
-            },
-            .raw_sql => |sql| try w.writeAll(sql),
-            .passthrough => |t| try w.writeAll(t),
-        }
+        const backend = @import("dialect.zig").getBackend(dialect);
+        try backend.renderType(w, self);
     }
 
     /// Render this SqlType to a JSON Schema type object (dialect-agnostic).
