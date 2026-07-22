@@ -307,6 +307,17 @@ fn emitFkDiffs(
                     try backend.emitAlterDropFk(w, fk);
                 }
             },
+            .modify => {
+                if (fk_diff.old_fk) |old_fk| {
+                    try beginAlterTable(w, backend, td.name, table_has_ops);
+                    try emitComma(w, sub_needs_comma);
+                    try backend.emitAlterDropFk(w, old_fk);
+                }
+                if (fk_diff.new_fk) |new_fk| {
+                    try emitComma(w, sub_needs_comma);
+                    try emitFkAdd(w, backend, new_fk);
+                }
+            },
         }
     }
 }

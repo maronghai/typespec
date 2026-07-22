@@ -131,6 +131,11 @@ fn writeDiffTo(w: anytype, d: SchemaDiff, q: u8) !void {
                         try w.print("  - FK → {s} (drop)\n", .{ofk.ref_table});
                     }
                 },
+                .modify => {
+                    if (fk.new_fk) |nfk| {
+                        try w.print("  ~ FK → {s} (modify)\n", .{nfk.ref_table});
+                    }
+                },
             }
         }
         if (table_has_changes) has_changes = true;
