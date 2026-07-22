@@ -25,7 +25,7 @@ bash tests/test.sh                  # MySQL (84 tests)
 bash tests/test_postgres.sh         # PostgreSQL (82 tests)
 bash tests/test_sqlite.sh           # SQLite (24 tests)
 bash tests/test_migrate.sh          # Migration (34 tests)
-bash tests/test_reverse.sh          # Reverse engineering (13 tests)
+bash tests/test_reverse.sh          # Reverse engineering (15 tests)
 bash tests/test_diff.sh             # Schema diff (12 tests)
 bash tests/test_error_recovery.sh   # Error recovery (9 tests)
 bash tests/test_json_schema.sh      # JSON Schema (1 test)
@@ -59,7 +59,7 @@ Run a single golden test by filter: `bash tests/test.sh 01` (matches test name s
 
 ### Key Design Patterns
 
-- **DialectBackend vtable** ([dialect.zig](zig-typespec/src/dialect.zig)): 22 core + 6 optional function pointers + 3 behavioral flags for dialect-specific SQL rendering. Includes `reverseLookup` for dialect-specific reverse engineering. [codegen.zig](zig-typespec/src/codegen.zig) is fully dialect-agnostic (zero `switch(dialect)` in production code). Per-dialect implementations: [dialect_mysql.zig](zig-typespec/src/dialect_mysql.zig), [dialect_pg.zig](zig-typespec/src/dialect_pg.zig), [dialect_sqlite.zig](zig-typespec/src/dialect_sqlite.zig); shared PG/SQLite logic in [dialect_common.zig](zig-typespec/src/dialect_common.zig). Adding a new SQL dialect = new enum variant + new `dialect_<name>.zig` (~200 lines).
+- **DialectBackend vtable** ([dialect.zig](zig-typespec/src/dialect.zig)): 23 core + 6 optional function pointers + 3 behavioral flags for dialect-specific SQL rendering. Includes `emitForeignKey` (shared FK rendering via `dialect_common.zig:emitForeignKeyShared`) and `reverseLookup` for dialect-specific reverse engineering. [codegen.zig](zig-typespec/src/codegen.zig) is fully dialect-agnostic (zero `switch(dialect)` in production code). Per-dialect implementations: [dialect_mysql.zig](zig-typespec/src/dialect_mysql.zig), [dialect_pg.zig](zig-typespec/src/dialect_pg.zig), [dialect_sqlite.zig](zig-typespec/src/dialect_sqlite.zig); shared PG/SQLite logic in [dialect_common.zig](zig-typespec/src/dialect_common.zig). Adding a new SQL dialect = new enum variant + new `dialect_<name>.zig` (~200 lines).
 
 - **Semantic Pass Manager** ([semantic.zig](zig-typespec/src/semantic.zig)): Extensible array of `SemanticPass` structs with `depends_on` dependency declarations. Current passes: `autofk` → `suffix_inference` → `validate` → `validate_type_modifiers`. Debug mode validates dependency ordering. New passes: write a `fn(*PassContext) !void` and add to `DEFAULT_PASSES`.
 
@@ -69,7 +69,7 @@ Run a single golden test by filter: `bash tests/test.sh 01` (matches test name s
 
 - **Custom Type System**: `~` directives in schema block define user-defined type aliases with optional dialect overrides. Resolved during type resolution, not parsing.
 
-- **Self-contained SqlType** ([sql_type.zig](zig-typespec/src/sql_type.zig)): `SqlType.toSql()` is the single source of truth for type rendering — no delegation to `type_map.zig`. `type_registry.lookupSqlTypeDirect()` returns `SqlType` variants directly, avoiding stringly-typed round-trips.
+- **Self-contained SqlType** ([sql_type.zig](zig-typespec/src/sql_type.zig)): `SqlType.toSql()` delegates to `DialectBackend.renderType` for dialect-aware rendering. Variants: `int`, `bigint`, `smallint`, `decimal`, `varchar`, `text`, `blob`, `json`, `datetime`, `date`, `timestamptz`, `boolean`, `uuid`, `serial`, `enum_values`, `raw_sql`, `passthrough`. `toJsonSchema()` provides dialect-agnostic JSON Schema output.
 
 - **Dialect-Aware Diff** ([diff_semantic.zig](zig-typespec/src/diff_semantic.zig)): Type equivalence checking uses canonical TPS symbol mapping — different symbols that resolve to the same SQL type are equivalent (e.g. `N4` ↔ `4`), but distinct types like `n` (int) vs `N` (bigint) are NOT equivalent. Diff engine accepts optional `Dialect` parameter.
 
@@ -83,7 +83,7 @@ Run a single golden test by filter: `bash tests/test.sh 01` (matches test name s
 
 | Module | Role |
 |--------|------|
-| `codegen.zig` | TypedAst → SQL DDL text, 5 sub-functions (emitColumnDefs, emitInlineIndexes, emitConstraints, emitTableMetadata, emitStandaloneIndexes) + shared `isDominatedByExplicitIndex()` |
+| `codegen.zig` | TypedAst → SQL DDL text, 5 sub-functions (emitColumnDefs, emitInlineIndexes, emitConstraints, emitTableMetadata, emitStandaloneIndexes) + shared `isDominatedByExplicitIndex()`. FK rendering via `DialectBackend.emitForeignKey` |
 | `sql_parser.zig` | Recursive-descent SQL DDL parser (reverse pipeline), delegates to 8 sub-modules |
 | `sql_parser_helpers.zig` | Identifier/literal/word parsing, whitespace/comment skipping, trailing comment capture |
 | `sql_parser_alter.zig` | ALTER TABLE statement parsing |
@@ -91,7 +91,7 @@ Run a single golden test by filter: `bash tests/test.sh 01` (matches test name s
 | `semantic.zig` | Pass manager + template resolution orchestration |
 | `diff.zig` | Table-level diff orchestration + SchemaDiff types (accepts optional Dialect for semantic comparison) |
 | `parser.zig` | Token-level `.tps` parser → AST (delegates to parse_*.zig modules; main dispatch + error recovery) |
-| `migrate.zig` | Migration SQL generation, 7 sub-functions (emitDroppedTables, emitViewDiffs, emitTableDiffs, emitFieldDiffs, emitIndexDiffs, emitMetadataDiffs, emitFkDiffs) |
+| `migrate.zig` | Migration SQL generation, 6 sub-functions (emitDroppedTables, emitViewDiffs, emitTableDiffs, emitFieldDiffs, emitIndexDiffs, emitMetadataDiffs, emitFkDiffs). FK rendering via `DialectBackend.emitForeignKey` |
 | `ast_visitor.zig` | Comptime-generic AST traversal utilities (read-only; `ResolvedTable.fields` is `[]const Field`) |
 | `parse_trace.zig` | Parser diagnostic trace output (debug mode, extracted from parser.zig) |
 | `parse_field.zig` | Field declaration parsing (type, modifiers, default, inline FK) |
@@ -100,8 +100,8 @@ Run a single golden test by filter: `bash tests/test.sh 01` (matches test name s
 | `sql_parser_create.zig` | CREATE TABLE parsing (extracted from sql_parser.zig) |
 | `reverse_map.zig` | Reverse lookup logic (SQL → TPS symbol matching via vtable + parameterized types) |
 | `reverse_column.zig` | Column reverse engineering (re-exports dialect.ReverseResult as TypeResult, suffix, inline index detection) |
-| `diagnostic.zig` | Multi-error diagnostic collector with JSON output |
-| `trace.zig` | Shared AST trace formatting (FK actions, FK declarations, index declarations) used by parser.zig and semantic.zig diagnosticTrace |
+| `diagnostic.zig` | Multi-error diagnostic collector with JSON output. Unified across forward and reverse pipelines (`SqlParser` uses `DiagnosticCollector` directly) |
+| `trace.zig` | Shared AST trace formatting (FK actions, FK declarations, index declarations, `fmtTypeInfo`, `fmtModifiers`) used by parser.zig and semantic.zig diagnosticTrace |
 | `template.zig` | Template inheritance resolution and slot-based field merging |
 | `template_extraction.zig` | Template extraction from SQL (reverse pipeline) |
 | `typed_ast.zig` | TypedAst IR: SqlType resolution + ColumnFlags bitflags |

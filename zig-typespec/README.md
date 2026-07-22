@@ -124,7 +124,7 @@ typespec reverse schema.sql -t -o schema.tps
 
 | Feature | Input (SQL) | Output (.tps) |
 |---------|-------------|---------------|
-| Types | `int`, `bigint`, `varchar(N)`, `decimal(P,S)`, `text`, `boolean`, `blob`, `json`, `date`, `datetime`, `bit(1)`, `ENUM(...)` | `n`, `N`, `sN`, `m`/`M`, `S`, `b`, `B`, `j`, `d`, `t`, `b`, `e(...)` |
+| Types | `int`, `bigint`, `smallint`, `varchar(N)`, `decimal(P,S)`, `text`, `boolean`, `blob`, `json`, `date`, `datetime`, `timestamptz`, `uuid`, `serial`, `bit(1)`, `ENUM(...)` | `n`, `N`, `i`, `sN`, `m`/`M`, `S`, `b`, `B`, `j`, `d`, `t`, `T`, `u`, `p`, `b`, `e(...)` |
 | Modifiers | `NOT NULL`, `AUTO_INCREMENT`, `PRIMARY KEY`, `UNSIGNED` | `*`, `+`, `!`, `u` (fused: `++` = AI+PK) |
 | Defaults | `DEFAULT 0`, `DEFAULT 'val'`, `DEFAULT CURRENT_TIMESTAMP`, `DEFAULT b'0'` | `=0`, `=val`, `+`/`++` on datetime, `=0` |
 | Suffix inference | `user_id int` → `user_id` (type omitted) | `_id`→int, `_on`→date, `_at`→datetime, default→varchar(255) |
@@ -318,7 +318,7 @@ Codegen      SQL DDL generation via DialectBackend vtable (5 methods)
 .sql output
 ```
 
-**DialectBackend vtable** (5 methods):
+**DialectBackend vtable** (23 core + 6 optional methods):
 
 | Method | MySQL | PostgreSQL | SQLite |
 |--------|-------|-----------|--------|
@@ -418,7 +418,7 @@ src/
 ├── sqlite_hints.zig     SQLite type affinity heuristics
 ├── json_schema.zig      JSON Schema output
 ├── io.zig               stdin/stdout/file I/O helpers
-├── trace.zig            Shared AST trace formatting
+├── trace.zig            Shared AST trace formatting (FK actions, fmtTypeInfo, fmtModifiers)
 ├── bench.zig            Benchmark entry point (per-stage pipeline timing)
 └── test_helpers.zig     Shared test factory functions
 ```
@@ -433,14 +433,14 @@ The parser was split into 4 extracted modules (~790 lines total) for modularity 
 
 | Script | Tests | Description |
 |--------|-------|-------------|
-| `tests/test.sh` | 81 | MySQL forward compilation golden files |
-| `tests/test_postgres.sh` | 93 | PostgreSQL forward compilation golden files |
-| `tests/test_sqlite.sh` | 1 | SQLite forward compilation |
-| `tests/test_migrate.sh` | 6 | Migration SQL golden files |
-| `tests/test_reverse.sh` | 8 | Reverse engineering golden files (MySQL/PG/SQLite) |
-| `tests/test_diff.sh` | 2 | Schema diff golden files |
-| `zig build test` | 76 | Zig inline unit tests (type_map + tokenizer + parser) |
-| **Total** | **267** | |
+| `tests/test.sh` | 84 | MySQL forward compilation golden files |
+| `tests/test_postgres.sh` | 82 | PostgreSQL forward compilation golden files |
+| `tests/test_sqlite.sh` | 24 | SQLite forward compilation |
+| `tests/test_migrate.sh` | 34 | Migration SQL golden files |
+| `tests/test_reverse.sh` | 15 | Reverse engineering golden files (MySQL/PG/SQLite) |
+| `tests/test_diff.sh` | 12 | Schema diff golden files |
+| `zig build test` | ~160 | Zig inline unit tests |
+| **Total** | **~411+** | |
 
 ### Golden-file tests (compile)
 

@@ -41,9 +41,9 @@ TypeSpec is a compiler that transforms `.tps` schema files into SQL DDL. It cons
 **Leaf modules** (zero internal dependencies): `ast.zig`, `dialect_enum.zig`, `diagnostic.zig`
 
 **Key modules**:
-- `sql_type.zig`: Self-contained `SqlType` union with `toSql()` — the single source of truth for SqlType → SQL rendering
+- `sql_type.zig`: `SqlType` union with `toSql()` delegating to `DialectBackend.renderType`. Variants: int, bigint, smallint, decimal, varchar, text, blob, json, datetime, date, timestamptz, boolean, uuid, serial, enum_values, raw_sql, passthrough. `toJsonSchema()` for JSON Schema output.
 - `type_map.zig`: Helper functions (`lookupCustomType`, `isNumericTpsType`, etc.) + `SqlType` re-export
-- `type_registry.zig`: TPS symbol → `SqlType` direct mapping (`lookupSqlTypeDirect`) and reverse lookup
+- `type_registry.zig`: TPS symbol → `SqlType` direct mapping (`lookupSqlTypeDirect`) and reverse lookup. 15 core TPS symbols: n, N, i, m, M, S, b, B, j, d, t, T, s, u, p
 
 ### Extracted Sub-Modules
 
@@ -94,7 +94,7 @@ Input (.tps text)
     Output: []ResolvedTable (templates applied to each table)
     │
     ▼
-[4] Semantic Analyzer (semantic.zig, 767 lines)
+[4] Semantic Analyzer (semantic.zig, 749 lines)
     Pass manager: validate_template_types, autofk, suffix_inference, validate, validate_type_modifiers
     Output: ResolvedAst (templates resolved + passes applied)
     │
@@ -158,16 +158,17 @@ Input (SQL DDL text)
     │
     ├──▶ Diff Printer (human-readable diff output)
     │
-    └──▶ Migration Generator (migrate.zig, 458 lines, 7 sub-functions)
+    └──▶ Migration Generator (migrate.zig, 458 lines, 6 sub-functions)
          SchemaDiff → ALTER TABLE SQL
          Sub-functions: emitDroppedTables, emitViewDiffs, emitTableDiffs,
          emitFieldDiffs, emitIndexDiffs, emitMetadataDiffs, emitFkDiffs
+         FK rendering via DialectBackend.emitForeignKey
          Output: migration SQL
 ```
 
 ## DialectBackend Vtable
 
-22 core + 6 optional function pointers + 3 behavioral flags for dialect-specific SQL generation (31 total dispatch points):
+23 core + 6 optional function pointers + 3 behavioral flags for dialect-specific SQL generation (32 total dispatch points):
 
 ```zig
 DialectBackend = struct {
@@ -203,6 +204,10 @@ DialectBackend = struct {
     emitAlterEngine:        fn(w, engine) -> !void,
     // View support
     emitCreateView:         fn(w, name, query) -> !void,
+    // Type rendering (single source of truth)
+    renderType:             fn(w, sql_type) -> !void,
+    // FK rendering (shared via dialect_common.zig:emitForeignKeyShared)
+    emitForeignKey:         fn(w, fk) -> !void,
     // Reverse engineering (optional)
     reverseLookup:          fn(sql_type, col_name, is_auto_inc, is_default_ts) -> ?ReverseResult,
     // Behavioral flags (eliminate dialect checks in caller)
@@ -229,14 +234,16 @@ DialectBackend = struct {
 | `emitInlineColumnComment` | `COMMENT '...'` | no-op (standalone) | no-op (standalone) |
 | `emitEnumTypeCheck` | no-op (native ENUM) | `CHECK (... IN (...))` | `CHECK (... IN (...))` |
 | `emitInlineColumnStandaloneIndex` | no-op (inline) | `CREATE INDEX` | `CREATE INDEX` |
+| `renderType` | `int`, `bigint`, `smallint`, `decimal`, `varchar`, `text`, `blob`, `json`, `datetime`, `date`, `timestamptz`, `boolean`, `uuid`, `serial` | `integer`, `bigint`, `smallint`, `numeric`, `varchar`, `text`, `bytea`, `json`, `timestamp`, `date`, `timestamptz`, `boolean`, `uuid`, `serial` | `INTEGER`, `NUMERIC`, `varchar`, `TEXT`, `BLOB`, `INTEGER` |
+| `emitForeignKey` | `FOREIGN KEY (...) REFERENCES ...` | `FOREIGN KEY (...) REFERENCES ...` | `FOREIGN KEY (...) REFERENCES ...` |
 
-PG and SQLite share 4/5 method implementations. `emitCheckExpr` is a shared standalone function (all dialects use identical CHECK syntax).
+PG and SQLite share 4/5 method implementations. `emitCheckExpr` is a shared standalone function (all dialects use identical CHECK syntax). `emitForeignKey` is shared via `dialect_common.zig:emitForeignKeyShared` (takes `quoteIdent` function pointer).
 
 ## Semantic Pass Manager
 
 ```zig
-SemanticPass = struct { name: []const u8, run: fn(*PassContext) !void };
-DEFAULT_PASSES = [_]SemanticPass{ autofk, suffix_inference, validate, validate_type_modifiers };
+SemanticPass = struct { name: []const u8, run: fn(*PassContext) !void, depends_on: []const []const u8 };
+DEFAULT_PASSES = [_]SemanticPass{ validate_template_types, autofk, suffix_inference, validate, validate_type_modifiers };
 ```
 
 New passes can be added by:
@@ -280,9 +287,9 @@ When `typespec reverse -t` is used, the reverse codegen extracts common field se
 
 TypeSpec uses a three-layer type mapping system:
 
-- **`sql_type.zig` (SqlType.toSql)**: Self-contained method on the `SqlType` union. The single source of truth for SqlType → dialect-specific SQL rendering. Zero external dependencies — all dialect switch logic is inline.
+- **`sql_type.zig` (SqlType.toSql)**: Delegates to `DialectBackend.renderType` for dialect-aware rendering. Variants: int, bigint, smallint, decimal, varchar, text, blob, json, datetime, date, timestamptz, boolean, uuid, serial, enum_values, raw_sql, passthrough.
 
-- **`type_registry.zig` (CORE_TYPES)**: Static array of 11 TPS symbol entries with dialect-specific SQL names. Provides two lookup functions:
+- **`type_registry.zig` (CORE_TYPES)**: Static array of 15 TPS symbol entries with dialect-specific SQL names. Provides two lookup functions:
   - `lookupSqlType(tps, dialect)` → `?[]const u8` (SQL name string, for backward compat)
   - `lookupSqlTypeDirect(tps, dialect)` → `?SqlType` (direct variant, avoids stringly-typed round-trip)
 
@@ -293,8 +300,8 @@ TypeSpec uses a three-layer type mapping system:
 ## Key Design Decisions
 
 1. **TypedAst IR layer**: Separates type resolution from code generation. Codegen only outputs strings — no type inference logic.
-2. **DialectBackend vtable**: 26 function pointers + 3 behavioral flags cover all dialect differences. Adding a new dialect requires < 100 lines. codegen.zig is fully dialect-agnostic (zero `switch(dialect)` in production code).
-3. **Self-contained SqlType**: `SqlType.toSql()` in `sql_type.zig` is the single source of truth for type rendering. No delegation to `type_map.zig`. Adding a new type = add variant to union + add case to `toSql()` + add to `type_registry.zig`.
+2. **DialectBackend vtable**: 23 core + 6 optional function pointers + 3 behavioral flags cover all dialect differences. Adding a new dialect requires < 100 lines. codegen.zig is fully dialect-agnostic (zero `switch(dialect)` in production code). FK rendering is shared via `dialect_common.zig:emitForeignKeyShared`.
+3. **Self-contained SqlType**: `SqlType.toSql()` delegates to `DialectBackend.renderType`. Adding a new type = add variant to union + add case to all `renderType` implementations + add to `type_registry.zig`.
 4. **Direct type lookup**: `type_registry.lookupSqlTypeDirect()` returns `SqlType` variants directly, avoiding the stringly-typed round-trip (TPS symbol → SQL string → SqlType).
 5. **AST-level diff**: Semantic comparison, not text diff. Detects renames by signature matching. Dialect-aware type equivalence (`diff_semantic.zig`) uses canonical TPS symbol mapping — different symbols that resolve to the same SQL type are equivalent (e.g., `N4` ↔ `4` in MySQL), but distinct types like `n` (int) vs `N` (bigint) are NOT equivalent.
 6. **Arena allocation**: All modules take `std.mem.Allocator`. Arena-style usage for command-lifetime memory.
@@ -389,7 +396,7 @@ zig build bench -- bench/large.tps 5         # large schema
 | PG golden | `tests/test_postgres.sh` | 82 | Full pipeline |
 | SQLite golden | `tests/test_sqlite.sh` | 24 | Full pipeline |
 | Migrate golden | `tests/test_migrate.sh` | 34 | Diff + migration SQL |
-| Reverse golden | `tests/test_reverse.sh` | 13 | SQL → .tps |
+| Reverse golden | `tests/test_reverse.sh` | 15 | SQL → .tps |
 | Diff golden | `tests/test_diff.sh` | 12 | Schema comparison |
 | Error recovery | `tests/test_error_recovery.sh` | 9 | Parse error handling |
 | JSON Schema | `tests/test_json_schema.sh` | 1 | JSON Schema output |
