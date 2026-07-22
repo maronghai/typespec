@@ -57,7 +57,7 @@ pub fn handleReverse(io: std.Io, alloc: std.mem.Allocator, file_data: []const u8
     // Use DiagnosticCollector for consistent error handling with forward pipeline
     var diagnostics = diag.DiagnosticCollector.init(alloc);
 
-    var sp_parser = sql_parser.SqlParser.init(alloc, file_data, sql_dialect);
+    var sp_parser = try sql_parser.SqlParser.init(alloc, file_data, sql_dialect);
     const result = sp_parser.parse() catch |err| {
         const lc = sp_parser.lineColAt(sp_parser.pos);
         const src_line = sp_parser.getSourceLine(lc.line);

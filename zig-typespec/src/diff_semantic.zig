@@ -34,60 +34,26 @@ pub fn typeInfoEquiv(a: TypeInfo, b: TypeInfo, dialect: Dialect) bool {
 
 /// Canonical form of a TPS type symbol within a dialect.
 /// Equivalent symbols map to the same canonical form.
+/// NOTE: n and N are NOT equivalent — they map to int vs bigint.
 fn canonicalSimple(sym: []const u8, dialect: Dialect) ?[]const u8 {
+    _ = dialect;
     if (sym.len == 0) return null;
-    return switch (dialect) {
-        .mysql => switch (sym[0]) {
-            'n', 'N' => if (sym.len == 1) "n" else switch (sym[1]) {
-                '4' => "4",
-                '8' => "8",
-                else => null,
-            },
+    return switch (sym[0]) {
+        'n', 'N' => if (sym.len == 1) sym else switch (sym[1]) {
             '4' => "4",
             '8' => "8",
-            'd' => "d",
-            's' => if (sym.len == 1) "s" else sym,
-            't' => "t",
-            'b', 'B' => "b",
-            'j' => "j",
-            'm' => "m",
-            'e' => "e",
             else => null,
         },
-        .pg => switch (sym[0]) {
-            'n', 'N' => if (sym.len == 1) "n" else switch (sym[1]) {
-                '4' => "4",
-                '8' => "8",
-                else => null,
-            },
-            '4' => "4",
-            '8' => "8",
-            'd' => "d",
-            's' => if (sym.len == 1) "s" else sym,
-            't' => "t",
-            'b', 'B' => "b",
-            'j' => "j",
-            'm' => "m",
-            'e' => "e",
-            else => null,
-        },
-        .sqlite => switch (sym[0]) {
-            'n', 'N' => if (sym.len == 1) "n" else switch (sym[1]) {
-                '4' => "4",
-                '8' => "8",
-                else => null,
-            },
-            '4' => "4",
-            '8' => "8",
-            'd' => "d",
-            's' => if (sym.len == 1) "s" else sym,
-            't' => "t",
-            'b', 'B' => "b",
-            'j' => "j",
-            'm' => "m",
-            'e' => "e",
-            else => null,
-        },
+        '4' => "4",
+        '8' => "8",
+        'd' => "d",
+        's' => if (sym.len == 1) "s" else sym,
+        't' => "t",
+        'b', 'B' => sym, // b (boolean) and B (blob) are different
+        'j' => "j",
+        'm' => "m",
+        'e' => "e",
+        else => null,
     };
 }
 
@@ -109,9 +75,9 @@ test "typeInfoEquiv: identical types" {
     try testing.expect(typeInfoEquiv(.none, .none, .mysql));
 }
 
-test "typeInfoEquiv: MySQL n/N equivalent" {
-    try testing.expect(typeInfoEquiv(.{ .simple = "n" }, .{ .simple = "N" }, .mysql));
-    try testing.expect(typeInfoEquiv(.{ .simple = "N" }, .{ .simple = "n" }, .mysql));
+test "typeInfoEquiv: MySQL n/N NOT equivalent (int vs bigint)" {
+    try testing.expect(!typeInfoEquiv(.{ .simple = "n" }, .{ .simple = "N" }, .mysql));
+    try testing.expect(!typeInfoEquiv(.{ .simple = "N" }, .{ .simple = "n" }, .mysql));
 }
 
 test "typeInfoEquiv: MySQL 4/N4 equivalent" {
@@ -122,8 +88,8 @@ test "typeInfoEquiv: MySQL 8/N8 equivalent" {
     try testing.expect(typeInfoEquiv(.{ .simple = "8" }, .{ .simple = "N8" }, .mysql));
 }
 
-test "typeInfoEquiv: MySQL b/B equivalent" {
-    try testing.expect(typeInfoEquiv(.{ .simple = "b" }, .{ .simple = "B" }, .mysql));
+test "typeInfoEquiv: MySQL b/B NOT equivalent (boolean vs blob)" {
+    try testing.expect(!typeInfoEquiv(.{ .simple = "b" }, .{ .simple = "B" }, .mysql));
 }
 
 test "typeInfoEquiv: MySQL different types not equivalent" {
@@ -132,8 +98,8 @@ test "typeInfoEquiv: MySQL different types not equivalent" {
     try testing.expect(!typeInfoEquiv(.{ .simple = "s" }, .{ .simple = "t" }, .mysql));
 }
 
-test "typeInfoEquiv: PG n/N equivalent" {
-    try testing.expect(typeInfoEquiv(.{ .simple = "n" }, .{ .simple = "N" }, .pg));
+test "typeInfoEquiv: PG n/N NOT equivalent (int vs bigint)" {
+    try testing.expect(!typeInfoEquiv(.{ .simple = "n" }, .{ .simple = "N" }, .pg));
 }
 
 test "typeInfoEquiv: PG 4/N4 equivalent" {

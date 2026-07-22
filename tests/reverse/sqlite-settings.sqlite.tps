@@ -1,5 +1,5 @@
 # settings
 id n ++
-key * -- [LOW]
-value -- [LOW]
+key * -- [score:50]
+value -- [score:50]
 updated_at =(datetime('now'))

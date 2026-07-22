@@ -1,7 +1,7 @@
 # inventory
 id n ++
 product_id *
-quantity n * =0 -- [LOW]
+quantity n * =0 -- [score:50]
 location : Warehouse location
 updated_at =(datetime('now'))
 
