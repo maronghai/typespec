@@ -165,8 +165,8 @@ test "indexesEqual different field count" {
 }
 
 test "indexesEqual same fields but different descending" {
-    var desc_a = [_]bool{true, false};
-    var desc_b = [_]bool{false, false};
+    var desc_a = [_]bool{ true, false };
+    var desc_b = [_]bool{ false, false };
     const a = IndexDecl{
         .kind = .regular,
         .name = "idx",
@@ -185,8 +185,8 @@ test "indexesEqual same fields but different descending" {
 }
 
 test "indexesEqual same fields and same descending" {
-    var desc_a = [_]bool{true, false};
-    var desc_b = [_]bool{true, false};
+    var desc_a = [_]bool{ true, false };
+    var desc_b = [_]bool{ true, false };
     const a = IndexDecl{
         .kind = .regular,
         .name = "idx",

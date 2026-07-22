@@ -55,7 +55,7 @@ pub fn handleReverse(io: std.Io, alloc: std.mem.Allocator, file_data: []const u8
     const sql_dialect: sql_parser.Dialect = if (dialect == .mysql) detectSqlDialect(file_data) else dialect;
 
     // Use DiagnosticCollector for consistent error handling with forward pipeline
-    var diagnostics = diag.DiagnosticCollector.init(alloc);
+    var diagnostics = try diag.DiagnosticCollector.init(alloc);
 
     var sp_parser = try sql_parser.SqlParser.init(alloc, file_data, sql_dialect);
     const result = sp_parser.parse() catch |err| {

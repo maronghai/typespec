@@ -108,9 +108,9 @@ pub const DiagnosticCollector = struct {
     diagnostics: std.ArrayList(Diagnostic),
     alloc: std.mem.Allocator,
 
-    pub fn init(alloc: std.mem.Allocator) DiagnosticCollector {
+    pub fn init(alloc: std.mem.Allocator) !DiagnosticCollector {
         return .{
-            .diagnostics = std.ArrayList(Diagnostic).initCapacity(alloc, 8) catch unreachable,
+            .diagnostics = try std.ArrayList(Diagnostic).initCapacity(alloc, 8),
             .alloc = alloc,
         };
     }
@@ -283,27 +283,27 @@ test "tokenColumn: empty inputs" {
 }
 
 test "DiagnosticCollector: init starts empty" {
-    var dc = DiagnosticCollector.init(testing.allocator);
+    var dc = try DiagnosticCollector.init(testing.allocator);
     try testing.expect(!dc.hasErrors());
     try testing.expectEqual(@as(usize, 0), dc.errorCount());
 }
 
 test "DiagnosticCollector: push warning" {
-    var dc = DiagnosticCollector.init(testing.allocator);
+    var dc = try DiagnosticCollector.init(testing.allocator);
     dc.push(.{ .severity = .warning, .line_no = 1, .message = "test warning" });
     try testing.expect(!dc.hasErrors());
     try testing.expectEqual(@as(usize, 0), dc.errorCount());
 }
 
 test "DiagnosticCollector: push error" {
-    var dc = DiagnosticCollector.init(testing.allocator);
+    var dc = try DiagnosticCollector.init(testing.allocator);
     dc.push(.{ .severity = .@"error", .line_no = 5, .message = "test error" });
     try testing.expect(dc.hasErrors());
     try testing.expectEqual(@as(usize, 1), dc.errorCount());
 }
 
 test "DiagnosticCollector: mixed severity" {
-    var dc = DiagnosticCollector.init(testing.allocator);
+    var dc = try DiagnosticCollector.init(testing.allocator);
     dc.push(.{ .severity = .warning, .line_no = 1, .message = "w1" });
     dc.push(.{ .severity = .@"error", .line_no = 2, .message = "e1" });
     dc.push(.{ .severity = .warning, .line_no = 3, .message = "w2" });
@@ -313,10 +313,10 @@ test "DiagnosticCollector: mixed severity" {
 }
 
 test "DiagnosticCollector: formatJson" {
-    var dc = DiagnosticCollector.init(testing.allocator);
+    var dc = try DiagnosticCollector.init(testing.allocator);
     dc.push(.{ .severity = .@"error", .line_no = 10, .col = 5, .message = "syntax error" });
 
-    var buf = std.ArrayList(u8).initCapacity(testing.allocator, 256) catch unreachable;
+    var buf = try std.ArrayList(u8).initCapacity(testing.allocator, 256);
     defer buf.deinit();
 
     const writer = buf.writer();
@@ -332,7 +332,7 @@ test "DiagnosticCollector: formatJson" {
 }
 
 test "DiagnosticCollector: formatJson with expected/actual" {
-    var dc = DiagnosticCollector.init(testing.allocator);
+    var dc = try DiagnosticCollector.init(testing.allocator);
     dc.push(.{
         .severity = .@"error",
         .line_no = 1,
@@ -341,7 +341,7 @@ test "DiagnosticCollector: formatJson with expected/actual" {
         .actual = "string",
     });
 
-    var buf = std.ArrayList(u8).initCapacity(testing.allocator, 256) catch unreachable;
+    var buf = try std.ArrayList(u8).initCapacity(testing.allocator, 256);
     defer buf.deinit();
 
     try dc.formatJson(buf.writer());
@@ -353,9 +353,9 @@ test "DiagnosticCollector: formatJson with expected/actual" {
 }
 
 test "DiagnosticCollector: formatJson empty" {
-    var dc = DiagnosticCollector.init(testing.allocator);
+    var dc = try DiagnosticCollector.init(testing.allocator);
 
-    var buf = std.ArrayList(u8).initCapacity(testing.allocator, 64) catch unreachable;
+    var buf = try std.ArrayList(u8).initCapacity(testing.allocator, 64);
     defer buf.deinit();
 
     try dc.formatJson(buf.writer());

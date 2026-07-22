@@ -186,7 +186,7 @@ test "diff: table engine change detected" {
     const alloc = testing.allocator;
 
     const fields = try alloc.alloc(Field, 1);
-    fields[0] = makeField(alloc, "id", .{ .simple = "n" });
+    fields[0] = try makeField(alloc, "id", .{ .simple = "n" });
 
     const old_table = try alloc.dupe(ast_mod.ResolvedTable, &.{.{
         .name = "t",
@@ -218,7 +218,7 @@ test "diff: no metadata change produces null metadata_diff" {
     const alloc = testing.allocator;
 
     const fields = try alloc.alloc(Field, 1);
-    fields[0] = makeField(alloc, "id", .{ .simple = "n" });
+    fields[0] = try makeField(alloc, "id", .{ .simple = "n" });
 
     const old_table = try alloc.dupe(ast_mod.ResolvedTable, &.{.{
         .name = "t",
@@ -248,11 +248,11 @@ test "diff: combined field and metadata change" {
     const alloc = testing.allocator;
 
     const old_fields = try alloc.alloc(Field, 1);
-    old_fields[0] = makeField(alloc, "id", .{ .simple = "n" });
+    old_fields[0] = try makeField(alloc, "id", .{ .simple = "n" });
 
     const new_fields = try alloc.alloc(Field, 2);
-    new_fields[0] = makeField(alloc, "id", .{ .simple = "n" });
-    new_fields[1] = makeField(alloc, "name", .{ .simple = "s" });
+    new_fields[0] = try makeField(alloc, "id", .{ .simple = "n" });
+    new_fields[1] = try makeField(alloc, "name", .{ .simple = "s" });
 
     const old_table = try alloc.dupe(ast_mod.ResolvedTable, &.{.{
         .name = "t",
@@ -284,9 +284,9 @@ test "diff: combined field and metadata change" {
 
 const testing = std.testing;
 
-fn makeField(alloc: std.mem.Allocator, name: []const u8, type_info: TypeInfo) Field {
+fn makeField(alloc: std.mem.Allocator, name: []const u8, type_info: TypeInfo) !Field {
     return .{
-        .name = alloc.dupe(u8, name) catch unreachable,
+        .name = try alloc.dupe(u8, name),
         .type_info = type_info,
         .modifiers = &.{},
         .default_val = null,
@@ -311,7 +311,7 @@ fn makeResolvedAst(_: std.mem.Allocator, tables: []const ast_mod.ResolvedTable) 
 test "diff: no changes produces empty diff" {
     const alloc = testing.allocator;
     const fields = try alloc.alloc(Field, 1);
-    fields[0] = makeField(alloc, "id", .{ .simple = "n" });
+    fields[0] = try makeField(alloc, "id", .{ .simple = "n" });
 
     const t = try alloc.dupe(ast_mod.ResolvedTable, &.{.{
         .name = "user",
@@ -334,7 +334,7 @@ test "diff: no changes produces empty diff" {
 test "diff: new table detected as create" {
     const alloc = testing.allocator;
     const fields = try alloc.alloc(Field, 1);
-    fields[0] = makeField(alloc, "id", .{ .simple = "n" });
+    fields[0] = try makeField(alloc, "id", .{ .simple = "n" });
 
     const old_ast = makeResolvedAst(alloc, &.{});
     const new_table = try alloc.dupe(ast_mod.ResolvedTable, &.{.{
@@ -357,7 +357,7 @@ test "diff: new table detected as create" {
 test "diff: dropped table detected" {
     const alloc = testing.allocator;
     const fields = try alloc.alloc(Field, 1);
-    fields[0] = makeField(alloc, "id", .{ .simple = "n" });
+    fields[0] = try makeField(alloc, "id", .{ .simple = "n" });
 
     const old_table = try alloc.dupe(ast_mod.ResolvedTable, &.{.{
         .name = "user",
@@ -380,11 +380,11 @@ test "diff: dropped table detected" {
 test "diff: added field detected" {
     const alloc = testing.allocator;
     const old_fields = try alloc.alloc(Field, 1);
-    old_fields[0] = makeField(alloc, "id", .{ .simple = "n" });
+    old_fields[0] = try makeField(alloc, "id", .{ .simple = "n" });
 
     const new_fields = try alloc.alloc(Field, 2);
-    new_fields[0] = makeField(alloc, "id", .{ .simple = "n" });
-    new_fields[1] = makeField(alloc, "name", .{ .varchar_explicit = 32 });
+    new_fields[0] = try makeField(alloc, "id", .{ .simple = "n" });
+    new_fields[1] = try makeField(alloc, "name", .{ .varchar_explicit = 32 });
 
     const old_ast = makeResolvedAst(alloc, try alloc.dupe(ast_mod.ResolvedTable, &.{.{
         .name = "user",
@@ -416,12 +416,12 @@ test "diff: added field detected" {
 test "diff: renamed field detected by signature match" {
     const alloc = testing.allocator;
     const old_fields = try alloc.alloc(Field, 2);
-    old_fields[0] = makeField(alloc, "id", .{ .simple = "n" });
-    old_fields[1] = makeField(alloc, "name", .{ .varchar_explicit = 32 });
+    old_fields[0] = try makeField(alloc, "id", .{ .simple = "n" });
+    old_fields[1] = try makeField(alloc, "name", .{ .varchar_explicit = 32 });
 
     const new_fields = try alloc.alloc(Field, 2);
-    new_fields[0] = makeField(alloc, "id", .{ .simple = "n" });
-    new_fields[1] = makeField(alloc, "full_name", .{ .varchar_explicit = 32 });
+    new_fields[0] = try makeField(alloc, "id", .{ .simple = "n" });
+    new_fields[1] = try makeField(alloc, "full_name", .{ .varchar_explicit = 32 });
 
     const old_ast = makeResolvedAst(alloc, try alloc.dupe(ast_mod.ResolvedTable, &.{.{
         .name = "user",
@@ -464,10 +464,10 @@ test "diff: two empty schemas produce no diff" {
 test "diff: table created and dropped simultaneously" {
     const alloc = testing.allocator;
     const old_fields = try alloc.alloc(Field, 1);
-    old_fields[0] = makeField(alloc, "id", .{ .simple = "n" });
+    old_fields[0] = try makeField(alloc, "id", .{ .simple = "n" });
 
     const new_fields = try alloc.alloc(Field, 1);
-    new_fields[0] = makeField(alloc, "id", .{ .simple = "n" });
+    new_fields[0] = try makeField(alloc, "id", .{ .simple = "n" });
 
     const old_ast = makeResolvedAst(alloc, try alloc.dupe(ast_mod.ResolvedTable, &.{.{
         .name = "users",
@@ -499,10 +499,10 @@ test "diff: table created and dropped simultaneously" {
 test "diff: field type change detected" {
     const alloc = testing.allocator;
     const old_fields = try alloc.alloc(Field, 1);
-    old_fields[0] = makeField(alloc, "count", .{ .simple = "n" });
+    old_fields[0] = try makeField(alloc, "count", .{ .simple = "n" });
 
     const new_fields = try alloc.alloc(Field, 1);
-    new_fields[0] = makeField(alloc, "count", .{ .simple = "N" });
+    new_fields[0] = try makeField(alloc, "count", .{ .simple = "N" });
 
     const old_ast = makeResolvedAst(alloc, try alloc.dupe(ast_mod.ResolvedTable, &.{.{
         .name = "stats",
@@ -532,8 +532,8 @@ test "diff: field type change detected" {
 test "diff: index added and dropped" {
     const alloc = testing.allocator;
     const fields = try alloc.alloc(Field, 2);
-    fields[0] = makeField(alloc, "id", .{ .simple = "n" });
-    fields[1] = makeField(alloc, "email", .{ .simple = "s" });
+    fields[0] = try makeField(alloc, "id", .{ .simple = "n" });
+    fields[1] = try makeField(alloc, "email", .{ .simple = "s" });
 
     const old_idx = try alloc.alloc(IndexDecl, 1);
     old_idx[0] = .{ .kind = .unique, .name = "uk_email", .fields = &.{"email"}, .descending = &.{false}, .line_no = 1 };
@@ -569,8 +569,8 @@ test "diff: index added and dropped" {
 test "diff: no changes on identical tables" {
     const alloc = testing.allocator;
     const fields = try alloc.alloc(Field, 2);
-    fields[0] = makeField(alloc, "id", .{ .simple = "n" });
-    fields[1] = makeField(alloc, "name", .{ .simple = "s" });
+    fields[0] = try makeField(alloc, "id", .{ .simple = "n" });
+    fields[1] = try makeField(alloc, "name", .{ .simple = "s" });
 
     const t1 = try alloc.dupe(ast_mod.ResolvedTable, &.{.{
         .name = "user",
@@ -600,12 +600,12 @@ test "diff: field added and dropped simultaneously" {
     const alloc = testing.allocator;
 
     const old_fields = try alloc.alloc(Field, 2);
-    old_fields[0] = makeField(alloc, "id", .{ .simple = "n" });
-    old_fields[1] = makeField(alloc, "old_col", .{ .simple = "s" });
+    old_fields[0] = try makeField(alloc, "id", .{ .simple = "n" });
+    old_fields[1] = try makeField(alloc, "old_col", .{ .simple = "s" });
 
     const new_fields = try alloc.alloc(Field, 2);
-    new_fields[0] = makeField(alloc, "id", .{ .simple = "n" });
-    new_fields[1] = makeField(alloc, "new_col", .{ .simple = "n" });
+    new_fields[0] = try makeField(alloc, "id", .{ .simple = "n" });
+    new_fields[1] = try makeField(alloc, "new_col", .{ .simple = "n" });
 
     const old_table = try alloc.dupe(ast_mod.ResolvedTable, &.{.{
         .name = "t",
@@ -635,7 +635,7 @@ test "diff: FK change detected" {
     const alloc = testing.allocator;
 
     const fields = try alloc.alloc(Field, 1);
-    fields[0] = makeField(alloc, "id", .{ .simple = "n" });
+    fields[0] = try makeField(alloc, "id", .{ .simple = "n" });
 
     const fk1 = try alloc.dupe(ast_mod.FkDecl, &.{.{
         .fields = &.{"user_id"},
@@ -680,7 +680,7 @@ test "diff: table comment change detected" {
     const alloc = testing.allocator;
 
     const fields = try alloc.alloc(Field, 1);
-    fields[0] = makeField(alloc, "id", .{ .simple = "n" });
+    fields[0] = try makeField(alloc, "id", .{ .simple = "n" });
 
     const old_table = try alloc.dupe(ast_mod.ResolvedTable, &.{.{
         .name = "t",

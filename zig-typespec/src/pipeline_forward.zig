@@ -35,7 +35,7 @@ pub fn compilePipeline(io: std.Io, alloc: std.mem.Allocator, file_data: []const 
     const tokenized = try tok.tokenizeAll(alloc);
 
     // Use DiagnosticCollector for multi-error recovery
-    var diagnostics = diag.DiagnosticCollector.init(alloc);
+    var diagnostics = try diag.DiagnosticCollector.init(alloc);
     var p = parser.Parser.initWithDiagnostics(alloc, &diagnostics);
     const tree = p.parse(tokenized) catch |err| {
         // Allocation errors propagate; syntax errors are collected

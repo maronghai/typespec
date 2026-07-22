@@ -82,7 +82,7 @@ pub const SemanticAnalyzer = struct {
                 try seen_names.put(pass.name, {});
             }
         }
-        var diagnostics = diag.DiagnosticCollector.init(self.alloc);
+        var diagnostics = try diag.DiagnosticCollector.init(self.alloc);
         var ctx = PassContext{
             .alloc = self.alloc,
             .tables = &tables,
@@ -621,7 +621,7 @@ test "validate_type_modifiers: ++ on varchar produces warning" {
         .line_no = 1,
     });
 
-    var diagnostics = diag.DiagnosticCollector.init(alloc);
+    var diagnostics = try diag.DiagnosticCollector.init(alloc);
     var ctx = PassContext{
         .alloc = alloc,
         .tables = &tables,
@@ -650,7 +650,7 @@ test "validate_type_modifiers: u on varchar produces warning" {
         .line_no = 1,
     });
 
-    var diagnostics = diag.DiagnosticCollector.init(alloc);
+    var diagnostics = try diag.DiagnosticCollector.init(alloc);
     var ctx = PassContext{
         .alloc = alloc,
         .tables = &tables,
@@ -679,7 +679,7 @@ test "validate_type_modifiers: ++ on n produces no warning" {
         .line_no = 1,
     });
 
-    var diagnostics = diag.DiagnosticCollector.init(alloc);
+    var diagnostics = try diag.DiagnosticCollector.init(alloc);
     var ctx = PassContext{
         .alloc = alloc,
         .tables = &tables,
@@ -708,7 +708,7 @@ test "validate_type_modifiers: + on t produces no warning" {
         .line_no = 1,
     });
 
-    var diagnostics = diag.DiagnosticCollector.init(alloc);
+    var diagnostics = try diag.DiagnosticCollector.init(alloc);
     var ctx = PassContext{
         .alloc = alloc,
         .tables = &tables,
@@ -737,7 +737,7 @@ test "validate_type_modifiers: u on n produces no warning" {
         .line_no = 1,
     });
 
-    var diagnostics = diag.DiagnosticCollector.init(alloc);
+    var diagnostics = try diag.DiagnosticCollector.init(alloc);
     var ctx = PassContext{
         .alloc = alloc,
         .tables = &tables,

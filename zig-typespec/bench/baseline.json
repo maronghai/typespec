@@ -1,0 +1,10 @@
+{
+  "file": "bench/small.tps",
+  "stages": {
+    "tokenize": 0.10,
+    "parse": 0.10,
+    "semantic": 0.07,
+    "type_resolve": 0.03,
+    "codegen": 0.04
+  }
+}
