@@ -32,7 +32,7 @@ pub fn lookupSqlTypeDirect(tps_symbol: []const u8, dialect: Dialect) ?sql_type_m
         .{ .tps = "t", .mysql = .datetime, .pg = .datetime, .sqlite = .datetime },
         .{ .tps = "T", .mysql = .timestamptz, .pg = .timestamptz, .sqlite = .timestamptz },
         .{ .tps = "s", .mysql = .{ .varchar = 0 }, .pg = .{ .varchar = 0 }, .sqlite = .{ .varchar = 0 } },
-        .{ .tps = "u", .mysql = .uuid, .pg = .uuid, .sqlite = .{ .passthrough = "TEXT" } },
+        .{ .tps = "U", .mysql = .uuid, .pg = .uuid, .sqlite = .{ .passthrough = "TEXT" } },
         .{ .tps = "p", .mysql = .serial, .pg = .serial, .sqlite = .{ .passthrough = "INTEGER" } },
     };
     for (&SYMBOL_MAP) |entry| {

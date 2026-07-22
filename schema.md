@@ -100,6 +100,10 @@ field_name  [type_symbol]  [modifier...]  [check]  [: | -- | ; comment]
 | `_at` | datetime | `created_at` → datetime |
 | *(none)* | varchar(255) | `name` → varchar(255) |
 
+> **Note**: See [Type Spec](type.md) for the full type symbol reference including `i` (smallint), `T` (timestamptz), `U` (uuid), `p` (serial).
+
+> **Note**: See [Type Spec](type.md) for the full type symbol reference including `i` (smallint), `T` (timestamptz), `U` (uuid), `p` (serial).
+
 ### Modifiers
 
 | Symbol | Meaning | Type | Example |
@@ -646,7 +650,16 @@ email s128 *
 
 `-C` = ON DELETE CASCADE, `-N` = ON DELETE SET NULL, `C` = ON UPDATE CASCADE, `N` = ON UPDATE SET NULL. Omit for RESTRICT (default).
 
-### Q8: Version control?
+### Q8: UUID and serial types?
+
+```asm
+token     U             ; uuid (PG: native uuid; MySQL: char(36))
+id        p             ; serial (PG: serial; MySQL/SQLite: int)
+```
+
+`U` is especially useful for primary keys in PostgreSQL. `p` provides a shorthand for auto-incrementing integer columns.
+
+### Q9: Version control?
 
 ```bash
 cd zig-typespec && zig build
@@ -669,3 +682,4 @@ diff v1.sql v2.sql
 8. **Template-driven** — define once, apply everywhere with `...` slot
 9. **DB-agnostic core** — symbols map to SQL standard; tool handles dialects
 10. **FK actions as postfix** — `-C`/`-N`/`C`/`N` appended to FK reference, no extra syntax
+11. **Lowercase for core, uppercase for variants** — `n`/`s`/`b`/`j`/`d`/`t` are core; `N`/`M`/`S`/`B`/`T`/`U` are variants. `i` and `p` are lowercase exceptions for smallint and serial.

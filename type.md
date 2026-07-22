@@ -8,6 +8,7 @@ A minimal DSL for declaring database field types using single-character symbols 
 |--------|------|---------|
 | `n` | int | `id n` |
 | `N` | bigint | `version N` |
+| `i` | smallint | `age i` |
 | `\d+` | int(n) | `type 1` → int(1) |
 | `\d+,\d+` | decimal(m,n) | `3,2` → decimal(3,2) |
 | `m` | decimal(16,2) | `balance m` |
@@ -20,6 +21,9 @@ A minimal DSL for declaring database field types using single-character symbols 
 | `j` | json | `meta j` |
 | `d` | date | `vip_on d` |
 | `t` | datetime | `create_at t` |
+| `T` | timestamptz | `created T` |
+| `U` | uuid | `token U` |
+| `p` | serial | `id p` |
 | `e(...)` | ENUM('...') | `e(M,F,X)` |
 
 **Suffix auto-inference** — when no type symbol is given:
@@ -41,6 +45,7 @@ A minimal DSL for declaring database field types using single-character symbols 
 |--------|----------|-------------|
 | `n` | int | 32-bit integer |
 | `N` | bigint | 64-bit integer |
+| `i` | smallint | 16-bit integer |
 | `\d+` | int(n) | Integer with display width |
 | `\d+,\d+` | decimal(m,n) | Fixed-point: precision m, scale n |
 
@@ -73,6 +78,7 @@ When a field has no type symbol, it defaults to `s` (varchar). This makes the sy
 |--------|----------|-------------|
 | `d` | date | Date only (YYYY-MM-DD) |
 | `t` | datetime | Date + time (YYYY-MM-DD HH:MM:SS) |
+| `T` | timestamptz | Timestamp with time zone |
 
 ### 1.5 Money
 
@@ -88,7 +94,14 @@ When a field has no type symbol, it defaults to `s` (varchar). This makes the sy
 | `B` | blob | Binary data (images, files, serialized objects) |
 | `j` | json | JSON document (MySQL 5.7+, PostgreSQL, etc.) |
 
-### 1.7 Enum
+### 1.7 UUID & Serial
+
+| Symbol | SQL Type | Description |
+|--------|----------|-------------|
+| `U` | uuid | UUID type (PG: native uuid; MySQL: char(36); SQLite: TEXT) |
+| `p` | serial | Auto-incrementing integer (PG: serial; MySQL/SQLite: int) |
+
+### 1.8 Enum
 
 | Symbol | SQL Type | Description |
 |--------|----------|-------------|
@@ -167,7 +180,7 @@ The complete type symbol EBNF is defined in [`grammar.ebnf`](grammar.ebnf). Here
 |------------|-----------|
 | `type_symbol` | `numeric_type \| money_type \| string_type \| enum_type \| atomic_type` |
 | `numeric_type` | `int_short \| int_explicit \| decimal_explicit` |
-| `int_short` | `"n" \| "N"` |
+| `int_short` | `"n" \| "N" \| "i"` |
 | `int_explicit` | `positive_int` (e.g. `128` → int(128)) |
 | `decimal_explicit` | `positive_int, ",", positive_int` (e.g. `16,2` → decimal(16,2)) |
 | `money_type` | `"m" \| "M"` |
@@ -176,7 +189,7 @@ The complete type symbol EBNF is defined in [`grammar.ebnf`](grammar.ebnf). Here
 | `varchar_explicit` | `"s", positive_int` (e.g. `s128` → varchar(128)) |
 | `text_type` | `"S"` |
 | `enum_type` | `"e", "(", (word \| string_literal), {",", (word \| string_literal)}, ")"` |
-| `atomic_type` | `"b" \| "B" \| "j" \| "d" \| "t"` |
+| `atomic_type` | `"b" \| "B" \| "j" \| "d" \| "t" \| "T" \| "U" \| "p"` |
 
 ### Disambiguation
 
@@ -209,6 +222,7 @@ id        n               ; int
 group_id                  ; int (suffix _id)
 type      1               ; int(1)
 version   N               ; bigint
+age       i               ; smallint
 balance   m               ; decimal(16, 2)
 rate      M               ; decimal(20, 6)
 
@@ -228,6 +242,11 @@ vip_on    d             ; date
 delete_on               ; date (suffix _on)
 create_at t             ; datetime
 update_at               ; datetime (suffix _at)
+created   T             ; timestamptz
+
+; ── UUID / Serial ──
+token     U             ; uuid
+id        p             ; serial
 ```
 
 ### 4.2 User Table
@@ -241,6 +260,7 @@ avatar      S           ; text
 is_admin    b           ; boolean
 balance     m           ; decimal(16,2)
 settings    j           ; json
+token       U           ; uuid
 created_at  t           ; datetime
 updated_at              ; datetime (suffix _at)
 deleted_on              ; date (suffix _on)
@@ -274,6 +294,7 @@ Each line starting with `|` is a regex alternation branch. Comments after `;` ar
 ```
 n             ; int
 |N            ; bigint
+|i            ; smallint
 
 |m            ; decimal(16,2)
 |M            ; decimal(20,6)
@@ -288,6 +309,9 @@ n             ; int
 |j            ; json
 |t            ; datetime
 |d            ; date
+|T            ; timestamptz
+|U            ; uuid
+|p            ; serial
 ```
 
 ### 5.2 Compiled Regex
@@ -295,14 +319,14 @@ n             ; int
 ZZ concatenates the branches into a single alternation, wrapped with word boundaries:
 
 ```
-\b(?:[nNmMSBbdjt]|\d+(?:,\d+)?|s\d+|e\([^)]+\))\b
+\b(?:[nNiImMSBbdjtTUp]|\d+(?:,\d+)?|s\d+|e\([^)]+\))\b
 ```
 
 **Breakdown:**
 
 | Segment | Matches |
 |---------|---------|
-| `[nNmMSBbdjt]` | Single-character type symbols (`n`=int, `N`=bigint, `m`=decimal(16,2), etc.) |
+| `[nNiImMSBbdjtTUp]` | Single-character type symbols (`n`=int, `N`=bigint, `i`=smallint, `m`=decimal(16,2), etc.) |
 | `e\([^)]+\)` | Enum type: `e(M,F,X)`, `e(pending,active,closed)`, etc. |
 | `s\d+` | VARCHAR with explicit length: `s100`, `s32`, etc. (note: `s` alone is also in the character class above) |
 | `\d+(?:,\d+)?` | Numeric: `int(n)` (e.g. `128`) or `decimal(m,n)` (e.g. `16,2`) |
@@ -337,6 +361,7 @@ typespec schema.tps -d postgres  # alias
 |--------|-------|-----------|-------|
 | `n` | `int` | `integer` | Same 4-byte integer |
 | `N` | `bigint` | `bigint` | Same 8-byte integer |
+| `i` | `smallint` | `smallint` | Same 2-byte integer |
 | `m` | `decimal(16,2)` | `numeric(16,2)` | Equivalent types |
 | `M` | `decimal(20,6)` | `numeric(20,6)` | Equivalent types |
 | `s` / `s\d+` | `varchar(n)` | `varchar(n)` | Same |
@@ -346,9 +371,12 @@ typespec schema.tps -d postgres  # alias
 | `j` | `json` | `json` | Same |
 | `d` | `date` | `date` | Same |
 | `t` | `datetime` | `timestamp` | PG has no datetime type |
+| `T` | `timestamp` | `timestamptz` | Timestamp with time zone |
+| `U` | `char(36)` | `uuid` | PG has native uuid; MySQL uses char(36) |
+| `p` | `int` | `serial` | Auto-incrementing integer |
 | `e(...)` | `ENUM(...)` | `text` + `CHECK` | PG: text column with CHECK constraint |
 | `\d+` (int width) | `int(n)` | `integer` | PG ignores display width |
-| `nu` / `Nu` | `UNSIGNED` | *(ignored)* | PG has no UNSIGNED |
+| `nu` / `Nu` / `iu` | `UNSIGNED` | *(ignored)* | PG has no UNSIGNED |
 | `n++` | `AUTO_INCREMENT` | `GENERATED ALWAYS AS IDENTITY` | SQL standard identity |
 | `t+` | `DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP` | `DEFAULT CURRENT_TIMESTAMP` | PG has no ON UPDATE |
 
@@ -372,17 +400,19 @@ typespec schema.tps -d postgres  # alias
 3. **Explicit when needed** — `s100` for arbitrary lengths.
 4. **Defaults are sensible** — no type symbol → varchar, since strings are the most common field type.
 5. **DB-agnostic** — symbols map to SQL standard types; the consuming tool (DB Spec) handles dialect-specific DDL.
+6. **Lowercase for core, uppercase for variants** — `n`/`s`/`b`/`j`/`d`/`t` are core; `N`/`M`/`S`/`B`/`T`/`U` are variants. `i` and `p` are lowercase exceptions for smallint and serial.
 
 ---
 
 ## 8. FAQ
 
-### Q1: What's the difference between `n` and `N`?
+### Q1: What's the difference between `n`, `N`, and `i`?
 
 - `n` = INT (32-bit, up to 2.1 billion)
 - `N` = BIGINT (64-bit, up to 9.2 quintillion)
+- `i` = SMALLINT (16-bit, up to 32,767)
 
-Use `n` for most IDs and counters. Use `N` for large numbers or timestamps.
+Use `n` for most IDs and counters. Use `N` for large numbers. Use `i` for small values like age, status codes, or flags.
 
 ### Q2: How do I choose between `s` and `s\d+`?
 
@@ -439,7 +469,18 @@ metadata j     ; JSON type
 
 Note: JSON support varies by database (MySQL 5.7+, PostgreSQL, etc.).
 
-### Q8: Can I use spaces in field names?
+### Q8: How do I use UUID or serial types?
+
+Use `U` for UUID and `p` for serial:
+
+```asm
+token     U             ; uuid (PG: native uuid; MySQL: char(36))
+id        p             ; serial (PG: serial; MySQL/SQLite: int)
+```
+
+`U` is especially useful for primary keys in PostgreSQL. `p` provides a shorthand for auto-incrementing integer columns.
+
+### Q9: Can I use spaces in field names?
 
 No. Field names must follow SQL identifier rules:
 
@@ -454,7 +495,7 @@ user name      ; Space not allowed
 user-name      ; Hyphen not allowed
 ```
 
-### Q9: How do I handle reserved words?
+### Q10: How do I handle reserved words?
 
 Avoid using SQL reserved words as field names. If you must, you'll need to quote them in the generated SQL:
 
@@ -467,7 +508,7 @@ table
 
 **Recommendation**: Use descriptive names like `order_no`, `select_option`, `table_name`.
 
-### Q10: How do I generate PostgreSQL DDL?
+### Q11: How do I generate PostgreSQL DDL?
 
 Use the `-d pg` flag:
 
@@ -476,4 +517,4 @@ typespec schema.tps -d pg        # PostgreSQL output
 typespec reverse -d pg schema.sql  # Reverse-engineer PG DDL
 ```
 
-TypeSpec maps `n` → `integer`, `t` → `timestamp`, `B` → `bytea`, `e(...)` → `text` + `CHECK`, and `n++` → `GENERATED ALWAYS AS IDENTITY` for PostgreSQL.
+TypeSpec maps `n` → `integer`, `t` → `timestamp`, `T` → `timestamptz`, `U` → `uuid`, `p` → `serial`, `B` → `bytea`, `e(...)` → `text` + `CHECK`, and `n++` → `GENERATED ALWAYS AS IDENTITY` for PostgreSQL.

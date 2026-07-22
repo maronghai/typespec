@@ -17,7 +17,7 @@ pub const SqlType = sql_type_mod.SqlType;
 
 pub fn isNumericTpsType(ti: TypeInfo) bool {
     switch (ti) {
-        .simple => |s| return std.mem.eql(u8, s, "n") or std.mem.eql(u8, s, "N"),
+        .simple => |s| return std.mem.eql(u8, s, "n") or std.mem.eql(u8, s, "N") or std.mem.eql(u8, s, "i"),
         .int_explicit, .decimal_explicit => return true,
         else => return false,
     }

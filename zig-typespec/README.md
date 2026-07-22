@@ -124,7 +124,7 @@ typespec reverse schema.sql -t -o schema.tps
 
 | Feature | Input (SQL) | Output (.tps) |
 |---------|-------------|---------------|
-| Types | `int`, `bigint`, `smallint`, `varchar(N)`, `decimal(P,S)`, `text`, `boolean`, `blob`, `json`, `date`, `datetime`, `timestamptz`, `uuid`, `serial`, `bit(1)`, `ENUM(...)` | `n`, `N`, `i`, `sN`, `m`/`M`, `S`, `b`, `B`, `j`, `d`, `t`, `T`, `u`, `p`, `b`, `e(...)` |
+| Types | `int`, `bigint`, `smallint`, `varchar(N)`, `decimal(P,S)`, `text`, `boolean`, `blob`, `json`, `date`, `datetime`, `timestamptz`, `uuid`, `serial`, `bit(1)`, `ENUM(...)` | `n`, `N`, `i`, `sN`, `m`/`M`, `S`, `b`, `B`, `j`, `d`, `t`, `T`, `U`, `p`, `b`, `e(...)` |
 | Modifiers | `NOT NULL`, `AUTO_INCREMENT`, `PRIMARY KEY`, `UNSIGNED` | `*`, `+`, `!`, `u` (fused: `++` = AI+PK) |
 | Defaults | `DEFAULT 0`, `DEFAULT 'val'`, `DEFAULT CURRENT_TIMESTAMP`, `DEFAULT b'0'` | `=0`, `=val`, `+`/`++` on datetime, `=0` |
 | Suffix inference | `user_id int` → `user_id` (type omitted) | `_id`→int, `_on`→date, `_at`→datetime, default→varchar(255) |

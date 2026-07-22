@@ -69,7 +69,7 @@ Run a single golden test by filter: `bash tests/test.sh 01` (matches test name s
 
 - **Custom Type System**: `~` directives in schema block define user-defined type aliases with optional dialect overrides. Resolved during type resolution, not parsing.
 
-- **Self-contained SqlType** ([sql_type.zig](zig-typespec/src/sql_type.zig)): `SqlType.toSql()` delegates to `DialectBackend.renderType` for dialect-aware rendering. Variants: `int`, `bigint`, `smallint`, `decimal`, `varchar`, `text`, `blob`, `json`, `datetime`, `date`, `timestamptz`, `boolean`, `uuid`, `serial`, `enum_values`, `raw_sql`, `passthrough`. `toJsonSchema()` provides dialect-agnostic JSON Schema output.
+- **Self-contained SqlType** ([sql_type.zig](zig-typespec/src/sql_type.zig)): `SqlType.toSql()` delegates to `DialectBackend.renderType` for dialect-aware rendering. Variants: `int`, `bigint`, `smallint`, `decimal`, `varchar`, `text`, `blob`, `json`, `datetime`, `date`, `timestamptz`, `boolean`, `uuid`, `serial`, `enum_values`, `raw_sql`, `passthrough`. TPS symbols: `n`, `N`, `i`, `m`, `M`, `s`, `S`, `b`, `B`, `j`, `d`, `t`, `T`, `U`, `p`. `toJsonSchema()` provides dialect-agnostic JSON Schema output. `toJsonSchema()` provides dialect-agnostic JSON Schema output.
 
 - **Dialect-Aware Diff** ([diff_semantic.zig](zig-typespec/src/diff_semantic.zig)): Type equivalence checking uses canonical TPS symbol mapping — different symbols that resolve to the same SQL type are equivalent (e.g. `N4` ↔ `4`), but distinct types like `n` (int) vs `N` (bigint) are NOT equivalent. Diff engine accepts optional `Dialect` parameter.
 

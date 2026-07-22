@@ -43,7 +43,7 @@ TypeSpec is a compiler that transforms `.tps` schema files into SQL DDL. It cons
 **Key modules**:
 - `sql_type.zig`: `SqlType` union with `toSql()` delegating to `DialectBackend.renderType`. Variants: int, bigint, smallint, decimal, varchar, text, blob, json, datetime, date, timestamptz, boolean, uuid, serial, enum_values, raw_sql, passthrough. `toJsonSchema()` for JSON Schema output.
 - `type_map.zig`: Helper functions (`lookupCustomType`, `isNumericTpsType`, etc.) + `SqlType` re-export
-- `type_registry.zig`: TPS symbol → `SqlType` direct mapping (`lookupSqlTypeDirect`) and reverse lookup. 15 core TPS symbols: n, N, i, m, M, S, b, B, j, d, t, T, s, u, p
+- `type_registry.zig`: TPS symbol → `SqlType` direct mapping (`lookupSqlTypeDirect`) and reverse lookup. 15 core TPS symbols: n, N, i, m, M, s, S, b, B, j, d, t, T, U, p
 
 ### Extracted Sub-Modules
 
@@ -287,7 +287,7 @@ When `typespec reverse -t` is used, the reverse codegen extracts common field se
 
 TypeSpec uses a three-layer type mapping system:
 
-- **`sql_type.zig` (SqlType.toSql)**: Delegates to `DialectBackend.renderType` for dialect-aware rendering. Variants: int, bigint, smallint, decimal, varchar, text, blob, json, datetime, date, timestamptz, boolean, uuid, serial, enum_values, raw_sql, passthrough.
+- **`sql_type.zig` (SqlType.toSql)**: Delegates to `DialectBackend.renderType` for dialect-aware rendering. Variants: int, bigint, smallint, decimal, varchar, text, blob, json, datetime, date, timestamptz, boolean, uuid, serial, enum_values, raw_sql, passthrough. TPS symbols: n, N, i, m, M, s, S, b, B, j, d, t, T, U, p.
 
 - **`type_registry.zig` (CORE_TYPES)**: Static array of 15 TPS symbol entries with dialect-specific SQL names. Provides two lookup functions:
   - `lookupSqlType(tps, dialect)` → `?[]const u8` (SQL name string, for backward compat)
@@ -301,7 +301,7 @@ TypeSpec uses a three-layer type mapping system:
 
 1. **TypedAst IR layer**: Separates type resolution from code generation. Codegen only outputs strings — no type inference logic.
 2. **DialectBackend vtable**: 23 core + 6 optional function pointers + 3 behavioral flags cover all dialect differences. Adding a new dialect requires < 100 lines. codegen.zig is fully dialect-agnostic (zero `switch(dialect)` in production code). FK rendering is shared via `dialect_common.zig:emitForeignKeyShared`.
-3. **Self-contained SqlType**: `SqlType.toSql()` delegates to `DialectBackend.renderType`. Adding a new type = add variant to union + add case to all `renderType` implementations + add to `type_registry.zig`.
+3. **Self-contained SqlType**: `SqlType.toSql()` delegates to `DialectBackend.renderType`. Adding a new type = add variant to union + add case to all `renderType` implementations + add to `type_registry.zig`. TPS symbol naming: lowercase for core types (n, s, b, j, d, t), uppercase for variants (N, M, S, B, T, U, i, p). Avoid `u` (reserved for unsigned modifier).
 4. **Direct type lookup**: `type_registry.lookupSqlTypeDirect()` returns `SqlType` variants directly, avoiding the stringly-typed round-trip (TPS symbol → SQL string → SqlType).
 5. **AST-level diff**: Semantic comparison, not text diff. Detects renames by signature matching. Dialect-aware type equivalence (`diff_semantic.zig`) uses canonical TPS symbol mapping — different symbols that resolve to the same SQL type are equivalent (e.g., `N4` ↔ `4` in MySQL), but distinct types like `n` (int) vs `N` (bigint) are NOT equivalent.
 6. **Arena allocation**: All modules take `std.mem.Allocator`. Arena-style usage for command-lifetime memory.
