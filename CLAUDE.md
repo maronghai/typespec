@@ -18,13 +18,13 @@ cd zig-typespec && zig fmt --check src/               # Formatting check
 ### Golden File Tests (shell-based, compare compiler output against .sql golden files)
 
 ```bash
-bash tests/test.sh                  # MySQL (82 tests)
+bash tests/test.sh                  # MySQL (84 tests)
 bash tests/test_postgres.sh         # PostgreSQL (82 tests)
 bash tests/test_sqlite.sh           # SQLite (24 tests)
-bash tests/test_migrate.sh          # Migration (30 tests: 10 MySQL + 10 PG + 10 SQLite)
-bash tests/test_reverse.sh          # Reverse engineering (15 tests)
-bash tests/test_diff.sh             # Schema diff (8 tests)
-bash tests/test_error_recovery.sh   # Error recovery (7 tests)
+bash tests/test_migrate.sh          # Migration (34 tests)
+bash tests/test_reverse.sh          # Reverse engineering (17 tests)
+bash tests/test_diff.sh             # Schema diff (12 tests)
+bash tests/test_error_recovery.sh   # Error recovery (9 tests)
 ```
 
 Run a single golden test by filter: `bash tests/test.sh 01` (matches test name substring).
@@ -54,7 +54,7 @@ Run a single golden test by filter: `bash tests/test.sh 01` (matches test name s
 
 ### Key Design Patterns
 
-- **DialectBackend vtable** ([dialect.zig](zig-typespec/src/dialect.zig)): 26 function pointers + 3 behavioral flags for dialect-specific SQL rendering. [codegen.zig](zig-typespec/src/codegen.zig) is fully dialect-agnostic (zero `switch(dialect)` in production code). Adding a new SQL dialect = new enum variant + type mappings + ~100-line backend implementation.
+- **DialectBackend vtable** ([dialect.zig](zig-typespec/src/dialect.zig)): 22 core + 5 optional function pointers + 3 behavioral flags for dialect-specific SQL rendering. [codegen.zig](zig-typespec/src/codegen.zig) is fully dialect-agnostic (zero `switch(dialect)` in production code). Per-dialect implementations: [dialect_mysql.zig](zig-typespec/src/dialect_mysql.zig), [dialect_pg.zig](zig-typespec/src/dialect_pg.zig), [dialect_sqlite.zig](zig-typespec/src/dialect_sqlite.zig); shared PG/SQLite logic in [dialect_common.zig](zig-typespec/src/dialect_common.zig). Adding a new SQL dialect = new enum variant + new `dialect_<name>.zig` (~200 lines).
 
 - **Semantic Pass Manager** ([semantic.zig](zig-typespec/src/semantic.zig)): Extensible array of `SemanticPass` structs with `depends_on` dependency declarations. Current passes: `autofk` → `suffix_inference` → `validate` → `validate_type_modifiers`. Debug mode validates dependency ordering. New passes: write a `fn(*PassContext) !void` and add to `DEFAULT_PASSES`.
 
@@ -73,10 +73,15 @@ Run a single golden test by filter: `bash tests/test.sh 01` (matches test name s
 | `codegen.zig` | TypedAst → SQL DDL text, 5 sub-functions (emitColumnDefs, emitInlineIndexes, emitConstraints, emitTableMetadata, emitStandaloneIndexes) |
 | `sql_parser.zig` | Recursive-descent SQL DDL parser (reverse pipeline) |
 | `semantic.zig` | Pass manager + template resolution orchestration |
-| `dialect.zig` | DialectBackend vtable (26 fn ptrs + 3 flags) for MySQL/PG/SQLite |
+| `dialect.zig` | DialectBackend vtable definition + getBackend() + shared emitCheckExpr helper |
+| `dialect_mysql.zig` | MySQL DialectBackend implementation (~270 lines) |
+| `dialect_pg.zig` | PostgreSQL DialectBackend implementation (~150 lines) |
+| `dialect_sqlite.zig` | SQLite DialectBackend implementation (~160 lines) |
+| `dialect_common.zig` | Shared PG/SQLite dialect functions (quoting, indexes, ALTER) |
 | `parser.zig` | Token-level `.tps` parser → AST (delegates to parse_*.zig modules) |
 | `diff.zig` | Table-level diff orchestration + SchemaDiff types + printing |
-| `reverse_map.zig` | Reverse type mappings (SQL → TPS symbols) |
+| `reverse_map.zig` | Reverse lookup logic (SQL → TPS symbol matching + heuristics) |
+| `reverse_map_data.zig` | REVERSE_MAP data table (SQL ↔ TPS type mappings, 46 entries) |
 | `migrate.zig` | Migration SQL generation, 7 sub-functions (emitDroppedTables, emitViewDiffs, emitTableDiffs, emitFieldDiffs, emitIndexDiffs, emitMetadataDiffs, emitFkDiffs) |
 | `ast_visitor.zig` | Comptime-generic AST traversal utilities |
 | `parse_field.zig` | Field declaration parsing (type, modifiers, default, inline FK) |

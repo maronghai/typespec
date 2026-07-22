@@ -59,7 +59,7 @@ pub fn main(init: std.process.Init) !void {
     };
 }
 
-const VERSION = "0.4.35";
+const VERSION = "0.4.55";
 
 // ─── Command Dispatch ──────────────────────────────────────────
 
