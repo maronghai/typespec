@@ -7,10 +7,20 @@ Supports forward compilation (`.tps` → SQL), reverse engineering (SQL → `.tp
 ## Build
 
 ```bash
-zig build
+zig build                          # Build (debug)
+zig build -Doptimize=ReleaseSafe   # Build (release)
+zig build test                     # Unit tests
 ```
 
 Output binary: `zig-out/bin/typespec`
+
+## Benchmark
+
+```bash
+zig build bench                              # default: bench/small.tps, 10 iterations
+zig build bench -- bench/medium.tps 20       # custom file and iteration count
+zig build bench -- bench/large.tps 5         # large schema benchmark
+```
 
 ## Usage
 
@@ -363,24 +373,54 @@ Reverse Codegen   Type mapping (via type_map.zig), modifier reconstruction,
 
 ```
 src/
-├── main.zig             Entry point, CLI parsing, pipeline orchestration (compilePipeline)
+├── main.zig             Entry point, CLI parsing, pipeline orchestration
 ├── tokenizer.zig        Line classification (Schema/Table/Field/FK/Index/Slot/Comment)
 ├── ast.zig              AST type definitions (Field, Table, Template, TypeInfo, etc.)
-├── parser.zig           Parser (tokens → AST, ~1340 lines)
-├── parse_field.zig      Field parsing module (fused type, enum, modifier, inline FK/CHECK)
-├── parse_fk.zig         Foreign key parsing module (inline + standalone FK)
-├── parse_check.zig      CHECK constraint parsing module (range, IN list, comparison)
-├── parse_index.zig      Index parsing module (shorthand, full form, composite PK)
+├── parser.zig           Parser (tokens → AST, 440 lines + 8 parse_*.zig modules)
+├── parse_field.zig      Field parsing (fused type, enum, modifier, inline FK/CHECK)
+├── parse_fk.zig         Foreign key parsing (inline + standalone FK)
+├── parse_check.zig      CHECK constraint parsing (range, IN, comparison)
+├── parse_index.zig      Index + composite PK parsing
+├── parse_typedef.zig    ~ directive parsing (custom types)
+├── parse_template.zig   Template header parsing + slot detection
+├── parse_table.zig      Table header parsing + engine token stripping
+├── parse_trace.zig      Parser diagnostic trace output (debug mode)
 ├── semantic.zig         Template resolution, suffix inference, autofk + PassManager
-├── type_map.zig         Unified tps ↔ SQL type mapping (single source of truth)
-├── typed_ast.zig        TypeResolver: TypeInfo → SQL type strings (dialect-agnostic IR)
-├── dialect.zig          DialectBackend vtable (5 methods) + shared PG/SQLite impls
+├── type_map.zig         Helper functions (isNumericTpsType, etc.) + SqlType re-export
+├── type_registry.zig    TPS symbol → SqlType direct mapping (CORE_TYPES)
+├── typed_ast.zig        TypeResolver: TypeInfo → SqlType per dialect (TypedAst IR)
+├── dialect.zig          DialectBackend vtable (22 core + 6 optional) + ReverseResult
+├── dialect_mysql.zig    MySQL DialectBackend implementation
+├── dialect_pg.zig       PostgreSQL DialectBackend implementation
+├── dialect_sqlite.zig   SQLite DialectBackend + heuristic reverse lookup
+├── dialect_common.zig   Shared PG/SQLite dialect functions
+├── dialect_enum.zig     Dialect enum (mysql, pg, sqlite)
+├── sql_type.zig         SqlType union + toSql() (single source of truth)
 ├── codegen.zig          SQL DDL generation via DialectBackend vtable
-├── diagnostic.zig       Error/warning reporting with source context + DiagnosticCollector
+├── diagnostic.zig       Error/warning reporting with source context
 ├── diff.zig             Schema diff engine (AST-level, rename detection)
-├── migrate.zig          AST-diff-driven migration SQL generator (ALTER TABLE)
-├── sql_parser.zig       MySQL/PG/SQLite DDL parser (CREATE DATABASE/TABLE → IR)
-└── reverse_codegen.zig  IR → .tps reverse codegen + template extraction (score-based)
+├── diff_fields.zig      Field-level diffing + rename detection
+├── diff_indexes.zig     Index diffing
+├── diff_fks.zig         FK diffing
+├── diff_semantic.zig    Dialect-aware type equivalence
+├── diff_format.zig      Human-readable diff formatting
+├── migrate.zig          Migration SQL generator (ALTER TABLE)
+├── sql_parser.zig       SQL DDL parser (reverse pipeline, 413 lines)
+├── sql_parser_*.zig     7 sub-modules (create, alter, comment, fk, index, helpers)
+├── reverse_codegen.zig  SQL → .tps orchestration
+├── reverse_map.zig      Reverse lookup logic (REVERSE_MAP)
+├── reverse_map_data.zig REVERSE_MAP data table
+├── reverse_column.zig   Column reverse engineering
+├── reverse_fk.zig       FK reverse classification
+├── reverse_check.zig    CHECK constraint reverse engineering
+├── template.zig         Template inheritance + slot-based field merging
+├── template_extraction.zig  Greedy template extraction (reverse -t)
+├── sqlite_hints.zig     SQLite type affinity heuristics
+├── json_schema.zig      JSON Schema output
+├── io.zig               stdin/stdout/file I/O helpers
+├── trace.zig            Shared AST trace formatting
+├── bench.zig            Benchmark entry point (per-stage pipeline timing)
+└── test_helpers.zig     Shared test factory functions
 ```
 
 ### Parser Module Split (v0.4.6)

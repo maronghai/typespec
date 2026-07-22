@@ -13,6 +13,7 @@ cd zig-typespec && zig build                          # Build (debug)
 cd zig-typespec && zig build -Doptimize=ReleaseSafe   # Build (release)
 cd zig-typespec && zig build test                     # Unit tests (inline Zig test blocks)
 cd zig-typespec && zig fmt --check src/               # Formatting check
+cd zig-typespec && zig build bench                    # Benchmark (per-stage pipeline timing)
 ```
 
 ### Golden File Tests (shell-based, compare compiler output against .sql golden files)
@@ -72,6 +73,8 @@ Run a single golden test by filter: `bash tests/test.sh 01` (matches test name s
 
 - **Reverse Lookup Vtable**: `DialectBackend.reverseLookup` (optional) allows dialect-specific reverse engineering (e.g. SQLite's heuristic-based INTEGER/TEXT disambiguation). Fallback to general REVERSE_MAP matching when vtable is null.
 
+- **Unified ReverseResult**: `dialect.zig` defines the single `ReverseResult` struct (`tps`, `omit`, `score`, `is_parameterized`). Both `type_registry.zig` and `reverse_column.zig` re-export it — zero duplication across the reverse pipeline.
+
 ### Module Roles (by size, largest first)
 
 | Module | Role |
@@ -85,13 +88,14 @@ Run a single golden test by filter: `bash tests/test.sh 01` (matches test name s
 | `diff.zig` | Table-level diff orchestration + SchemaDiff types (accepts optional Dialect for semantic comparison) |
 | `parser.zig` | Token-level `.tps` parser → AST (delegates to parse_*.zig modules; main dispatch + error recovery) |
 | `migrate.zig` | Migration SQL generation, 7 sub-functions (emitDroppedTables, emitViewDiffs, emitTableDiffs, emitFieldDiffs, emitIndexDiffs, emitMetadataDiffs, emitFkDiffs) |
-| `ast_visitor.zig` | Comptime-generic AST traversal utilities |
+| `ast_visitor.zig` | Comptime-generic AST traversal utilities (read-only; `ResolvedTable.fields` is `[]const Field`) |
+| `parse_trace.zig` | Parser diagnostic trace output (debug mode, extracted from parser.zig) |
 | `parse_field.zig` | Field declaration parsing (type, modifiers, default, inline FK) |
 | `diff_fields.zig` | Field-level diffing + rename detection + dialect-aware equality helpers |
 | `tokenizer.zig` | Lexical tokenizer (.tps text → Line[]) |
 | `sql_parser_create.zig` | CREATE TABLE parsing (extracted from sql_parser.zig) |
 | `reverse_map.zig` | Reverse lookup logic (SQL → TPS symbol matching via vtable + parameterized types) |
-| `reverse_column.zig` | Column reverse engineering (type mapping, suffix, inline index detection) |
+| `reverse_column.zig` | Column reverse engineering (re-exports dialect.ReverseResult as TypeResult, suffix, inline index detection) |
 | `diagnostic.zig` | Multi-error diagnostic collector with JSON output |
 | `trace.zig` | Shared AST trace formatting (FK actions, FK declarations, index declarations) used by parser.zig and semantic.zig diagnosticTrace |
 | `template.zig` | Template inheritance resolution and slot-based field merging |
@@ -102,7 +106,7 @@ Run a single golden test by filter: `bash tests/test.sh 01` (matches test name s
 | `diff_format.zig` | Diff output formatting |
 | `reverse_check.zig` | CHECK constraint reverse engineering |
 | `sql_type.zig` | Self-contained SqlType union with `toSql()` — single source of truth for type rendering |
-| `dialect.zig` | DialectBackend vtable + getBackend() + ReverseResult + canOmitType + emitCheckExpr |
+| `dialect.zig` | DialectBackend vtable + getBackend() + unified ReverseResult (score + is_parameterized) + canOmitType + emitCheckExpr |
 | `dialect_mysql.zig` | MySQL DialectBackend implementation (~270 lines) |
 | `dialect_sqlite.zig` | SQLite DialectBackend implementation + reverse lookup heuristics (~244 lines) |
 | `dialect_common.zig` | Shared PG/SQLite dialect functions (quoting, indexes, ALTER) |
@@ -110,7 +114,7 @@ Run a single golden test by filter: `bash tests/test.sh 01` (matches test name s
 | `reverse_map_data.zig` | REVERSE_MAP data table (SQL ↔ TPS type mappings, 46 entries) |
 | `reverse_fk.zig` | FK classification for reverse pipeline |
 | `type_map.zig` | Helper functions (lookupCustomType, isNumericTpsType) + SqlType re-export |
-| `type_registry.zig` | TPS symbol → SqlType direct mapping (lookupSqlTypeDirect) + CORE_TYPES |
+| `type_registry.zig` | TPS symbol → SqlType direct mapping (lookupSqlTypeDirect) + CORE_TYPES; re-exports dialect.ReverseResult |
 | `type_resolver.zig` | ResolvedAst → TypedAst type resolution |
 | `diff_indexes.zig` | Index diffing |
 | `diff_fks.zig` | FK diffing |
@@ -123,6 +127,7 @@ Run a single golden test by filter: `bash tests/test.sh 01` (matches test name s
 | `cli.zig` | CLI argument parsing, help text, Command/ParsedArgs type definitions |
 | `pipeline_diff.zig` | Diff/migrate pipeline orchestration |
 | `compiler.zig` | Re-export hub for pipeline modules |
+| `bench.zig` | Benchmark entry point: per-stage pipeline timing via Io.Clock.Timestamp |
 | `main.zig` | CLI entry point, command dispatch, output format routing |
 
 ### Testing

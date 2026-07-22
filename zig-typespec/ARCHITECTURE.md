@@ -56,6 +56,7 @@ TypeSpec is a compiler that transforms `.tps` schema files into SQL DDL. It cons
 | `parser.zig` | `parse_index.zig` | Index + composite PK parsing |
 | `parser.zig` | `parse_template.zig` | Template header parsing + slot detection |
 | `parser.zig` | `parse_table.zig` | Table header parsing + engine token stripping |
+| `parser.zig` | `parse_trace.zig` | Parser diagnostic trace output (debug mode) |
 | `diff.zig` | `diff_fields.zig` | Field-level diffing + rename detection + equality helpers |
 | `diff.zig` | `diff_indexes.zig` | Index diffing |
 | `diff.zig` | `diff_fks.zig` | FK diffing |
@@ -83,7 +84,7 @@ Input (.tps text)
     Output: []Line (line_type + tokens)
     │
     ▼
-[2] Parser (parser.zig, 723 lines + 5 parse_*.zig modules)
+[2] Parser (parser.zig, 440 lines + 8 parse_*.zig modules)
     Token-level parsing into AST
     Output: Ast (schema, templates, tables, sql_comments)
     │
@@ -166,7 +167,7 @@ Input (SQL DDL text)
 
 ## DialectBackend Vtable
 
-22 core + 6 optional function pointers + 3 behavioral flags for dialect-specific SQL generation (28 total methods):
+22 core + 6 optional function pointers + 3 behavioral flags for dialect-specific SQL generation (31 total dispatch points):
 
 ```zig
 DialectBackend = struct {
@@ -302,6 +303,7 @@ TypeSpec uses a three-layer type mapping system:
 9. **Template/Semantic separation**: Template resolution (inheritance, slot merging) is independent of semantic passes (autofk, suffix_inference, validation). Each can be modified without affecting the other.
 10. **Custom type system**: Users can define named type aliases via `~` directives in the schema block. Custom types support dialect-specific overrides and are resolved during type resolution (not parsing).
 11. **SQLite roundtrip preservation**: `-- @tps col_name type` metadata comments preserve original TPS types through lossy SQLite type affinity. Forward compiler emits comments; reverse compiler parses them for exact type restoration.
+12. **Unified ReverseResult**: `dialect.zig` defines the single `ReverseResult` struct (`tps`, `omit`, `score`, `is_parameterized`). Both `type_registry.zig` and `reverse_column.zig` re-export it — zero type duplication across the reverse pipeline.
 
 ## Custom Type System
 
@@ -349,6 +351,34 @@ No code changes needed — users define types in `.tps` files. For built-in supp
 8. Add golden file tests in `tests/`
 
 No changes needed in `codegen.zig` — it is fully dialect-agnostic.
+
+## Benchmark Infrastructure
+
+`src/bench.zig` measures per-stage latency for the forward pipeline using `Io.Clock.Timestamp` (nanosecond precision).
+
+### Schema Sizes
+
+| File | Tables | Fields | Description |
+|------|--------|--------|-------------|
+| `bench/small.tps` | 6 | ~30 | Blog-like schema (user, post, comment, tag) |
+| `bench/medium.tps` | 21 | ~200 | Project management (users, projects, issues, PRs) |
+| `bench/large.tps` | 32 | ~400 | Enterprise platform (tenants, tasks, sprints, audits) |
+
+### Usage
+
+```bash
+zig build bench                              # default: small, 10 iterations
+zig build bench -- bench/medium.tps 20       # custom file + count
+zig build bench -- bench/large.tps 5         # large schema
+```
+
+### Pipeline Stages Measured
+
+1. **Tokenize**: Line splitting + token classification
+2. **Parse**: Token-level parsing into AST
+3. **Semantic**: Template resolution + pass manager (autofk, suffix_inference, validate)
+4. **Type Resolve**: TypeInfo → SqlType per dialect
+5. **Codegen**: TypedAst → SQL DDL text via DialectBackend vtable
 
 ## Testing Strategy
 
