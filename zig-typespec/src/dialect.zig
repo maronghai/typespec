@@ -1,6 +1,7 @@
 const std = @import("std");
 const ast_mod = @import("ast.zig");
 const dialect_enum = @import("dialect_enum.zig");
+const common = @import("dialect_common.zig");
 const Writer = std.Io.Writer;
 const IndexDecl = ast_mod.IndexDecl;
 const CheckConstraint = ast_mod.CheckConstraint;
@@ -288,138 +289,6 @@ const mysql_backend = DialectBackend{
     .modify_column_def_skips_name = false,
 };
 
-// ─── Shared PG/SQLite Backend ──────────────────────────────────
-
-fn pgSqliteQuoteIdent(w: *Writer, name: []const u8) anyerror!void {
-    try w.print("\"{s}\"", .{name});
-}
-
-fn pgSqliteEmitIndex(w: *Writer, idx: IndexDecl, needs_comma: *bool) anyerror!void {
-    switch (idx.kind) {
-        .regular => return,
-        .fulltext => return,
-        .unique => {
-            if (needs_comma.*) try w.writeAll(",\n");
-            needs_comma.* = true;
-            try w.writeAll("  UNIQUE (");
-            for (idx.fields, 0..) |f, fi| {
-                if (fi > 0) try w.writeAll(", ");
-                try w.print("\"{s}\"", .{f});
-            }
-            try w.writeAll(")");
-        },
-        .primary_key => {
-            if (needs_comma.*) try w.writeAll(",\n");
-            needs_comma.* = true;
-            try w.writeAll("  PRIMARY KEY (");
-            for (idx.fields, 0..) |f, fi| {
-                if (fi > 0) try w.writeAll(", ");
-                try w.print("\"{s}\"", .{f});
-            }
-            try w.writeAll(")");
-        },
-    }
-}
-
-fn pgSqliteEmitUnsigned(_: *Writer) anyerror!void {}
-
-fn pgSqliteEmitTimestampModifier(w: *Writer, _: bool) anyerror!void {
-    try w.writeAll(" DEFAULT CURRENT_TIMESTAMP");
-}
-
-fn pgSqliteEmitTableFooter(w: *Writer, _: ?[]const u8, _: ?[]const u8, _: ?[]const u8) anyerror!void {
-    try w.writeAll(");\n");
-}
-
-fn pgSqliteEmitTableCommentPG(w: *Writer, table_name: []const u8, comment: []const u8) anyerror!void {
-    const ct = if (comment.len >= 1 and comment[0] == ':') comment[1..] else comment;
-    const tr = std.mem.trim(u8, ct, " ");
-    if (tr.len > 0) try w.print("COMMENT ON TABLE \"{s}\" IS '{s}';\n", .{ table_name, tr });
-}
-
-fn pgSqliteEmitColumnCommentPG(w: *Writer, table_name: []const u8, col_name: []const u8, comment: []const u8) anyerror!void {
-    if (comment.len >= 1 and comment[0] == ':') {
-        const ct = std.mem.trim(u8, comment[1..], " ");
-        if (ct.len > 0) try w.print("COMMENT ON COLUMN \"{s}\".\"{s}\" IS '{s}';\n", .{ table_name, col_name, ct });
-    }
-}
-
-fn pgSqliteEmitTableCommentSQLite(w: *Writer, _: []const u8, comment: []const u8) anyerror!void {
-    const ct = if (comment.len >= 1 and comment[0] == ':') comment[1..] else comment;
-    const tr = std.mem.trim(u8, ct, " ");
-    if (tr.len > 0) try w.print("-- {s}\n", .{tr});
-}
-
-fn pgSqliteEmitColumnCommentSQLite(w: *Writer, table_name: []const u8, col_name: []const u8, comment: []const u8) anyerror!void {
-    if (comment.len >= 1 and comment[0] == ':') {
-        const ct = std.mem.trim(u8, comment[1..], " ");
-        if (ct.len > 0) try w.print("-- {s}.{s}: {s}\n", .{ table_name, col_name, ct });
-    }
-}
-
-fn pgSqliteEmitAutoIncrementPG(w: *Writer) anyerror!void {
-    try w.writeAll(" GENERATED ALWAYS AS IDENTITY");
-}
-
-fn pgSqliteEmitAutoIncrementSQLite(_: *Writer) anyerror!void {
-    // SQLite: no standalone AUTO_INCREMENT; uses PRIMARY KEY AUTOINCREMENT instead
-}
-
-fn pgSqliteEmitPrimaryKeyNormal(w: *Writer, _: bool) anyerror!void {
-    try w.writeAll(" PRIMARY KEY");
-}
-
-fn pgSqliteEmitPrimaryKeySQLite(w: *Writer, auto_increment: bool) anyerror!void {
-    if (auto_increment) {
-        try w.writeAll(" PRIMARY KEY AUTOINCREMENT");
-    } else {
-        try w.writeAll(" PRIMARY KEY");
-    }
-}
-
-fn pgSqliteEmitInlineIndexUnique(w: *Writer, col_name: []const u8, is_unique: bool, needs_comma: *bool) anyerror!void {
-    if (is_unique) {
-        if (needs_comma.*) try w.writeAll(",\n");
-        needs_comma.* = true;
-        try w.print("  UNIQUE (\"{s}\")", .{col_name});
-    }
-    // Regular inline index: no-op for PG/SQLite
-}
-
-fn pgSqliteEmitStandaloneIndexPG(w: *Writer, table_name: []const u8, idx: IndexDecl) anyerror!void {
-    if (idx.kind == .primary_key or idx.kind == .unique or idx.kind == .fulltext) return;
-    try w.writeAll("CREATE INDEX ");
-    if (idx.name.len > 0) {
-        try w.print("\"{s}\"", .{idx.name});
-    } else {
-        try w.print("\"idx_{s}_{s}\"", .{ table_name, idx.fields[0] });
-    }
-    try w.print(" ON \"{s}\" (", .{table_name});
-    for (idx.fields, 0..) |f, fi| {
-        if (fi > 0) try w.writeAll(", ");
-        try w.print("\"{s}\"", .{f});
-    }
-    try w.writeAll(");\n");
-}
-
-fn pgSqliteEmitInlineColumnCommentPG(_: *Writer, _: []const u8) anyerror!void {
-    // PG: column comments are standalone COMMENT ON COLUMN, not inline
-}
-
-fn pgSqliteEmitInlineColumnCommentSQLite(_: *Writer, _: []const u8) anyerror!void {
-    // SQLite: column comments are standalone -- comments, not inline
-}
-
-fn pgSqliteEmitEnumTypeCheck(w: *Writer, col_name: []const u8, enum_values: []const []const u8) anyerror!void {
-    try w.writeAll(" CHECK (");
-    try w.print("\"{s}\" IN (", .{col_name});
-    for (enum_values, 0..) |v, vi| {
-        if (vi > 0) try w.writeAll(", ");
-        try w.print("'{s}'", .{v});
-    }
-    try w.writeAll("))");
-}
-
 // ─── PostgreSQL Backend ────────────────────────────────────────
 
 fn pgEmitCreateDatabase(w: *Writer, name: []const u8, charset: ?[]const u8) anyerror!void {
@@ -430,13 +299,7 @@ fn pgEmitCreateDatabase(w: *Writer, name: []const u8, charset: ?[]const u8) anye
     }
 }
 
-// ─── Unified PG/SQLite ALTER methods ─────────────────────
-
-fn pgSqliteEmitAlterDropColumn(w: *Writer, col_name: []const u8) anyerror!void {
-    try w.writeAll("DROP COLUMN \"");
-    try w.writeAll(col_name);
-    try w.writeAll("\"");
-}
+// ─── PG/SQLite ALTER methods ─────────────────────
 
 fn pgEmitAlterModifyColumn(w: *Writer, col_name: []const u8) anyerror!void {
     try w.print("ALTER COLUMN \"{s}\" TYPE ", .{col_name});
@@ -444,17 +307,6 @@ fn pgEmitAlterModifyColumn(w: *Writer, col_name: []const u8) anyerror!void {
 
 fn sqliteEmitAlterModifyColumn(w: *Writer, _: []const u8) anyerror!void {
     try w.writeAll("-- WARNING: MODIFY COLUMN not supported in SQLite; requires table recreation\n");
-}
-
-fn pgSqliteEmitAlterRenameColumn(w: *Writer, old_name: []const u8, new_name: []const u8) anyerror!void {
-    try w.print("RENAME COLUMN \"{s}\" TO \"{s}\"", .{ old_name, new_name });
-}
-
-fn pgSqliteEmitAlterDropIndex(w: *Writer, idx: IndexDecl) anyerror!void {
-    switch (idx.kind) {
-        .primary_key => try w.writeAll("DROP PRIMARY KEY"),
-        else => try w.print("DROP INDEX IF EXISTS \"{s}\"", .{idx.name}),
-    }
 }
 
 fn emitPgIndexFields(w: *Writer, idx: IndexDecl) !void {
@@ -486,14 +338,14 @@ fn sqliteEmitAlterAddIndex(w: *Writer, table_name: []const u8, idx: IndexDecl) a
     switch (idx.kind) {
         .unique => {
             try w.print("CREATE UNIQUE INDEX IF NOT EXISTS \"uk_{s}\" ON ", .{idx.name});
-            try pgSqliteQuoteIdent(w, table_name);
+            try common.quoteIdentDoubleQuote(w, table_name);
             try w.writeAll(" (");
             try emitPgIndexFields(w, idx);
             try w.writeAll(")");
         },
         .regular => {
             try w.print("CREATE INDEX IF NOT EXISTS \"idx_{s}\" ON ", .{idx.name});
-            try pgSqliteQuoteIdent(w, table_name);
+            try common.quoteIdentDoubleQuote(w, table_name);
             try w.writeAll(" (");
             try emitPgIndexFields(w, idx);
             try w.writeAll(")");
@@ -532,41 +384,83 @@ fn sqliteCommentResult() CommentResult {
     return .unsupported;
 }
 
-fn pgSqliteEmitAlterEngineWarning(w: *Writer, _: ?[]const u8) anyerror!void {
-    try w.writeAll("-- NOTE: ENGINE change is MySQL-only, ignored for this dialect\n");
-}
-
 fn sqliteNoopAlterDropColumn(w: *Writer, _: []const u8) anyerror!void {
     try w.writeAll("-- WARNING: DROP COLUMN not supported in SQLite < 3.35; requires table recreation\n");
 }
 
+// ─── PG-specific helpers ──────────────────────────────────────
+
+fn pgEmitTableComment(w: *Writer, table_name: []const u8, comment: []const u8) anyerror!void {
+    const ct = if (comment.len >= 1 and comment[0] == ':') comment[1..] else comment;
+    const tr = std.mem.trim(u8, ct, " ");
+    if (tr.len > 0) try w.print("COMMENT ON TABLE \"{s}\" IS '{s}';\n", .{ table_name, tr });
+}
+
+fn pgEmitColumnComment(w: *Writer, table_name: []const u8, col_name: []const u8, comment: []const u8) anyerror!void {
+    if (comment.len >= 1 and comment[0] == ':') {
+        const ct = std.mem.trim(u8, comment[1..], " ");
+        if (ct.len > 0) try w.print("COMMENT ON COLUMN \"{s}\".\"{s}\" IS '{s}';\n", .{ table_name, col_name, ct });
+    }
+}
+
+fn pgEmitAutoIncrement(w: *Writer) anyerror!void {
+    try w.writeAll(" GENERATED ALWAYS AS IDENTITY");
+}
+
+// ─── SQLite-specific helpers ──────────────────────────────────
+
+fn sqliteEmitTableComment(w: *Writer, _: []const u8, comment: []const u8) anyerror!void {
+    const ct = if (comment.len >= 1 and comment[0] == ':') comment[1..] else comment;
+    const tr = std.mem.trim(u8, ct, " ");
+    if (tr.len > 0) try w.print("-- {s}\n", .{tr});
+}
+
+fn sqliteEmitColumnComment(w: *Writer, table_name: []const u8, col_name: []const u8, comment: []const u8) anyerror!void {
+    if (comment.len >= 1 and comment[0] == ':') {
+        const ct = std.mem.trim(u8, comment[1..], " ");
+        if (ct.len > 0) try w.print("-- {s}.{s}: {s}\n", .{ table_name, col_name, ct });
+    }
+}
+
+fn sqliteEmitAutoIncrement(_: *Writer) anyerror!void {
+    // SQLite: no standalone AUTO_INCREMENT; uses PRIMARY KEY AUTOINCREMENT instead
+}
+
+fn sqliteEmitPrimaryKey(w: *Writer, auto_increment: bool) anyerror!void {
+    if (auto_increment) {
+        try w.writeAll(" PRIMARY KEY AUTOINCREMENT");
+    } else {
+        try w.writeAll(" PRIMARY KEY");
+    }
+}
+
 const pg_backend = DialectBackend{
-    .quoteIdent = pgSqliteQuoteIdent,
-    .emitIndex = pgSqliteEmitIndex,
+    .quoteIdent = common.quoteIdentDoubleQuote,
+    .emitIndex = common.emitIndex,
     .emitCreateDatabase = pgEmitCreateDatabase,
-    .emitUnsigned = pgSqliteEmitUnsigned,
-    .emitTimestampModifier = pgSqliteEmitTimestampModifier,
-    .emitTableFooter = pgSqliteEmitTableFooter,
-    .emitTableComment = pgSqliteEmitTableCommentPG,
-    .emitColumnComment = pgSqliteEmitColumnCommentPG,
-    .emitAutoIncrement = pgSqliteEmitAutoIncrementPG,
-    .emitPrimaryKey = pgSqliteEmitPrimaryKeyNormal,
-    .emitInlineIndex = pgSqliteEmitInlineIndexUnique,
-    .emitStandaloneIndex = pgSqliteEmitStandaloneIndexPG,
-    .emitInlineColumnComment = pgSqliteEmitInlineColumnCommentPG,
-    .emitEnumTypeCheck = pgSqliteEmitEnumTypeCheck,
-    .emitInlineColumnStandaloneIndex = pgSqliteEmitInlineColumnStandaloneIndex,
+    .emitUnsigned = common.emitUnsigned,
+    .emitTimestampModifier = common.emitTimestampModifier,
+    .emitTableFooter = common.emitTableFooter,
+    .emitTableComment = pgEmitTableComment,
+    .emitColumnComment = pgEmitColumnComment,
+    .emitAutoIncrement = pgEmitAutoIncrement,
+    .emitPrimaryKey = common.emitPrimaryKeyNormal,
+    .emitInlineIndex = common.emitInlineIndexUnique,
+    .emitStandaloneIndex = common.emitStandaloneIndex,
+    .emitInlineColumnComment = common.noopInlineColumnCommentPG,
+    .emitEnumTypeCheck = common.emitEnumTypeCheck,
+    .emitInlineColumnStandaloneIndex = common.emitInlineColumnStandaloneIndex,
     .emitTpsTypeMetadata = pgNoopTpsTypeMetadata,
     .emitConfidenceComment = pgNoopConfidenceComment,
-    .emitAlterDropColumn = pgSqliteEmitAlterDropColumn,
+    .emitAlterDropColumn = common.emitAlterDropColumn,
     .emitAlterModifyColumn = pgEmitAlterModifyColumn,
-    .emitAlterRenameColumn = pgSqliteEmitAlterRenameColumn,
+    .emitAlterRenameColumn = common.emitAlterRenameColumn,
     .emitAlterAddIndex = pgEmitAlterAddIndex,
-    .emitAlterDropIndex = pgSqliteEmitAlterDropIndex,
+    .emitAlterDropIndex = common.emitAlterDropIndex,
     .emitAlterDropFk = pgEmitAlterDropFk,
     .commentResult = pgCommentResult,
     .emitAlterTableComment = pgEmitAlterTableComment,
-    .emitAlterEngine = pgSqliteEmitAlterEngineWarning,
+    .emitAlterEngine = common.emitAlterEngineWarning,
     .emitCreateView = pgEmitCreateView,
     .rename_needs_column_def = false,
     .modify_needs_column_def = true,
@@ -578,32 +472,32 @@ const pg_backend = DialectBackend{
 fn sqliteEmitCreateDatabase(_: *Writer, _: []const u8, _: ?[]const u8) anyerror!void {}
 
 const sqlite_backend = DialectBackend{
-    .quoteIdent = pgSqliteQuoteIdent,
-    .emitIndex = pgSqliteEmitIndex,
+    .quoteIdent = common.quoteIdentDoubleQuote,
+    .emitIndex = common.emitIndex,
     .emitCreateDatabase = sqliteEmitCreateDatabase,
-    .emitUnsigned = pgSqliteEmitUnsigned,
-    .emitTimestampModifier = pgSqliteEmitTimestampModifier,
-    .emitTableFooter = pgSqliteEmitTableFooter,
-    .emitTableComment = pgSqliteEmitTableCommentSQLite,
-    .emitColumnComment = pgSqliteEmitColumnCommentSQLite,
-    .emitAutoIncrement = pgSqliteEmitAutoIncrementSQLite,
-    .emitPrimaryKey = pgSqliteEmitPrimaryKeySQLite,
-    .emitInlineIndex = pgSqliteEmitInlineIndexUnique,
-    .emitStandaloneIndex = pgSqliteEmitStandaloneIndexPG,
-    .emitInlineColumnComment = pgSqliteEmitInlineColumnCommentSQLite,
-    .emitEnumTypeCheck = pgSqliteEmitEnumTypeCheck,
-    .emitInlineColumnStandaloneIndex = pgSqliteEmitInlineColumnStandaloneIndex,
+    .emitUnsigned = common.emitUnsigned,
+    .emitTimestampModifier = common.emitTimestampModifier,
+    .emitTableFooter = common.emitTableFooter,
+    .emitTableComment = sqliteEmitTableComment,
+    .emitColumnComment = sqliteEmitColumnComment,
+    .emitAutoIncrement = sqliteEmitAutoIncrement,
+    .emitPrimaryKey = sqliteEmitPrimaryKey,
+    .emitInlineIndex = common.emitInlineIndexUnique,
+    .emitStandaloneIndex = common.emitStandaloneIndex,
+    .emitInlineColumnComment = common.noopInlineColumnCommentSQLite,
+    .emitEnumTypeCheck = common.emitEnumTypeCheck,
+    .emitInlineColumnStandaloneIndex = common.emitInlineColumnStandaloneIndex,
     .emitTpsTypeMetadata = sqliteEmitTpsTypeMetadata,
     .emitConfidenceComment = sqliteEmitConfidenceComment,
     .emitAlterDropColumn = sqliteNoopAlterDropColumn,
     .emitAlterModifyColumn = sqliteEmitAlterModifyColumn,
-    .emitAlterRenameColumn = pgSqliteEmitAlterRenameColumn,
+    .emitAlterRenameColumn = common.emitAlterRenameColumn,
     .emitAlterAddIndex = sqliteEmitAlterAddIndex,
-    .emitAlterDropIndex = pgSqliteEmitAlterDropIndex,
+    .emitAlterDropIndex = common.emitAlterDropIndex,
     .emitAlterDropFk = sqliteEmitAlterDropFk,
     .commentResult = sqliteCommentResult,
     .emitAlterTableComment = sqliteEmitAlterTableComment,
-    .emitAlterEngine = pgSqliteEmitAlterEngineWarning,
+    .emitAlterEngine = common.emitAlterEngineWarning,
     .emitCreateView = sqliteEmitCreateView,
     .rename_needs_column_def = false,
     .modify_needs_column_def = false,
@@ -622,16 +516,6 @@ fn mysqlNoopTpsTypeMetadata(_: *Writer, _: []const u8, _: []const u8) anyerror!v
 
 fn mysqlNoopConfidenceComment(_: *Writer, _: []const u8) anyerror!void {
     // MySQL: no confidence comments needed
-}
-
-fn pgSqliteEmitInlineColumnStandaloneIndex(w: *Writer, table_name: []const u8, col_name: []const u8) anyerror!void {
-    try w.writeAll("CREATE INDEX ");
-    try w.print("\"idx_{s}_{s}\"", .{ table_name, col_name });
-    try w.writeAll(" ON ");
-    try pgSqliteQuoteIdent(w, table_name);
-    try w.writeAll(" (");
-    try pgSqliteQuoteIdent(w, col_name);
-    try w.writeAll(");\n");
 }
 
 fn pgNoopTpsTypeMetadata(_: *Writer, _: []const u8, _: []const u8) anyerror!void {
@@ -741,7 +625,7 @@ fn mysqlEmitCreateView(w: *Writer, name: []const u8, query: []const u8) anyerror
 
 fn pgEmitCreateView(w: *Writer, name: []const u8, query: []const u8) anyerror!void {
     try w.writeAll("CREATE OR REPLACE VIEW ");
-    try pgSqliteQuoteIdent(w, name);
+    try common.quoteIdentDoubleQuote(w, name);
     try w.writeAll(" AS\n");
     try w.writeAll(query);
     try w.writeAll(";\n");
@@ -750,7 +634,7 @@ fn pgEmitCreateView(w: *Writer, name: []const u8, query: []const u8) anyerror!vo
 fn sqliteEmitCreateView(w: *Writer, name: []const u8, query: []const u8) anyerror!void {
     // SQLite does not support CREATE OR REPLACE VIEW
     try w.writeAll("CREATE VIEW ");
-    try pgSqliteQuoteIdent(w, name);
+    try common.quoteIdentDoubleQuote(w, name);
     try w.writeAll(" AS\n");
     try w.writeAll(query);
     try w.writeAll(";\n");
