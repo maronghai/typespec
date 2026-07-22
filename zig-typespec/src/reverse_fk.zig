@@ -43,8 +43,16 @@ pub fn classifyFk(alloc: std.mem.Allocator, fk: sp.SqlForeignKey) FkClassificati
     for (fk.actions) |a| {
         buf.append(alloc, ' ') catch return .{ .form = .full, .text = null };
         switch (a.trigger) {
-            .on_delete => if (a.action == .cascade) buf.appendSlice(alloc, "-C") catch {} else buf.appendSlice(alloc, "-N") catch {},
-            .on_update => if (a.action == .cascade) buf.appendSlice(alloc, " C") catch {} else buf.appendSlice(alloc, " N") catch {},
+            .on_delete => switch (a.action) {
+                .cascade => buf.appendSlice(alloc, "-C") catch {},
+                .set_null => buf.appendSlice(alloc, "-N") catch {},
+                else => buf.appendSlice(alloc, "-?") catch {},
+            },
+            .on_update => switch (a.action) {
+                .cascade => buf.appendSlice(alloc, " C") catch {},
+                .set_null => buf.appendSlice(alloc, " N") catch {},
+                else => buf.appendSlice(alloc, " ?") catch {},
+            },
         }
     }
 

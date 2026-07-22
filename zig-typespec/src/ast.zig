@@ -73,6 +73,9 @@ pub const Field = struct {
 pub const FkActionType = enum {
     cascade,
     set_null,
+    set_default,
+    restrict,
+    no_action,
 };
 
 pub const FkActionTrigger = enum {

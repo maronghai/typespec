@@ -35,12 +35,18 @@ pub fn parseForeignKey(self: *sp.SqlParser) !SqlForeignKey {
             self.skipSpaces();
             const act: FkActionType = blk: {
                 if (self.matchKeyword("CASCADE")) break :blk .cascade;
+                if (self.matchKeyword("RESTRICT")) break :blk .restrict;
+                if (self.matchKeyword("NO")) {
+                    self.skipSpaces();
+                    if (self.matchKeyword("ACTION")) break :blk .no_action;
+                }
                 if (self.matchKeyword("SET")) {
                     self.skipSpaces();
                     if (self.matchKeyword("NULL")) break :blk .set_null;
+                    if (self.matchKeyword("DEFAULT")) break :blk .set_default;
                 }
-                self.reportError("expected CASCADE or SET NULL in foreign key action", .{});
-                return error.ExpectedCascadeOrSetNull;
+                self.reportError("expected CASCADE, RESTRICT, NO ACTION, SET NULL, or SET DEFAULT in foreign key action", .{});
+                return error.ExpectedFkAction;
             };
             try actions.append(self.alloc, .{ .trigger = trigger, .action = act });
         } else {

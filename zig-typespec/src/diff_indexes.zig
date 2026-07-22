@@ -74,8 +74,12 @@ pub fn createAllIndexDiffs(alloc: std.mem.Allocator, new_idxs: []const IndexDecl
 pub fn indexesEqual(a: IndexDecl, b: IndexDecl) bool {
     if (a.kind != b.kind) return false;
     if (a.fields.len != b.fields.len) return false;
+    if (a.descending.len != b.descending.len) return false;
     for (a.fields, 0..) |f, i| {
         if (!std.mem.eql(u8, f, b.fields[i])) return false;
+    }
+    for (a.descending, 0..) |d, i| {
+        if (d != b.descending[i]) return false;
     }
     return true;
 }
@@ -158,4 +162,44 @@ test "indexesEqual different field count" {
     const a = makeIdx(.regular, "idx", &.{"a"});
     const b = makeIdx(.regular, "idx", &.{ "a", "b" });
     try std.testing.expect(!indexesEqual(a, b));
+}
+
+test "indexesEqual same fields but different descending" {
+    var desc_a = [_]bool{true, false};
+    var desc_b = [_]bool{false, false};
+    const a = IndexDecl{
+        .kind = .regular,
+        .name = "idx",
+        .fields = &.{ "a", "b" },
+        .descending = &desc_a,
+        .line_no = 0,
+    };
+    const b = IndexDecl{
+        .kind = .regular,
+        .name = "idx",
+        .fields = &.{ "a", "b" },
+        .descending = &desc_b,
+        .line_no = 0,
+    };
+    try std.testing.expect(!indexesEqual(a, b));
+}
+
+test "indexesEqual same fields and same descending" {
+    var desc_a = [_]bool{true, false};
+    var desc_b = [_]bool{true, false};
+    const a = IndexDecl{
+        .kind = .regular,
+        .name = "idx",
+        .fields = &.{ "a", "b" },
+        .descending = &desc_a,
+        .line_no = 0,
+    };
+    const b = IndexDecl{
+        .kind = .regular,
+        .name = "idx",
+        .fields = &.{ "a", "b" },
+        .descending = &desc_b,
+        .line_no = 0,
+    };
+    try std.testing.expect(indexesEqual(a, b));
 }

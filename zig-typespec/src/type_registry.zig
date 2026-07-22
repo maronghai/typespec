@@ -6,55 +6,15 @@ const Dialect = dialect_enum.Dialect;
 // ─── Type Registry: Single source of truth for TPS types ─────
 //
 // To add a new TPS type (e.g., UUID):
-//   1. Add one TypeEntry to CORE_TYPES below
-//   2. All four pipelines (forward, reverse, diff, migrate) automatically recognize it
+//   1. Add one entry to SYMBOL_MAP below
+//   2. Add the SqlType variant to sql_type.zig if needed
+//   3. All four pipelines (forward, reverse, diff, migrate) automatically recognize it
 //
-// TypeEntry defines:
-//   - tps: the single-char TPS symbol
-//   - mysql/pg/sqlite: the SQL type string for each dialect
-//   - omit_in_reverse: if true, the type symbol is omitted in reverse output
-//     (e.g., 's' (varchar) is the default and doesn't need explicit notation)
-
-pub const TypeEntry = struct {
-    tps: []const u8,
-    mysql: []const u8,
-    pg: []const u8,
-    sqlite: []const u8,
-    /// When true, reverse codegen omits this type symbol (it's the default).
-    omit_in_reverse: bool = false,
-};
-
-/// Core single-char TPS types. This is the canonical type vocabulary.
-/// Order matters: index is used for consistency tests.
-pub const CORE_TYPES = [_]TypeEntry{
-    .{ .tps = "n", .mysql = "int", .pg = "integer", .sqlite = "INTEGER" },
-    .{ .tps = "N", .mysql = "bigint", .pg = "bigint", .sqlite = "INTEGER" },
-    .{ .tps = "m", .mysql = "decimal(16, 2)", .pg = "numeric(16, 2)", .sqlite = "NUMERIC(16, 2)" },
-    .{ .tps = "M", .mysql = "decimal(20, 6)", .pg = "numeric(20, 6)", .sqlite = "NUMERIC(20, 6)" },
-    .{ .tps = "S", .mysql = "text", .pg = "text", .sqlite = "TEXT" },
-    .{ .tps = "b", .mysql = "boolean", .pg = "boolean", .sqlite = "INTEGER" },
-    .{ .tps = "B", .mysql = "blob", .pg = "bytea", .sqlite = "BLOB" },
-    .{ .tps = "j", .mysql = "json", .pg = "json", .sqlite = "TEXT" },
-    .{ .tps = "d", .mysql = "date", .pg = "date", .sqlite = "TEXT" },
-    .{ .tps = "t", .mysql = "datetime", .pg = "timestamp", .sqlite = "TEXT" },
-    .{ .tps = "s", .mysql = "varchar(255)", .pg = "varchar(255)", .sqlite = "TEXT", .omit_in_reverse = true },
-};
-
-/// Look up SQL type name for a TPS symbol in a given dialect.
-pub fn lookupSqlType(tps_symbol: []const u8, dialect: Dialect) ?[]const u8 {
-    for (&CORE_TYPES) |entry| {
-        if (std.mem.eql(u8, entry.tps, tps_symbol)) {
-            return switch (dialect) {
-                .mysql => entry.mysql,
-                .pg => entry.pg,
-                .sqlite => entry.sqlite,
-            };
-        }
-    }
-    return null;
-}
+// Production code uses lookupSqlTypeDirect() which returns SqlType variants.
+// lookupSqlType() is a convenience wrapper for tests that need string output.
 
 /// Look up SqlType variant directly for a TPS symbol in a given dialect.
+/// This is the primary lookup used by production code (SqlType.fromTypeInfo).
 /// Avoids the stringly-typed round-trip (TPS → SQL string → SqlType).
 pub fn lookupSqlTypeDirect(tps_symbol: []const u8, dialect: Dialect) ?sql_type_mod.SqlType {
     const SYMBOL_MAP = [_]struct { tps: []const u8, mysql: sql_type_mod.SqlType, pg: sql_type_mod.SqlType, sqlite: sql_type_mod.SqlType }{
@@ -82,23 +42,43 @@ pub fn lookupSqlTypeDirect(tps_symbol: []const u8, dialect: Dialect) ?sql_type_m
     return null;
 }
 
+/// Look up SQL type name for a TPS symbol in a given dialect.
+/// Convenience wrapper — delegates to lookupSqlTypeDirect + SqlType.toSql.
+pub fn lookupSqlType(tps_symbol: []const u8, dialect: Dialect) ?[]const u8 {
+    const sql_type = lookupSqlTypeDirect(tps_symbol, dialect) orelse return null;
+    var aw = std.Io.Writer.Allocating.init(std.heap.page_allocator);
+    sql_type.toSql(dialect, &aw.writer) catch return null;
+    return aw.toOwnedSlice(std.heap.page_allocator) catch null;
+}
+
 /// Look up TPS symbol for a SQL type in a given dialect.
 /// Returns .{ .tps, .omit } where omit indicates the symbol should be omitted in reverse output.
 pub const ReverseResult = struct {
     tps: []const u8,
     omit: bool,
+    /// Whether this entry is a parameterized type (varchar, decimal) that
+    /// requires special handling in reverse lookup.
+    is_parameterized: bool = false,
 };
 
 pub fn lookupTpsSymbol(sql_type: []const u8, dialect: Dialect) ?ReverseResult {
-    // Priority: exact match first, then dialect-specific fallbacks
-    for (&CORE_TYPES) |entry| {
+    // Parameterized types: check prefix matches
+    if (std.mem.startsWith(u8, sql_type, "varchar(")) {
+        return .{ .tps = "s", .omit = true, .is_parameterized = true };
+    }
+    if (std.mem.startsWith(u8, sql_type, "decimal(") or std.mem.startsWith(u8, sql_type, "numeric(")) {
+        return .{ .tps = "m", .omit = false, .is_parameterized = true };
+    }
+    // Exact match via reverse_map
+    const reverse_map = @import("reverse_map.zig");
+    for (&reverse_map.REVERSE_MAP) |entry| {
         const dialect_type = switch (dialect) {
             .mysql => entry.mysql,
             .pg => entry.pg,
             .sqlite => entry.sqlite,
         };
         if (std.mem.eql(u8, sql_type, dialect_type)) {
-            return .{ .tps = entry.tps, .omit = entry.omit_in_reverse };
+            return .{ .tps = entry.tps, .omit = false };
         }
     }
     return null;
@@ -106,46 +86,95 @@ pub fn lookupTpsSymbol(sql_type: []const u8, dialect: Dialect) ?ReverseResult {
 
 /// Check if a TPS symbol is a known core type.
 pub fn isCoreType(tps_symbol: []const u8) bool {
-    for (&CORE_TYPES) |entry| {
-        if (std.mem.eql(u8, entry.tps, tps_symbol)) return true;
-    }
-    return false;
-}
-
-/// Get all core types (for iteration by type_map.zig).
-pub fn getAllCoreTypes() []const TypeEntry {
-    return &CORE_TYPES;
+    return lookupSqlTypeDirect(tps_symbol, .mysql) != null;
 }
 
 // ─── Unit Tests ──────────────────────────────────────────────
 
 const testing = std.testing;
 
-test "registry: lookupSqlType for all core types" {
-    try testing.expectEqualStrings("int", lookupSqlType("n", .mysql).?);
-    try testing.expectEqualStrings("integer", lookupSqlType("n", .pg).?);
-    try testing.expectEqualStrings("INTEGER", lookupSqlType("n", .sqlite).?);
-    try testing.expectEqualStrings("bigint", lookupSqlType("N", .mysql).?);
-    try testing.expectEqualStrings("text", lookupSqlType("S", .mysql).?);
-    try testing.expectEqualStrings("boolean", lookupSqlType("b", .pg).?);
-    try testing.expectEqualStrings("blob", lookupSqlType("B", .mysql).?);
-    try testing.expectEqualStrings("bytea", lookupSqlType("B", .pg).?);
-    try testing.expectEqualStrings("json", lookupSqlType("j", .mysql).?);
-    try testing.expectEqualStrings("datetime", lookupSqlType("t", .mysql).?);
-    try testing.expectEqualStrings("timestamp", lookupSqlType("t", .pg).?);
-    try testing.expect(lookupSqlType("x", .mysql) == null);
+test "registry: lookupSqlTypeDirect for all core types" {
+    const int_mysql = lookupSqlTypeDirect("n", .mysql);
+    try testing.expect(int_mysql != null);
+    try testing.expectEqual(sql_type_mod.SqlType.int, int_mysql.?);
+
+    const int_pg = lookupSqlTypeDirect("n", .pg);
+    try testing.expect(int_pg != null);
+    try testing.expectEqual(sql_type_mod.SqlType.int, int_pg.?);
+
+    const bigint = lookupSqlTypeDirect("N", .mysql);
+    try testing.expect(bigint != null);
+    try testing.expectEqual(sql_type_mod.SqlType.bigint, bigint.?);
+
+    const text = lookupSqlTypeDirect("S", .mysql);
+    try testing.expect(text != null);
+    try testing.expectEqual(sql_type_mod.SqlType.text, text.?);
+
+    const boolean = lookupSqlTypeDirect("b", .pg);
+    try testing.expect(boolean != null);
+    try testing.expectEqual(sql_type_mod.SqlType.boolean, boolean.?);
+
+    const blob = lookupSqlTypeDirect("B", .mysql);
+    try testing.expect(blob != null);
+    try testing.expectEqual(sql_type_mod.SqlType.blob, blob.?);
+
+    const json = lookupSqlTypeDirect("j", .mysql);
+    try testing.expect(json != null);
+    try testing.expectEqual(sql_type_mod.SqlType.json, json.?);
+
+    const datetime = lookupSqlTypeDirect("t", .mysql);
+    try testing.expect(datetime != null);
+    try testing.expectEqual(sql_type_mod.SqlType.datetime, datetime.?);
+
+    try testing.expect(lookupSqlTypeDirect("x", .mysql) == null);
 }
 
-test "registry: lookupTpsSymbol for common SQL types" {
-    const r_int = lookupTpsSymbol("int", .mysql);
-    try testing.expect(r_int != null);
-    try testing.expectEqualStrings("n", r_int.?.tps);
-    try testing.expect(!r_int.?.omit);
+test "registry: lookupSqlType renders correct strings" {
+    const int_mysql = lookupSqlType("n", .mysql);
+    try testing.expect(int_mysql != null);
+    try testing.expectEqualStrings("int", int_mysql.?);
 
-    const r_varchar = lookupTpsSymbol("varchar(255)", .mysql);
-    try testing.expect(r_varchar != null);
-    try testing.expectEqualStrings("s", r_varchar.?.tps);
-    try testing.expect(r_varchar.?.omit);
+    const int_pg = lookupSqlType("n", .pg);
+    try testing.expect(int_pg != null);
+    try testing.expectEqualStrings("integer", int_pg.?);
+
+    const int_sqlite = lookupSqlType("n", .sqlite);
+    try testing.expect(int_sqlite != null);
+    try testing.expectEqualStrings("INTEGER", int_sqlite.?);
+
+    const bigint_mysql = lookupSqlType("N", .mysql);
+    try testing.expect(bigint_mysql != null);
+    try testing.expectEqualStrings("bigint", bigint_mysql.?);
+
+    const text_mysql = lookupSqlType("S", .mysql);
+    try testing.expect(text_mysql != null);
+    try testing.expectEqualStrings("text", text_mysql.?);
+
+    const boolean_pg = lookupSqlType("b", .pg);
+    try testing.expect(boolean_pg != null);
+    try testing.expectEqualStrings("boolean", boolean_pg.?);
+
+    const blob_mysql = lookupSqlType("B", .mysql);
+    try testing.expect(blob_mysql != null);
+    try testing.expectEqualStrings("blob", blob_mysql.?);
+
+    const bytea_pg = lookupSqlType("B", .pg);
+    try testing.expect(bytea_pg != null);
+    try testing.expectEqualStrings("bytea", bytea_pg.?);
+
+    const json_mysql = lookupSqlType("j", .mysql);
+    try testing.expect(json_mysql != null);
+    try testing.expectEqualStrings("json", json_mysql.?);
+
+    const datetime_mysql = lookupSqlType("t", .mysql);
+    try testing.expect(datetime_mysql != null);
+    try testing.expectEqualStrings("datetime", datetime_mysql.?);
+
+    const timestamp_pg = lookupSqlType("t", .pg);
+    try testing.expect(timestamp_pg != null);
+    try testing.expectEqualStrings("timestamp", timestamp_pg.?);
+
+    try testing.expect(lookupSqlType("x", .mysql) == null);
 }
 
 test "registry: isCoreType" {
@@ -153,8 +182,4 @@ test "registry: isCoreType" {
     try testing.expect(isCoreType("S"));
     try testing.expect(!isCoreType("x"));
     try testing.expect(!isCoreType("uuid"));
-}
-
-test "registry: CORE_TYPES count" {
-    try testing.expectEqual(@as(usize, 11), CORE_TYPES.len);
 }

@@ -335,6 +335,9 @@ fn emitFkAdd(w: anytype, backend: dialect_mod.DialectBackend, fk: ast_mod.FkDecl
         switch (action.action) {
             .cascade => try w.writeAll("CASCADE"),
             .set_null => try w.writeAll("SET NULL"),
+            .set_default => try w.writeAll("SET DEFAULT"),
+            .restrict => try w.writeAll("RESTRICT"),
+            .no_action => try w.writeAll("NO ACTION"),
         }
     }
 }

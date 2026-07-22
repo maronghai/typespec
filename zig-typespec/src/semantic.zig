@@ -451,6 +451,9 @@ pub fn diagnosticTrace(resolved: ResolvedAst) void {
                         switch (action.action) {
                             .cascade => std.debug.print("CASCADE", .{}),
                             .set_null => std.debug.print("SET NULL", .{}),
+                            .set_default => std.debug.print("SET DEFAULT", .{}),
+                            .restrict => std.debug.print("RESTRICT", .{}),
+                            .no_action => std.debug.print("NO ACTION", .{}),
                         }
                     }
                 }

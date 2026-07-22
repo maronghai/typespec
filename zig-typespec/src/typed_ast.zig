@@ -1,7 +1,6 @@
 const std = @import("std");
 const ast_mod = @import("ast.zig");
 const type_map = @import("type_map.zig");
-const type_registry = @import("type_registry.zig");
 const dialect_enum = @import("dialect_enum.zig");
 const sql_type_mod = @import("sql_type.zig");
 const Writer = std.Io.Writer;

@@ -21,11 +21,8 @@ fn quoteChar(dialect: Dialect) u8 {
     };
 }
 
-pub fn formatDiff(alloc: std.mem.Allocator, d: SchemaDiff, dialect: Dialect) ![]const u8 {
-    var aw = std.Io.Writer.Allocating.init(alloc);
-    const w = &aw.writer;
-    const q = quoteChar(dialect);
-
+/// Core diff formatting logic — writes to any std.io.Writer.
+fn writeDiffTo(w: anytype, d: SchemaDiff, q: u8) !void {
     var has_changes = false;
 
     for (d.dropped_tables) |tname| {
@@ -142,127 +139,19 @@ pub fn formatDiff(alloc: std.mem.Allocator, d: SchemaDiff, dialect: Dialect) ![]
     if (!has_changes) {
         // Empty output for no differences
     }
+}
 
+pub fn formatDiff(alloc: std.mem.Allocator, d: SchemaDiff, dialect: Dialect) ![]const u8 {
+    var aw = std.Io.Writer.Allocating.init(alloc);
+    const w = &aw.writer;
+    const q = quoteChar(dialect);
+    try writeDiffTo(w, d, q);
     try w.flush();
     var out = aw.toArrayList();
     return try out.toOwnedSlice(alloc);
 }
 
 pub fn printDiff(d: SchemaDiff, dialect: Dialect) void {
-    var has_changes = false;
-    const q = quoteChar(dialect);
-
-    for (d.dropped_tables) |tname| {
-        std.debug.print("-- DROP TABLE {c}{s}{c}\n", .{ q, tname, q });
-        has_changes = true;
-    }
-
-    for (d.view_diffs) |vd| {
-        switch (vd.action) {
-            .create => {
-                std.debug.print("-- CREATE VIEW {c}{s}{c}\n", .{ q, vd.name, q });
-                has_changes = true;
-            },
-            .drop => {
-                std.debug.print("-- DROP VIEW {c}{s}{c}\n", .{ q, vd.name, q });
-                has_changes = true;
-            },
-            .modify => {
-                std.debug.print("-- ALTER VIEW {c}{s}{c} (query changed)\n", .{ q, vd.name, q });
-                has_changes = true;
-            },
-        }
-    }
-
-    for (d.table_diffs) |td| {
-        if (td.action == .create) {
-            std.debug.print("-- CREATE TABLE {c}{s}{c}\n", .{ q, td.name, q });
-            has_changes = true;
-            for (td.field_diffs) |fd| {
-                std.debug.print("  + {s}\n", .{fd.name});
-            }
-            for (td.index_diffs) |idx| {
-                std.debug.print("  + @{s}\n", .{idx.name});
-            }
-            for (td.fk_diffs) |fk| {
-                if (fk.new_fk) |nfk| {
-                    std.debug.print("  + FK → {s}\n", .{nfk.ref_table});
-                }
-            }
-            continue;
-        }
-
-        var table_has_changes = false;
-        for (td.field_diffs) |fd| {
-            if (!table_has_changes) {
-                std.debug.print("-- ALTER TABLE {c}{s}{c}\n", .{ q, td.name, q });
-                table_has_changes = true;
-            }
-            switch (fd.action) {
-                .add => std.debug.print("  + {s} (add)\n", .{fd.name}),
-                .drop => std.debug.print("  - {s} (drop)\n", .{fd.name}),
-                .modify => std.debug.print("  ~ {s} (modify)\n", .{fd.name}),
-                .rename => std.debug.print("  ~ {s} → {s} (rename)\n", .{ fd.rename_from.?, fd.name }),
-            }
-        }
-        // Metadata diffs (comment, engine)
-        if (td.metadata_diff) |md| {
-            if (!optionalStrEq(md.old_comment, md.new_comment)) {
-                if (!table_has_changes) {
-                    std.debug.print("-- ALTER TABLE {c}{s}{c}\n", .{ q, td.name, q });
-                    table_has_changes = true;
-                }
-                if (md.new_comment) |nc| {
-                    std.debug.print("  ~ comment → '{s}'\n", .{nc});
-                } else {
-                    std.debug.print("  - comment (removed)\n", .{});
-                }
-            }
-            if (!optionalStrEq(md.old_engine, md.new_engine)) {
-                if (!table_has_changes) {
-                    std.debug.print("-- ALTER TABLE {c}{s}{c}\n", .{ q, td.name, q });
-                    table_has_changes = true;
-                }
-                if (md.new_engine) |ne| {
-                    std.debug.print("  ~ engine → '{s}'\n", .{ne});
-                } else {
-                    std.debug.print("  - engine (removed)\n", .{});
-                }
-            }
-        }
-        for (td.index_diffs) |idx| {
-            if (!table_has_changes) {
-                std.debug.print("-- ALTER TABLE {c}{s}{c}\n", .{ q, td.name, q });
-                table_has_changes = true;
-            }
-            switch (idx.action) {
-                .add => std.debug.print("  + @{s} (add index)\n", .{idx.name}),
-                .drop => std.debug.print("  - @{s} (drop index)\n", .{idx.name}),
-                .modify => std.debug.print("  ~ @{s} (modify index)\n", .{idx.name}),
-            }
-        }
-        for (td.fk_diffs) |fk| {
-            if (!table_has_changes) {
-                std.debug.print("-- ALTER TABLE {c}{s}{c}\n", .{ q, td.name, q });
-                table_has_changes = true;
-            }
-            switch (fk.action) {
-                .add => {
-                    if (fk.new_fk) |nfk| {
-                        std.debug.print("  + FK → {s} (add)\n", .{nfk.ref_table});
-                    }
-                },
-                .drop => {
-                    if (fk.old_fk) |ofk| {
-                        std.debug.print("  - FK → {s} (drop)\n", .{ofk.ref_table});
-                    }
-                },
-            }
-        }
-        if (table_has_changes) has_changes = true;
-    }
-
-    if (!has_changes) {
-        std.debug.print("No differences found.\n", .{});
-    }
+    const text = formatDiff(std.heap.page_allocator, d, dialect) catch return;
+    std.debug.print("{s}", .{text});
 }

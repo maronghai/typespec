@@ -685,9 +685,21 @@ pub const SqlParser = struct {
                 } else break;
             }
             if (self.pos >= self.src.len) break;
-            // Skip -- comments
+            // Skip -- line comments
             if (self.pos + 1 < self.src.len and self.src[self.pos] == '-' and self.src[self.pos + 1] == '-') {
                 while (self.pos < self.src.len and self.src[self.pos] != '\n') self.pos += 1;
+                continue;
+            }
+            // Skip /* block comments */
+            if (self.pos + 1 < self.src.len and self.src[self.pos] == '/' and self.src[self.pos + 1] == '*') {
+                self.pos += 2;
+                while (self.pos + 1 < self.src.len) {
+                    if (self.src[self.pos] == '*' and self.src[self.pos + 1] == '/') {
+                        self.pos += 2;
+                        break;
+                    }
+                    self.pos += 1;
+                }
                 continue;
             }
             break;
@@ -698,8 +710,21 @@ pub const SqlParser = struct {
         while (self.pos < self.src.len) {
             self.skipSpacesAndNewlines();
             if (self.pos >= self.src.len) break;
+            // Skip -- line comments
             if (self.pos + 1 < self.src.len and self.src[self.pos] == '-' and self.src[self.pos + 1] == '-') {
                 while (self.pos < self.src.len and self.src[self.pos] != '\n') self.pos += 1;
+                continue;
+            }
+            // Skip /* block comments */
+            if (self.pos + 1 < self.src.len and self.src[self.pos] == '/' and self.src[self.pos + 1] == '*') {
+                self.pos += 2;
+                while (self.pos + 1 < self.src.len) {
+                    if (self.src[self.pos] == '*' and self.src[self.pos + 1] == '/') {
+                        self.pos += 2;
+                        break;
+                    }
+                    self.pos += 1;
+                }
                 continue;
             }
             break;
@@ -707,8 +732,79 @@ pub const SqlParser = struct {
     }
 
     pub fn skipToSemicolon(self: *SqlParser) void {
-        while (self.pos < self.src.len and self.src[self.pos] != ';') self.pos += 1;
-        if (self.pos < self.src.len) self.pos += 1; // skip the semicolon
+        while (self.pos < self.src.len) {
+            const c = self.src[self.pos];
+            switch (c) {
+                ';' => {
+                    self.pos += 1;
+                    return;
+                },
+                '\'' => {
+                    // Skip single-quoted string
+                    self.pos += 1;
+                    while (self.pos < self.src.len) {
+                        if (self.src[self.pos] == '\'') {
+                            if (self.pos + 1 < self.src.len and self.src[self.pos + 1] == '\'') {
+                                self.pos += 2; // escaped ''
+                            } else {
+                                self.pos += 1; // closing '
+                                break;
+                            }
+                        } else {
+                            self.pos += 1;
+                        }
+                    }
+                },
+                '"' => {
+                    // Skip double-quoted identifier
+                    self.pos += 1;
+                    while (self.pos < self.src.len and self.src[self.pos] != '"') {
+                        if (self.src[self.pos] == '"' and self.pos + 1 < self.src.len and self.src[self.pos + 1] == '"') {
+                            self.pos += 2; // escaped ""
+                        } else {
+                            self.pos += 1;
+                        }
+                    }
+                    if (self.pos < self.src.len) self.pos += 1; // closing "
+                },
+                '`' => {
+                    // Skip backtick-quoted identifier
+                    self.pos += 1;
+                    while (self.pos < self.src.len and self.src[self.pos] != '`') {
+                        if (self.src[self.pos] == '`' and self.pos + 1 < self.src.len and self.src[self.pos + 1] == '`') {
+                            self.pos += 2; // escaped ``
+                        } else {
+                            self.pos += 1;
+                        }
+                    }
+                    if (self.pos < self.src.len) self.pos += 1; // closing `
+                },
+                '-' => {
+                    // Skip -- line comment
+                    if (self.pos + 1 < self.src.len and self.src[self.pos + 1] == '-') {
+                        while (self.pos < self.src.len and self.src[self.pos] != '\n') self.pos += 1;
+                    } else {
+                        self.pos += 1;
+                    }
+                },
+                '/' => {
+                    // Skip /* block comment */
+                    if (self.pos + 1 < self.src.len and self.src[self.pos + 1] == '*') {
+                        self.pos += 2;
+                        while (self.pos + 1 < self.src.len) {
+                            if (self.src[self.pos] == '*' and self.src[self.pos + 1] == '/') {
+                                self.pos += 2;
+                                break;
+                            }
+                            self.pos += 1;
+                        }
+                    } else {
+                        self.pos += 1;
+                    }
+                },
+                else => self.pos += 1,
+            }
+        }
     }
 
     /// Read a -- comment (without advancing past whitespace before it).
