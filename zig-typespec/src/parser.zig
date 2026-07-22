@@ -125,9 +125,8 @@ pub const Parser = struct {
                     }
                 },
                 .Template => {
-                    // Flush previous template
                     if (in_block == .template) {
-                        try self.flushTemplate(&templates, cur_name, cur_parents_buf, cur_parents_len, &cur_fields, cur_line_no, cur_loc);
+                        try self.flushAndResetTemplate(&templates, cur_name, cur_parents_buf, cur_parents_len, &cur_fields, cur_line_no, cur_loc);
                         cur_fields = try std.ArrayList(Field).initCapacity(self.alloc, 16);
                         cur_parents_buf = try self.alloc.alloc([]const u8, 4);
                         cur_parents_len = 0;
@@ -160,9 +159,8 @@ pub const Parser = struct {
                     in_block = .template;
                 },
                 .Table => {
-                    // Flush previous block
                     if (in_block == .template) {
-                        try self.flushTemplate(&templates, cur_name, cur_parents_buf, cur_parents_len, &cur_fields, cur_line_no, cur_loc);
+                        try self.flushAndResetTemplate(&templates, cur_name, cur_parents_buf, cur_parents_len, &cur_fields, cur_line_no, cur_loc);
                         cur_fields = try std.ArrayList(Field).initCapacity(self.alloc, 16);
                         cur_parents_buf = try self.alloc.alloc([]const u8, 4);
                         cur_parents_len = 0;
@@ -170,35 +168,16 @@ pub const Parser = struct {
                         try self.flushTable(&tables, cur_name, cur_comment, cur_template_ref, cur_engine, &cur_fields, &cur_fks, &cur_indexes, cur_line_no, cur_loc);
                     }
 
-                    // Strip ^ tokens from line before parsing header
-                    var stripped_tokens = try std.ArrayList([]const u8).initCapacity(self.alloc, line.tokens.len);
-                    var ti: usize = 0;
-                    while (ti < line.tokens.len) : (ti += 1) {
-                        const tok = line.tokens[ti];
-                        if (std.mem.eql(u8, tok, "^")) {
-                            if (ti + 1 < line.tokens.len and !std.mem.eql(u8, line.tokens[ti + 1], ":")) {
-                                cur_engine = try self.alloc.dupe(u8, line.tokens[ti + 1]);
-                                ti += 1;
-                            } else {
-                                cur_engine = "InnoDB";
-                            }
-                            continue;
-                        }
-                        if (tok.len > 1 and tok[0] == '^') {
-                            cur_engine = try self.alloc.dupe(u8, tok[1..]);
-                            continue;
-                        }
-                        try stripped_tokens.append(self.alloc, tok);
-                    }
+                    const result = try self.stripEngineTokens(line.tokens);
+                    if (result.engine) |e| cur_engine = e;
                     const stripped_line = tk.Line{
                         .line_type = line.line_type,
-                        .tokens = try stripped_tokens.toOwnedSlice(self.alloc),
+                        .tokens = result.stripped,
                         .raw = line.raw,
                         .trimmed = line.trimmed,
                         .line_no = line.line_no,
                     };
 
-                    // Parse new table header
                     const hdr = self.parseTableHeader(stripped_line) catch |err| {
                         if (!self.handleParseError(err, line, "failed to parse table declaration")) return err;
                         in_block = .none;
@@ -215,9 +194,8 @@ pub const Parser = struct {
                     in_block = .table;
                 },
                 .View => {
-                    // Flush previous block
                     if (in_block == .template) {
-                        try self.flushTemplate(&templates, cur_name, cur_parents_buf, cur_parents_len, &cur_fields, cur_line_no, cur_loc);
+                        try self.flushAndResetTemplate(&templates, cur_name, cur_parents_buf, cur_parents_len, &cur_fields, cur_line_no, cur_loc);
                         cur_fields = try std.ArrayList(Field).initCapacity(self.alloc, 16);
                         cur_parents_buf = try self.alloc.alloc([]const u8, 4);
                         cur_parents_len = 0;
@@ -225,43 +203,13 @@ pub const Parser = struct {
                         try self.flushTable(&tables, cur_name, cur_comment, cur_template_ref, cur_engine, &cur_fields, &cur_fks, &cur_indexes, cur_line_no, cur_loc);
                     }
                     in_block = .none;
-
-                    // Parse view: tokens are [&, name, =, query]
-                    if (line.tokens.len >= 4) {
-                        const view_name = try self.alloc.dupe(u8, line.tokens[1]);
-                        // Find query token (after =)
-                        var query: []const u8 = "";
-                        for (line.tokens, 0..) |tok, ti| {
-                            if (std.mem.eql(u8, tok, "=") and ti + 1 < line.tokens.len) {
-                                query = try self.alloc.dupe(u8, line.tokens[ti + 1]);
-                                break;
-                            }
-                        }
-                        try views.append(self.alloc, .{
-                            .name = view_name,
-                            .query = query,
-                            .comment = null,
-                            .line_no = line.line_no,
-                            .loc = Parser.locFromLine(line, line.tokens[0]),
-                        });
-                    } else if (line.tokens.len == 2) {
-                        // `& name` without query — will produce empty query
-                        try views.append(self.alloc, .{
-                            .name = try self.alloc.dupe(u8, line.tokens[1]),
-                            .query = "",
-                            .comment = null,
-                            .line_no = line.line_no,
-                            .loc = Parser.locFromLine(line, line.tokens[0]),
-                        });
+                    if (line.tokens.len >= 2) {
+                        views.append(self.alloc, self.processViewLine(line.tokens, line.line_no) catch continue) catch continue;
                     }
                 },
                 .Field => {
                     if (in_block != .none) {
-                        const fld = parse_field.parseField(self.alloc, line) catch |err| {
-                            if (!self.handleParseError(err, line, "failed to parse field")) return err;
-                            continue;
-                        };
-                        try cur_fields.append(self.alloc, fld);
+                        try self.processFieldLine(line, &cur_fields);
                     }
                 },
                 .Slot => {
@@ -531,6 +479,86 @@ pub const Parser = struct {
         return parse_typedef.parseTypeDef(self.alloc, line);
     }
 
+    // ─── Parse helpers ─────────────────────────────────────────
+
+    /// Flush the current template block.
+    fn flushAndResetTemplate(
+        self: *Parser,
+        templates: *std.ArrayList(Template),
+        name: ?[]const u8,
+        parents_buf: []const []const u8,
+        parents_len: usize,
+        fields: *std.ArrayList(Field),
+        line_no: usize,
+        loc: ?SourceLocation,
+    ) !void {
+        try self.flushTemplate(templates, name, parents_buf, parents_len, fields, line_no, loc);
+    }
+
+    /// Strip engine tokens (^ or ^EngineName) from a table line's tokens.
+    fn stripEngineTokens(self: *Parser, tokens: []const []const u8) !struct { stripped: []const []const u8, engine: ?[]const u8 } {
+        var engine: ?[]const u8 = null;
+        var stripped = try std.ArrayList([]const u8).initCapacity(self.alloc, tokens.len);
+        var ti: usize = 0;
+        while (ti < tokens.len) : (ti += 1) {
+            const tok = tokens[ti];
+            if (std.mem.eql(u8, tok, "^")) {
+                if (ti + 1 < tokens.len and !std.mem.eql(u8, tokens[ti + 1], ":")) {
+                    engine = try self.alloc.dupe(u8, tokens[ti + 1]);
+                    ti += 1;
+                } else {
+                    engine = "InnoDB";
+                }
+                continue;
+            }
+            if (tok.len > 1 and tok[0] == '^') {
+                engine = try self.alloc.dupe(u8, tok[1..]);
+                continue;
+            }
+            try stripped.append(self.alloc, tok);
+        }
+        return .{ .stripped = try stripped.toOwnedSlice(self.alloc), .engine = engine };
+    }
+
+    /// Parse a view line into a View AST node.
+    fn processViewLine(self: *Parser, tokens: []const []const u8, line_no: usize) !ast_mod.View {
+        if (tokens.len >= 4) {
+            const view_name = try self.alloc.dupe(u8, tokens[1]);
+            var query: []const u8 = "";
+            for (tokens, 0..) |tok, ti| {
+                if (std.mem.eql(u8, tok, "=") and ti + 1 < tokens.len) {
+                    query = try self.alloc.dupe(u8, tokens[ti + 1]);
+                    break;
+                }
+            }
+            return .{
+                .name = view_name,
+                .query = query,
+                .comment = null,
+                .line_no = line_no,
+                .loc = Parser.locFromLine(.{ .line_no = line_no, .raw = "", .trimmed = "", .tokens = tokens, .line_type = .View, .offset = 0 }, tokens[0]),
+            };
+        } else if (tokens.len == 2) {
+            return .{
+                .name = try self.alloc.dupe(u8, tokens[1]),
+                .query = "",
+                .comment = null,
+                .line_no = line_no,
+                .loc = Parser.locFromLine(.{ .line_no = line_no, .raw = "", .trimmed = "", .tokens = tokens, .line_type = .View, .offset = 0 }, tokens[0]),
+            };
+        }
+        return error.InvalidView;
+    }
+
+    /// Process a field line: parse and append to cur_fields.
+    fn processFieldLine(self: *Parser, line: tk.Line, cur_fields: *std.ArrayList(Field)) !void {
+        const fld = parse_field.parseField(self.alloc, line) catch |err| {
+            if (!self.handleParseError(err, line, "failed to parse field")) return err;
+            return;
+        };
+        try cur_fields.append(self.alloc, fld);
+    }
+
     // ─── Public API: delegated functions ────────────────────
 
     /// Public API: parse type token. Delegates to parse_field module.
@@ -545,6 +573,8 @@ pub const Parser = struct {
 };
 
 // ─── Diagnostic Trace ────────────────────────────────────────
+
+const trace = @import("trace.zig");
 
 pub fn diagnosticTrace(tree: Ast) void {
     std.debug.print("=== [Stage 2: Parser] ===\n\n", .{});
@@ -600,77 +630,16 @@ pub fn diagnosticTrace(tree: Ast) void {
                 if (field.default_val) |dv| std.debug.print(" ={s}", .{dv.value});
                 if (field.check) |ck| std.debug.print(" [{s}]", .{ck.expr});
                 if (field.fk) |fk| {
-                    std.debug.print(" >", .{});
-                    for (fk.fields, 0..) |f, fi| {
-                        if (fi > 0) std.debug.print(",", .{});
-                        std.debug.print("{s}", .{f});
-                    }
-                    std.debug.print(" {s}(", .{fk.ref_table});
-                    for (fk.ref_fields, 0..) |f, fi| {
-                        if (fi > 0) std.debug.print(",", .{});
-                        std.debug.print("{s}", .{f});
-                    }
-                    std.debug.print(")", .{});
-                    for (fk.actions) |action| {
-                        std.debug.print(" ", .{});
-                        switch (action.trigger) {
-                            .on_delete => std.debug.print("ON DELETE ", .{}),
-                            .on_update => std.debug.print("ON UPDATE ", .{}),
-                        }
-                        switch (action.action) {
-                            .cascade => std.debug.print("CASCADE", .{}),
-                            .set_null => std.debug.print("SET NULL", .{}),
-                            .set_default => std.debug.print("SET DEFAULT", .{}),
-                            .restrict => std.debug.print("RESTRICT", .{}),
-                            .no_action => std.debug.print("NO ACTION", .{}),
-                        }
-                    }
+                    trace.formatFk(fk);
                 }
                 if (field.comment) |c| std.debug.print(" {s}", .{c});
                 std.debug.print("\n", .{});
             }
             for (table.fks) |fk| {
-                std.debug.print("    > ", .{});
-                for (fk.fields, 0..) |f, fi| {
-                    if (fi > 0) std.debug.print(",", .{});
-                    std.debug.print("{s}", .{f});
-                }
-                std.debug.print(" {s}(", .{fk.ref_table});
-                for (fk.ref_fields, 0..) |f, fi| {
-                    if (fi > 0) std.debug.print(",", .{});
-                    std.debug.print("{s}", .{f});
-                }
-                std.debug.print(")", .{});
-                for (fk.actions) |action| {
-                    std.debug.print(" ", .{});
-                    switch (action.trigger) {
-                        .on_delete => std.debug.print("ON DELETE ", .{}),
-                        .on_update => std.debug.print("ON UPDATE ", .{}),
-                    }
-                    switch (action.action) {
-                        .cascade => std.debug.print("CASCADE", .{}),
-                        .set_null => std.debug.print("SET NULL", .{}),
-                        .set_default => std.debug.print("SET DEFAULT", .{}),
-                        .restrict => std.debug.print("RESTRICT", .{}),
-                        .no_action => std.debug.print("NO ACTION", .{}),
-                    }
-                }
-                std.debug.print("\n", .{});
+                trace.formatResolvedFk(fk);
             }
             for (table.indexes) |idx| {
-                std.debug.print("    @ ", .{});
-                switch (idx.kind) {
-                    .regular => std.debug.print("idx", .{}),
-                    .unique => std.debug.print("uk", .{}),
-                    .fulltext => std.debug.print("ft", .{}),
-                    .primary_key => std.debug.print("pk", .{}),
-                }
-                std.debug.print(" {s}(", .{idx.name});
-                for (idx.fields, 0..) |f, fi| {
-                    if (fi > 0) std.debug.print(",", .{});
-                    std.debug.print("{s}", .{f});
-                }
-                std.debug.print(")\n", .{});
+                trace.formatIndex(idx);
             }
         }
         std.debug.print("\n", .{});

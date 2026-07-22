@@ -22,9 +22,11 @@ bash tests/test.sh                  # MySQL (84 tests)
 bash tests/test_postgres.sh         # PostgreSQL (82 tests)
 bash tests/test_sqlite.sh           # SQLite (24 tests)
 bash tests/test_migrate.sh          # Migration (34 tests)
-bash tests/test_reverse.sh          # Reverse engineering (17 tests)
+bash tests/test_reverse.sh          # Reverse engineering (13 tests)
 bash tests/test_diff.sh             # Schema diff (12 tests)
 bash tests/test_error_recovery.sh   # Error recovery (9 tests)
+bash tests/test_json_schema.sh      # JSON Schema (1 test)
+bash tests/test_roundtrip.sh        # Round-trip (20 tests)
 ```
 
 Run a single golden test by filter: `bash tests/test.sh 01` (matches test name substring).
@@ -70,7 +72,7 @@ Run a single golden test by filter: `bash tests/test.sh 01` (matches test name s
 
 | Module | Role |
 |--------|------|
-| `codegen.zig` | TypedAst → SQL DDL text, 5 sub-functions (emitColumnDefs, emitInlineIndexes, emitConstraints, emitTableMetadata, emitStandaloneIndexes) |
+| `codegen.zig` | TypedAst → SQL DDL text, 5 sub-functions (emitColumnDefs, emitInlineIndexes, emitConstraints, emitTableMetadata, emitStandaloneIndexes) + shared `isDominatedByExplicitIndex()` |
 | `sql_parser.zig` | Recursive-descent SQL DDL parser (reverse pipeline) |
 | `semantic.zig` | Pass manager + template resolution orchestration |
 | `dialect.zig` | DialectBackend vtable definition + getBackend() + shared emitCheckExpr helper |
@@ -78,7 +80,7 @@ Run a single golden test by filter: `bash tests/test.sh 01` (matches test name s
 | `dialect_pg.zig` | PostgreSQL DialectBackend implementation (~150 lines) |
 | `dialect_sqlite.zig` | SQLite DialectBackend implementation (~160 lines) |
 | `dialect_common.zig` | Shared PG/SQLite dialect functions (quoting, indexes, ALTER) |
-| `parser.zig` | Token-level `.tps` parser → AST (delegates to parse_*.zig modules) |
+| `parser.zig` | Token-level `.tps` parser → AST (delegates to parse_*.zig modules; helpers: flushAndResetTemplate, stripEngineTokens, processViewLine, processFieldLine) |
 | `diff.zig` | Table-level diff orchestration + SchemaDiff types + printing |
 | `reverse_map.zig` | Reverse lookup logic (SQL → TPS symbol matching + heuristics) |
 | `reverse_map_data.zig` | REVERSE_MAP data table (SQL ↔ TPS type mappings, 46 entries) |
@@ -90,6 +92,7 @@ Run a single golden test by filter: `bash tests/test.sh 01` (matches test name s
 | `sql_parser_create.zig` | CREATE TABLE parsing (extracted from sql_parser.zig) |
 | `reverse_column.zig` | Column reverse engineering (type mapping, suffix, inline index detection) |
 | `diagnostic.zig` | Multi-error diagnostic collector with JSON output |
+| `trace.zig` | Shared AST trace formatting (FK actions, FK declarations, index declarations) used by parser.zig and semantic.zig diagnosticTrace |
 | `template.zig` | Template inheritance resolution and slot-based field merging |
 | `template_extraction.zig` | Template extraction from SQL (reverse pipeline) |
 | `typed_ast.zig` | TypedAst IR: SqlType resolution + ColumnFlags bitflags |

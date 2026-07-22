@@ -112,37 +112,25 @@ pub const Codegen = struct {
         }
     }
 
+    fn isDominatedByExplicitIndex(col_name: []const u8, explicit_indexes: []const ast_mod.IndexDecl, require_unique: bool) bool {
+        for (explicit_indexes) |idx| {
+            if (require_unique and idx.kind != .unique and idx.kind != .primary_key) continue;
+            for (idx.fields) |f| {
+                if (std.mem.eql(u8, f, col_name)) return true;
+            }
+        }
+        return false;
+    }
+
     fn emitInlineIndexes(self: Codegen, w: *Writer, table: typed_ast_mod.TypedTable, needs_comma: *bool) !void {
         for (table.columns) |col| {
             if (col.flags.inline_unique) {
-                var dominated = false;
-                for (table.indexes) |idx| {
-                    if (idx.kind == .unique or idx.kind == .primary_key) {
-                        for (idx.fields) |f| {
-                            if (std.mem.eql(u8, f, col.name)) {
-                                dominated = true;
-                                break;
-                            }
-                        }
-                    }
-                    if (dominated) break;
-                }
-                if (!dominated) {
+                if (!isDominatedByExplicitIndex(col.name, table.indexes, true)) {
                     try self.backend.emitInlineIndex(w, col.name, true, needs_comma);
                 }
             }
             if (col.flags.inline_index) {
-                var dominated = false;
-                for (table.indexes) |idx| {
-                    for (idx.fields) |f| {
-                        if (std.mem.eql(u8, f, col.name)) {
-                            dominated = true;
-                            break;
-                        }
-                    }
-                    if (dominated) break;
-                }
-                if (!dominated) {
+                if (!isDominatedByExplicitIndex(col.name, table.indexes, false)) {
                     try self.backend.emitInlineIndex(w, col.name, false, needs_comma);
                 }
             }
@@ -211,17 +199,7 @@ pub const Codegen = struct {
     fn emitInlineColumnStandaloneIndexes(self: Codegen, w: *Writer, table: typed_ast_mod.TypedTable) !void {
         for (table.columns) |col| {
             if (col.flags.inline_index) {
-                var dominated = false;
-                for (table.indexes) |idx| {
-                    for (idx.fields) |f| {
-                        if (std.mem.eql(u8, f, col.name)) {
-                            dominated = true;
-                            break;
-                        }
-                    }
-                    if (dominated) break;
-                }
-                if (!dominated) {
+                if (!isDominatedByExplicitIndex(col.name, table.indexes, false)) {
                     try self.backend.emitInlineColumnStandaloneIndex(w, table.name, col.name);
                 }
             }

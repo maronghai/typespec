@@ -394,6 +394,8 @@ fn visitFieldCheckModifiers(ctx: *ModifierValidationCtx, field: *const Field, _:
 
 // ─── Diagnostic ──────────────────────────────────────────────
 
+const trace = @import("trace.zig");
+
 pub fn diagnosticTrace(resolved: ResolvedAst) void {
     std.debug.print("=== [Stage 3: Semantic] ===\n\n", .{});
 
@@ -443,37 +445,14 @@ pub fn diagnosticTrace(resolved: ResolvedAst) void {
                     }
                     std.debug.print(")", .{});
                     for (fk.actions) |action| {
-                        std.debug.print(" ", .{});
-                        switch (action.trigger) {
-                            .on_delete => std.debug.print("ON DELETE ", .{}),
-                            .on_update => std.debug.print("ON UPDATE ", .{}),
-                        }
-                        switch (action.action) {
-                            .cascade => std.debug.print("CASCADE", .{}),
-                            .set_null => std.debug.print("SET NULL", .{}),
-                            .set_default => std.debug.print("SET DEFAULT", .{}),
-                            .restrict => std.debug.print("RESTRICT", .{}),
-                            .no_action => std.debug.print("NO ACTION", .{}),
-                        }
+                        trace.formatFkAction(action);
                     }
                 }
                 if (field.comment) |c| std.debug.print(" {s}", .{c});
                 std.debug.print("\n", .{});
             }
             for (table.indexes) |idx| {
-                std.debug.print("    INDEX ", .{});
-                switch (idx.kind) {
-                    .regular => std.debug.print("idx", .{}),
-                    .unique => std.debug.print("UNIQUE", .{}),
-                    .fulltext => std.debug.print("FULLTEXT", .{}),
-                    .primary_key => std.debug.print("PRIMARY KEY", .{}),
-                }
-                std.debug.print(" {s}(", .{idx.name});
-                for (idx.fields, 0..) |f, fi| {
-                    if (fi > 0) std.debug.print(",", .{});
-                    std.debug.print("{s}", .{f});
-                }
-                std.debug.print(")\n", .{});
+                trace.formatResolvedIndex(idx);
             }
         }
         std.debug.print("\n", .{});
