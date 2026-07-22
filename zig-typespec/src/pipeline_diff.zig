@@ -10,7 +10,7 @@ const pipeline_forward = @import("pipeline_forward.zig");
 pub fn handleDiff(io: std.Io, alloc: std.mem.Allocator, old_path: []const u8, new_path: []const u8, dialect: codegen.Dialect) !void {
     const old_ast = try pipeline_forward.compileToAst(io, alloc, old_path);
     const new_ast = try pipeline_forward.compileToAst(io, alloc, new_path);
-    const schema_diff = try diff.diff(old_ast, new_ast, alloc);
+    const schema_diff = try diff.diff(old_ast, new_ast, alloc, dialect);
     const diff_text = try diff.formatDiff(alloc, schema_diff, dialect);
     try @import("io.zig").writeOutput(io, diff_text, null);
 }
@@ -18,7 +18,7 @@ pub fn handleDiff(io: std.Io, alloc: std.mem.Allocator, old_path: []const u8, ne
 pub fn handleMigrate(io: std.Io, alloc: std.mem.Allocator, old_path: []const u8, new_path: []const u8, output_path: ?[]const u8, dialect: codegen.Dialect) !void {
     const old_ast = try pipeline_forward.compileToAst(io, alloc, old_path);
     const new_ast = try pipeline_forward.compileToAst(io, alloc, new_path);
-    const schema_diff = try diff.diff(old_ast, new_ast, alloc);
+    const schema_diff = try diff.diff(old_ast, new_ast, alloc, dialect);
 
     // Resolve new AST to TypedAst for migration generation
     var tr = typed_ast.TypeResolver.init(alloc);

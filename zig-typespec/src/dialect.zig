@@ -8,6 +8,27 @@ const CheckConstraint = ast_mod.CheckConstraint;
 const Dialect = dialect_enum.Dialect;
 const SqlType = sql_type_mod.SqlType;
 
+// ─── Reverse Result (shared by reverse_map.zig + dialect backends) ──
+
+pub const ReverseResult = struct {
+    tps: []const u8,
+    omit: bool,
+    /// Confidence score 0-100. Higher = more certain.
+    score: u8 = 100,
+};
+
+// ─── canOmitType: shared helper for reverse lookup ────────────
+
+pub fn canOmitType(col_name: []const u8, tps_symbol: []const u8, is_auto_inc: bool, is_default_ts: bool) bool {
+    if (is_auto_inc or is_default_ts) return false;
+    if (col_name.len > 3) {
+        if (std.mem.endsWith(u8, col_name, "_id") and std.mem.eql(u8, tps_symbol, "n")) return true;
+        if (std.mem.endsWith(u8, col_name, "_on") and std.mem.eql(u8, tps_symbol, "d")) return true;
+        if (std.mem.endsWith(u8, col_name, "_at") and std.mem.eql(u8, tps_symbol, "t")) return true;
+    }
+    return std.mem.eql(u8, tps_symbol, "s");
+}
+
 // ─── DialectBackend: vtable for dialect-specific SQL generation ─
 //
 // Adding a new dialect requires only:
@@ -63,6 +84,8 @@ pub const DialectBackend = struct {
     emitTpsTypeMetadata: ?*const fn (w: *Writer, col_name: []const u8, tps_type: []const u8) anyerror!void = null,
     /// SQLite-specific confidence comment (e.g. ` -- [score:42]`).
     emitConfidenceComment: ?*const fn (w: *Writer, confidence: []const u8) anyerror!void = null,
+    /// Dialect-specific reverse lookup. Returns null to fall back to general logic.
+    reverseLookup: ?*const fn (sql_type: []const u8, col_name: []const u8, is_auto_inc: bool, is_default_ts: bool) ?ReverseResult = null,
 
     // ── Behavioral flags (eliminate dialect checks in caller) ──
     /// MySQL CHANGE COLUMN requires the full column definition after the rename.

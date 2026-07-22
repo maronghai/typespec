@@ -56,7 +56,7 @@ Run a single golden test by filter: `bash tests/test.sh 01` (matches test name s
 
 ### Key Design Patterns
 
-- **DialectBackend vtable** ([dialect.zig](zig-typespec/src/dialect.zig)): 22 core + 5 optional function pointers + 3 behavioral flags for dialect-specific SQL rendering. [codegen.zig](zig-typespec/src/codegen.zig) is fully dialect-agnostic (zero `switch(dialect)` in production code). Per-dialect implementations: [dialect_mysql.zig](zig-typespec/src/dialect_mysql.zig), [dialect_pg.zig](zig-typespec/src/dialect_pg.zig), [dialect_sqlite.zig](zig-typespec/src/dialect_sqlite.zig); shared PG/SQLite logic in [dialect_common.zig](zig-typespec/src/dialect_common.zig). Adding a new SQL dialect = new enum variant + new `dialect_<name>.zig` (~200 lines).
+- **DialectBackend vtable** ([dialect.zig](zig-typespec/src/dialect.zig)): 22 core + 6 optional function pointers + 3 behavioral flags for dialect-specific SQL rendering. Includes `reverseLookup` for dialect-specific reverse engineering. [codegen.zig](zig-typespec/src/codegen.zig) is fully dialect-agnostic (zero `switch(dialect)` in production code). Per-dialect implementations: [dialect_mysql.zig](zig-typespec/src/dialect_mysql.zig), [dialect_pg.zig](zig-typespec/src/dialect_pg.zig), [dialect_sqlite.zig](zig-typespec/src/dialect_sqlite.zig); shared PG/SQLite logic in [dialect_common.zig](zig-typespec/src/dialect_common.zig). Adding a new SQL dialect = new enum variant + new `dialect_<name>.zig` (~200 lines).
 
 - **Semantic Pass Manager** ([semantic.zig](zig-typespec/src/semantic.zig)): Extensible array of `SemanticPass` structs with `depends_on` dependency declarations. Current passes: `autofk` → `suffix_inference` → `validate` → `validate_type_modifiers`. Debug mode validates dependency ordering. New passes: write a `fn(*PassContext) !void` and add to `DEFAULT_PASSES`.
 
@@ -68,6 +68,10 @@ Run a single golden test by filter: `bash tests/test.sh 01` (matches test name s
 
 - **Self-contained SqlType** ([sql_type.zig](zig-typespec/src/sql_type.zig)): `SqlType.toSql()` is the single source of truth for type rendering — no delegation to `type_map.zig`. `type_registry.lookupSqlTypeDirect()` returns `SqlType` variants directly, avoiding stringly-typed round-trips.
 
+- **Dialect-Aware Diff** ([diff_semantic.zig](zig-typespec/src/diff_semantic.zig)): Type equivalence checking considers dialect-specific canonical forms (e.g. MySQL `n`/`N` both → int). Diff engine accepts optional `Dialect` parameter to avoid false-positive type changes across equivalent symbols.
+
+- **Reverse Lookup Vtable**: `DialectBackend.reverseLookup` allows dialect-specific reverse engineering (e.g. SQLite's heuristic-based INTEGER/TEXT disambiguation). Fallback to general REVERSE_MAP matching when vtable is null.
+
 ### Module Roles (by size, largest first)
 
 | Module | Role |
@@ -75,21 +79,15 @@ Run a single golden test by filter: `bash tests/test.sh 01` (matches test name s
 | `codegen.zig` | TypedAst → SQL DDL text, 5 sub-functions (emitColumnDefs, emitInlineIndexes, emitConstraints, emitTableMetadata, emitStandaloneIndexes) + shared `isDominatedByExplicitIndex()` |
 | `sql_parser.zig` | Recursive-descent SQL DDL parser (reverse pipeline) |
 | `semantic.zig` | Pass manager + template resolution orchestration |
-| `dialect.zig` | DialectBackend vtable definition + getBackend() + shared emitCheckExpr helper |
-| `dialect_mysql.zig` | MySQL DialectBackend implementation (~270 lines) |
-| `dialect_pg.zig` | PostgreSQL DialectBackend implementation (~150 lines) |
-| `dialect_sqlite.zig` | SQLite DialectBackend implementation (~160 lines) |
-| `dialect_common.zig` | Shared PG/SQLite dialect functions (quoting, indexes, ALTER) |
-| `parser.zig` | Token-level `.tps` parser → AST (delegates to parse_*.zig modules; helpers: flushAndResetTemplate, stripEngineTokens, processViewLine, processFieldLine) |
-| `diff.zig` | Table-level diff orchestration + SchemaDiff types + printing |
-| `reverse_map.zig` | Reverse lookup logic (SQL → TPS symbol matching + heuristics) |
-| `reverse_map_data.zig` | REVERSE_MAP data table (SQL ↔ TPS type mappings, 46 entries) |
+| `diff.zig` | Table-level diff orchestration + SchemaDiff types (accepts optional Dialect for semantic comparison) |
+| `parser.zig` | Token-level `.tps` parser → AST (delegates to parse_*.zig modules; main dispatch + error recovery) |
 | `migrate.zig` | Migration SQL generation, 7 sub-functions (emitDroppedTables, emitViewDiffs, emitTableDiffs, emitFieldDiffs, emitIndexDiffs, emitMetadataDiffs, emitFkDiffs) |
 | `ast_visitor.zig` | Comptime-generic AST traversal utilities |
 | `parse_field.zig` | Field declaration parsing (type, modifiers, default, inline FK) |
+| `diff_fields.zig` | Field-level diffing + rename detection + dialect-aware equality helpers |
 | `tokenizer.zig` | Lexical tokenizer (.tps text → Line[]) |
-| `diff_fields.zig` | Field-level diffing + rename detection + equality helpers |
 | `sql_parser_create.zig` | CREATE TABLE parsing (extracted from sql_parser.zig) |
+| `reverse_map.zig` | Reverse lookup logic (SQL → TPS symbol matching via vtable + parameterized types) |
 | `reverse_column.zig` | Column reverse engineering (type mapping, suffix, inline index detection) |
 | `diagnostic.zig` | Multi-error diagnostic collector with JSON output |
 | `trace.zig` | Shared AST trace formatting (FK actions, FK declarations, index declarations) used by parser.zig and semantic.zig diagnosticTrace |
@@ -101,12 +99,21 @@ Run a single golden test by filter: `bash tests/test.sh 01` (matches test name s
 | `diff_format.zig` | Diff output formatting |
 | `reverse_check.zig` | CHECK constraint reverse engineering |
 | `sql_type.zig` | Self-contained SqlType union with `toSql()` — single source of truth for type rendering |
-| `sqlite_hints.zig` | SQLite-specific type affinity hints |
+| `dialect.zig` | DialectBackend vtable + getBackend() + ReverseResult + canOmitType + emitCheckExpr |
+| `dialect_mysql.zig` | MySQL DialectBackend implementation (~270 lines) |
+| `dialect_sqlite.zig` | SQLite DialectBackend implementation + reverse lookup heuristics (~244 lines) |
+| `dialect_common.zig` | Shared PG/SQLite dialect functions (quoting, indexes, ALTER) |
+| `sqlite_hints.zig` | SQLite-specific type affinity hints + column name heuristics |
+| `reverse_map_data.zig` | REVERSE_MAP data table (SQL ↔ TPS type mappings, 46 entries) |
 | `reverse_fk.zig` | FK classification for reverse pipeline |
 | `type_map.zig` | Helper functions (lookupCustomType, isNumericTpsType) + SqlType re-export |
 | `type_registry.zig` | TPS symbol → SqlType direct mapping (lookupSqlTypeDirect) + CORE_TYPES |
+| `type_resolver.zig` | ResolvedAst → TypedAst type resolution |
 | `diff_indexes.zig` | Index diffing |
 | `diff_fks.zig` | FK diffing |
+| `diff_semantic.zig` | Dialect-aware type equivalence (canonical TPS symbol mapping per dialect) |
+| `parse_template.zig` | Template header parsing + slot detection + flush logic |
+| `parse_table.zig` | Table header parsing + engine token stripping + view line parsing |
 | `json_schema.zig` | JSON Schema output (dialect-agnostic) |
 | `pipeline_forward.zig` | Forward pipeline orchestration (no cli.zig dependency) |
 | `pipeline_reverse.zig` | Reverse pipeline + dialect auto-detection |

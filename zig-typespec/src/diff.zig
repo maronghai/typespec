@@ -74,7 +74,7 @@ const optionalStrEq = utils.optionalStrEq;
 
 // ─── Diff Engine ───────────────────────────────────────────
 
-pub fn diff(old: ast_mod.ResolvedAst, new: ast_mod.ResolvedAst, alloc: std.mem.Allocator) !SchemaDiff {
+pub fn diff(old: ast_mod.ResolvedAst, new: ast_mod.ResolvedAst, alloc: std.mem.Allocator, dialect: ?Dialect) !SchemaDiff {
     var table_diffs = try std.ArrayList(TableDiff).initCapacity(alloc, 8);
     var dropped_tables = try std.ArrayList([]const u8).initCapacity(alloc, 4);
     var view_diffs = try std.ArrayList(ViewDiff).initCapacity(alloc, 4);
@@ -112,7 +112,7 @@ pub fn diff(old: ast_mod.ResolvedAst, new: ast_mod.ResolvedAst, alloc: std.mem.A
     for (old.tables) |old_table| {
         if (new_map.get(old_table.name)) |new_idx| {
             const new_table = new.tables[new_idx];
-            const td = try diffTable(alloc, old_table, new_table);
+            const td = try diffTable(alloc, old_table, new_table, dialect);
             if (td.field_diffs.len > 0 or td.index_diffs.len > 0 or td.fk_diffs.len > 0 or td.metadata_diff != null) {
                 try table_diffs.append(alloc, td);
             }
@@ -154,8 +154,8 @@ pub fn diff(old: ast_mod.ResolvedAst, new: ast_mod.ResolvedAst, alloc: std.mem.A
     };
 }
 
-fn diffTable(alloc: std.mem.Allocator, old: ast_mod.ResolvedTable, new: ast_mod.ResolvedTable) !TableDiff {
-    const field_diffs = try diff_fields.diffFields(alloc, old.fields, new.fields);
+fn diffTable(alloc: std.mem.Allocator, old: ast_mod.ResolvedTable, new: ast_mod.ResolvedTable, dialect: ?Dialect) !TableDiff {
+    const field_diffs = try diff_fields.diffFields(alloc, old.fields, new.fields, dialect);
     const index_diffs = try diff_indexes.diffIndexes(alloc, old.indexes, new.indexes);
     const fk_diffs = try diff_fks.diffFks(alloc, old.fks, new.fks);
 
@@ -207,7 +207,7 @@ test "diff: table engine change detected" {
         .line_no = 1,
     }});
 
-    const result = try diff(makeResolvedAst(alloc, old_table), makeResolvedAst(alloc, new_table), alloc);
+    const result = try diff(makeResolvedAst(alloc, old_table), makeResolvedAst(alloc, new_table), alloc, null);
     try testing.expectEqual(@as(usize, 1), result.table_diffs.len);
     try testing.expect(result.table_diffs[0].metadata_diff != null);
     try testing.expectEqualStrings("InnoDB", result.table_diffs[0].metadata_diff.?.old_engine.?);
@@ -239,7 +239,7 @@ test "diff: no metadata change produces null metadata_diff" {
         .line_no = 1,
     }});
 
-    const result = try diff(makeResolvedAst(alloc, old_table), makeResolvedAst(alloc, new_table), alloc);
+    const result = try diff(makeResolvedAst(alloc, old_table), makeResolvedAst(alloc, new_table), alloc, null);
     // No changes at all → table shouldn't be in diffs
     try testing.expectEqual(@as(usize, 0), result.table_diffs.len);
 }
@@ -273,7 +273,7 @@ test "diff: combined field and metadata change" {
         .line_no = 1,
     }});
 
-    const result = try diff(makeResolvedAst(alloc, old_table), makeResolvedAst(alloc, new_table), alloc);
+    const result = try diff(makeResolvedAst(alloc, old_table), makeResolvedAst(alloc, new_table), alloc, null);
     try testing.expectEqual(@as(usize, 1), result.table_diffs.len);
     // Both field and metadata changes
     try testing.expectEqual(@as(usize, 1), result.table_diffs[0].field_diffs.len);
@@ -326,7 +326,7 @@ test "diff: no changes produces empty diff" {
     const old_ast = makeResolvedAst(alloc, t);
     const new_ast = makeResolvedAst(alloc, t);
 
-    const result = try diff(old_ast, new_ast, alloc);
+    const result = try diff(old_ast, new_ast, alloc, null);
     try testing.expectEqual(@as(usize, 0), result.table_diffs.len);
     try testing.expectEqual(@as(usize, 0), result.dropped_tables.len);
 }
@@ -348,7 +348,7 @@ test "diff: new table detected as create" {
     }});
     const new_ast = makeResolvedAst(alloc, new_table);
 
-    const result = try diff(old_ast, new_ast, alloc);
+    const result = try diff(old_ast, new_ast, alloc, null);
     try testing.expectEqual(@as(usize, 1), result.table_diffs.len);
     try testing.expectEqual(TableAction.create, result.table_diffs[0].action);
     try testing.expectEqualStrings("user", result.table_diffs[0].name);
@@ -371,7 +371,7 @@ test "diff: dropped table detected" {
     const old_ast = makeResolvedAst(alloc, old_table);
     const new_ast = makeResolvedAst(alloc, &.{});
 
-    const result = try diff(old_ast, new_ast, alloc);
+    const result = try diff(old_ast, new_ast, alloc, null);
     try testing.expectEqual(@as(usize, 0), result.table_diffs.len);
     try testing.expectEqual(@as(usize, 1), result.dropped_tables.len);
     try testing.expectEqualStrings("user", result.dropped_tables[0]);
@@ -405,7 +405,7 @@ test "diff: added field detected" {
         .line_no = 1,
     }}));
 
-    const result = try diff(old_ast, new_ast, alloc);
+    const result = try diff(old_ast, new_ast, alloc, null);
     try testing.expectEqual(@as(usize, 1), result.table_diffs.len);
     try testing.expectEqual(TableAction.alter, result.table_diffs[0].action);
     try testing.expectEqual(@as(usize, 1), result.table_diffs[0].field_diffs.len);
@@ -442,7 +442,7 @@ test "diff: renamed field detected by signature match" {
         .line_no = 1,
     }}));
 
-    const result = try diff(old_ast, new_ast, alloc);
+    const result = try diff(old_ast, new_ast, alloc, null);
     try testing.expectEqual(@as(usize, 1), result.table_diffs.len);
     try testing.expectEqual(@as(usize, 1), result.table_diffs[0].field_diffs.len);
     try testing.expectEqual(FieldAction.rename, result.table_diffs[0].field_diffs[0].action);
@@ -456,7 +456,7 @@ test "diff: two empty schemas produce no diff" {
     const old = makeResolvedAst(alloc, &.{});
     const new = makeResolvedAst(alloc, &.{});
 
-    const result = try diff(old, new, alloc);
+    const result = try diff(old, new, alloc, null);
     try testing.expectEqual(@as(usize, 0), result.table_diffs.len);
     try testing.expectEqual(@as(usize, 0), result.dropped_tables.len);
 }
@@ -488,7 +488,7 @@ test "diff: table created and dropped simultaneously" {
         .line_no = 1,
     }}));
 
-    const result = try diff(old_ast, new_ast, alloc);
+    const result = try diff(old_ast, new_ast, alloc, null);
     try testing.expectEqual(@as(usize, 1), result.dropped_tables.len);
     try testing.expectEqualStrings("users", result.dropped_tables[0]);
     try testing.expectEqual(@as(usize, 1), result.table_diffs.len);
@@ -523,7 +523,7 @@ test "diff: field type change detected" {
         .line_no = 1,
     }}));
 
-    const result = try diff(old_ast, new_ast, alloc);
+    const result = try diff(old_ast, new_ast, alloc, null);
     try testing.expectEqual(@as(usize, 1), result.table_diffs.len);
     try testing.expectEqual(@as(usize, 1), result.table_diffs[0].field_diffs.len);
     try testing.expectEqual(FieldAction.modify, result.table_diffs[0].field_diffs[0].action);
@@ -560,7 +560,7 @@ test "diff: index added and dropped" {
         .line_no = 1,
     }}));
 
-    const result = try diff(old_ast, new_ast, alloc);
+    const result = try diff(old_ast, new_ast, alloc, null);
     try testing.expectEqual(@as(usize, 1), result.table_diffs.len);
     try testing.expectEqual(@as(usize, 1), result.table_diffs[0].index_diffs.len);
     try testing.expectEqual(IndexAction.modify, result.table_diffs[0].index_diffs[0].action);
@@ -591,7 +591,7 @@ test "diff: no changes on identical tables" {
         .line_no = 1,
     }});
 
-    const result = try diff(makeResolvedAst(alloc, t1), makeResolvedAst(alloc, t2), alloc);
+    const result = try diff(makeResolvedAst(alloc, t1), makeResolvedAst(alloc, t2), alloc, null);
     try testing.expectEqual(@as(usize, 0), result.table_diffs.len);
     try testing.expectEqual(@as(usize, 0), result.dropped_tables.len);
 }
@@ -626,7 +626,7 @@ test "diff: field added and dropped simultaneously" {
         .line_no = 1,
     }});
 
-    const result = try diff(makeResolvedAst(alloc, old_table), makeResolvedAst(alloc, new_table), alloc);
+    const result = try diff(makeResolvedAst(alloc, old_table), makeResolvedAst(alloc, new_table), alloc, null);
     try testing.expectEqual(@as(usize, 1), result.table_diffs.len);
     try testing.expectEqual(@as(usize, 2), result.table_diffs[0].field_diffs.len);
 }
@@ -671,7 +671,7 @@ test "diff: FK change detected" {
         .line_no = 1,
     }});
 
-    const result = try diff(makeResolvedAst(alloc, old_table), makeResolvedAst(alloc, new_table), alloc);
+    const result = try diff(makeResolvedAst(alloc, old_table), makeResolvedAst(alloc, new_table), alloc, null);
     try testing.expectEqual(@as(usize, 1), result.table_diffs.len);
     try testing.expectEqual(@as(usize, 1), result.table_diffs[0].fk_diffs.len);
 }
@@ -701,7 +701,7 @@ test "diff: table comment change detected" {
         .line_no = 1,
     }});
 
-    const result = try diff(makeResolvedAst(alloc, old_table), makeResolvedAst(alloc, new_table), alloc);
+    const result = try diff(makeResolvedAst(alloc, old_table), makeResolvedAst(alloc, new_table), alloc, null);
     try testing.expectEqual(@as(usize, 1), result.table_diffs.len);
     // Comment change is now detected as metadata diff, not field diff
     try testing.expect(result.table_diffs[0].metadata_diff != null);

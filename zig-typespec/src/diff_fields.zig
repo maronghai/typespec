@@ -1,10 +1,13 @@
 const std = @import("std");
 const ast_mod = @import("ast.zig");
+const diff_semantic = @import("diff_semantic.zig");
+const dialect_enum = @import("dialect_enum.zig");
 const Field = ast_mod.Field;
 const TypeInfo = ast_mod.TypeInfo;
 const DefaultVal = ast_mod.DefaultVal;
 const Modifier = ast_mod.Modifier;
 const CheckConstraint = ast_mod.CheckConstraint;
+const Dialect = dialect_enum.Dialect;
 
 // ─── Field Diff + Rename Detection ─────────────────────────
 // Extracted from diff.zig for single-responsibility.
@@ -21,6 +24,7 @@ pub fn diffFields(
     alloc: std.mem.Allocator,
     old_fields: []const Field,
     new_fields: []const Field,
+    dialect: ?Dialect,
 ) ![]const FieldDiff {
     // Build name→field maps (skip slot markers)
     var old_fmap = std.StringHashMap(usize).init(alloc);
@@ -43,7 +47,7 @@ pub fn diffFields(
         if (std.mem.eql(u8, old_field.name, "...")) continue;
         if (new_fmap.get(old_field.name)) |new_idx| {
             const new_field = new_fields[new_idx];
-            if (!fieldsEqual(old_field, new_field)) {
+            if (!fieldsEqual(old_field, new_field, dialect)) {
                 try diffs.append(alloc, .{
                     .name = old_field.name,
                     .action = .modify,
@@ -66,7 +70,7 @@ pub fn diffFields(
     }
 
     // Rename detection: match dropped ↔ added by (type_info, modifiers, default, check)
-    const renames = try detectRenames(old_fields, new_fields, &dropped_names, alloc);
+    const renames = try detectRenames(old_fields, new_fields, &dropped_names, alloc, dialect);
 
     // Emit add for unmatched added fields
     for (added_fields.items) |af| {
@@ -146,6 +150,7 @@ fn detectRenames(
     new_fields: []const Field,
     dropped_names: *const std.ArrayList([]const u8),
     alloc: std.mem.Allocator,
+    dialect: ?Dialect,
 ) ![]const RenamePair {
     var renames = try std.ArrayList(RenamePair).initCapacity(alloc, 4);
 
@@ -172,7 +177,7 @@ fn detectRenames(
             if (new_fmap.contains(new_f.name) and old_fmap.contains(new_f.name)) continue;
             if (!new_fmap.contains(new_f.name)) continue;
 
-            if (fieldSignatureMatch(old_f, new_f)) {
+            if (fieldSignatureMatch(old_f, new_f, dialect)) {
                 match_name = new_f.name;
                 match_count += 1;
             }
@@ -195,8 +200,8 @@ fn detectRenames(
 
 // ─── Equality Helpers ──────────────────────────────────────
 
-pub fn fieldSignatureMatch(a: Field, b: Field) bool {
-    if (!typeInfoEqual(a.type_info, b.type_info)) return false;
+pub fn fieldSignatureMatch(a: Field, b: Field, dialect: ?Dialect) bool {
+    if (!typeInfoEqualDialect(a.type_info, b.type_info, dialect)) return false;
     if (a.modifiers.len != b.modifiers.len) return false;
     for (a.modifiers, 0..) |am, i| {
         if (am.kind != b.modifiers[i].kind) return false;
@@ -206,8 +211,8 @@ pub fn fieldSignatureMatch(a: Field, b: Field) bool {
     return true;
 }
 
-pub fn fieldsEqual(a: Field, b: Field) bool {
-    if (!typeInfoEqual(a.type_info, b.type_info)) return false;
+pub fn fieldsEqual(a: Field, b: Field, dialect: ?Dialect) bool {
+    if (!typeInfoEqualDialect(a.type_info, b.type_info, dialect)) return false;
     if (a.modifiers.len != b.modifiers.len) return false;
     for (a.modifiers, 0..) |am, i| {
         if (am.kind != b.modifiers[i].kind) return false;
@@ -234,6 +239,12 @@ pub fn typeInfoEqual(a: TypeInfo, b: TypeInfo) bool {
             return true;
         },
     };
+}
+
+/// Dialect-aware type info equality: uses semantic equivalence when dialect is provided.
+pub fn typeInfoEqualDialect(a: TypeInfo, b: TypeInfo, dialect: ?Dialect) bool {
+    if (dialect) |d| return diff_semantic.typeInfoEquiv(a, b, d);
+    return typeInfoEqual(a, b);
 }
 
 pub fn defaultValEqual(a: ?DefaultVal, b: ?DefaultVal) bool {
@@ -292,7 +303,7 @@ test "diffFields identical — no diffs" {
     const alloc = std.testing.allocator;
     const old = [_]Field{ makeField("id", .{ .simple = "n" }), makeField("name", .{ .simple = "s" }) };
     const new_ = [_]Field{ makeField("id", .{ .simple = "n" }), makeField("name", .{ .simple = "s" }) };
-    const diffs = try diffFields(alloc, &old, &new_);
+    const diffs = try diffFields(alloc, &old, &new_, null);
     defer alloc.free(diffs);
     try std.testing.expectEqual(@as(usize, 0), diffs.len);
 }
@@ -301,7 +312,7 @@ test "diffFields added field" {
     const alloc = std.testing.allocator;
     const old = [_]Field{makeField("id", .{ .simple = "n" })};
     const new_ = [_]Field{ makeField("id", .{ .simple = "n" }), makeField("email", .{ .simple = "s" }) };
-    const diffs = try diffFields(alloc, &old, &new_);
+    const diffs = try diffFields(alloc, &old, &new_, null);
     defer alloc.free(diffs);
     try std.testing.expectEqual(@as(usize, 1), diffs.len);
     try std.testing.expectEqual(FieldAction.add, diffs[0].action);
@@ -312,7 +323,7 @@ test "diffFields dropped field" {
     const alloc = std.testing.allocator;
     const old = [_]Field{ makeField("id", .{ .simple = "n" }), makeField("name", .{ .simple = "s" }) };
     const new_ = [_]Field{makeField("id", .{ .simple = "n" })};
-    const diffs = try diffFields(alloc, &old, &new_);
+    const diffs = try diffFields(alloc, &old, &new_, null);
     defer alloc.free(diffs);
     try std.testing.expectEqual(@as(usize, 1), diffs.len);
     try std.testing.expectEqual(FieldAction.drop, diffs[0].action);
@@ -323,7 +334,7 @@ test "diffFields modified field" {
     const alloc = std.testing.allocator;
     const old = [_]Field{makeField("id", .{ .simple = "n" })};
     const new_ = [_]Field{makeField("id", .{ .simple = "N" })};
-    const diffs = try diffFields(alloc, &old, &new_);
+    const diffs = try diffFields(alloc, &old, &new_, null);
     defer alloc.free(diffs);
     try std.testing.expectEqual(@as(usize, 1), diffs.len);
     try std.testing.expectEqual(FieldAction.modify, diffs[0].action);
@@ -333,7 +344,7 @@ test "diffFields rename detection" {
     const alloc = std.testing.allocator;
     const old = [_]Field{ makeField("id", .{ .simple = "n" }), makeField("old_name", .{ .simple = "s" }) };
     const new_ = [_]Field{ makeField("id", .{ .simple = "n" }), makeField("new_name", .{ .simple = "s" }) };
-    const diffs = try diffFields(alloc, &old, &new_);
+    const diffs = try diffFields(alloc, &old, &new_, null);
     defer alloc.free(diffs);
     try std.testing.expectEqual(@as(usize, 1), diffs.len);
     try std.testing.expectEqual(FieldAction.rename, diffs[0].action);
@@ -346,7 +357,7 @@ test "diffFields rename not detected when type changes" {
     // old: name is "n" (int), new: different name is "s" (varchar) — different type → not a rename
     const old = [_]Field{ makeField("id", .{ .simple = "n" }), makeField("a", .{ .simple = "n" }) };
     const new_ = [_]Field{ makeField("id", .{ .simple = "n" }), makeField("b", .{ .simple = "s" }) };
-    const diffs = try diffFields(alloc, &old, &new_);
+    const diffs = try diffFields(alloc, &old, &new_, null);
     defer alloc.free(diffs);
     // Should be drop(a) + add(b), not rename
     var has_drop = false;
@@ -363,7 +374,7 @@ test "diffFields slot markers ignored" {
     const alloc = std.testing.allocator;
     const old = [_]Field{ makeField("...", .none), makeField("id", .{ .simple = "n" }) };
     const new_ = [_]Field{ makeField("...", .none), makeField("id", .{ .simple = "n" }) };
-    const diffs = try diffFields(alloc, &old, &new_);
+    const diffs = try diffFields(alloc, &old, &new_, null);
     defer alloc.free(diffs);
     try std.testing.expectEqual(@as(usize, 0), diffs.len);
 }

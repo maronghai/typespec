@@ -1,33 +1,30 @@
 const std = @import("std");
 const data = @import("reverse_map_data.zig");
+const dialect_mod = @import("dialect.zig");
 const dialect_enum = @import("dialect_enum.zig");
 const sqlite_hints = @import("sqlite_hints.zig");
 
 pub const Dialect = dialect_enum.Dialect;
 pub const ReverseMapping = data.ReverseMapping;
 pub const REVERSE_MAP = data.REVERSE_MAP;
-
-// ─── Reverse Result ───────────────────────────────────────────
-
-pub const ReverseResult = struct {
-    tps: []const u8,
-    omit: bool,
-    /// Confidence score 0-100. Higher = more certain.
-    /// 100 = exact match, 95 = parameterized type, 80 = column name pattern, 50 = heuristic guess.
-    score: u8 = 100,
-};
+pub const ReverseResult = dialect_mod.ReverseResult;
+pub const canOmitType = dialect_mod.canOmitType;
 
 /// Reverse-lookup a SQL type string to its TPS symbol.
 /// Handles exact match from REVERSE_MAP + parameterized types (int(N), decimal(P,S), varchar(N)).
+/// For dialects with a vtable reverseLookup (e.g. SQLite), delegates to the backend.
 pub fn reverseLookup(sql_type: []const u8, col_name: []const u8, is_auto_inc: bool, is_default_ts: bool, dialect: Dialect) ReverseResult {
     const t = std.mem.trim(u8, sql_type, " \t");
 
-    // SQLite: match against m.sqlite with case-insensitive comparison and disambiguation heuristics
-    if (dialect == .sqlite) {
-        return reverseLookupSqlite(t, col_name, is_auto_inc, is_default_ts);
+    // Check if dialect has a custom reverse lookup (e.g. SQLite)
+    const backend = dialect_mod.getBackend(dialect);
+    if (backend.reverseLookup) |customLookup| {
+        if (customLookup(t, col_name, is_auto_inc, is_default_ts)) |result| {
+            return result;
+        }
     }
 
-    // MySQL/PG: exact match from REVERSE_MAP
+    // General path: MySQL/PG exact match from REVERSE_MAP + parameterized types
     var best_match: ?ReverseResult = null;
     var best_priority: u32 = std.math.maxInt(u32);
     for (REVERSE_MAP) |m| {
@@ -87,102 +84,6 @@ pub fn reverseLookup(sql_type: []const u8, col_name: []const u8, is_auto_inc: bo
         return .{ .tps = t, .omit = false };
 
     return .{ .tps = t, .omit = false };
-}
-
-// ─── SQLite Reverse Lookup ────────────────────────────────────
-
-fn reverseLookupSqlite(t: []const u8, col_name: []const u8, is_auto_inc: bool, is_default_ts: bool) ReverseResult {
-    // Normalize to uppercase for case-insensitive comparison
-    var upper_buf: [64]u8 = undefined;
-    const upper_t = if (t.len <= upper_buf.len) blk: {
-        for (t, 0..) |ch, i| upper_buf[i] = std.ascii.toUpper(ch);
-        break :blk upper_buf[0..t.len];
-    } else t;
-
-    // Parameterized types: varchar(N) → sN, numeric(P,S) → P,S
-    if (std.mem.startsWith(u8, upper_t, "VARCHAR(") and std.mem.endsWith(u8, upper_t, ")")) {
-        const inner = std.mem.trim(u8, t[8 .. t.len - 1], " ");
-        if (std.mem.eql(u8, inner, "255"))
-            return .{ .tps = "s", .omit = canOmitType(col_name, "s", is_auto_inc, is_default_ts), .score = 100 };
-        const sbuf = struct {
-            var buf: [16]u8 = undefined;
-        };
-        sbuf.buf[0] = 's';
-        for (inner, 0..) |ch, i| sbuf.buf[i + 1] = ch;
-        return .{ .tps = sbuf.buf[0 .. 1 + inner.len], .omit = false, .score = 100 };
-    }
-    if (std.mem.startsWith(u8, upper_t, "NUMERIC(") and std.mem.endsWith(u8, upper_t, ")")) {
-        return .{ .tps = t[8 .. t.len - 1], .omit = false, .score = 100 };
-    }
-
-    // Check against REVERSE_MAP SQLite entries
-    var found_tps: ?[]const u8 = null;
-    for (REVERSE_MAP) |m| {
-        if (std.mem.eql(u8, upper_t, m.sqlite)) {
-            found_tps = m.tps;
-            break;
-        }
-    }
-
-    if (found_tps) |tps| {
-        // Single-result types: BLOB, REAL — no ambiguity
-        if (std.mem.eql(u8, tps, "B") or std.mem.eql(u8, tps, "real") or
-            std.mem.eql(u8, tps, "float4") or std.mem.eql(u8, tps, "float8"))
-        {
-            return .{ .tps = tps, .omit = canOmitType(col_name, tps, is_auto_inc, is_default_ts), .score = 100 };
-        }
-
-        // INTEGER group (n, N, b) — disambiguate with heuristics
-        if (std.mem.eql(u8, upper_t, "INTEGER")) {
-            if (is_auto_inc) return .{ .tps = "n", .omit = false, .score = 100 };
-            if (col_name.len > 3 and std.mem.endsWith(u8, col_name, "_id"))
-                return .{ .tps = "n", .omit = canOmitType(col_name, "n", is_auto_inc, is_default_ts), .score = 100 };
-            if (isBooleanColumnName(col_name))
-                return .{ .tps = "b", .omit = canOmitType(col_name, "b", is_auto_inc, is_default_ts), .score = 80 };
-            return .{ .tps = "n", .omit = canOmitType(col_name, "n", is_auto_inc, is_default_ts), .score = 50 };
-        }
-
-        // NUMERIC group (m, M) — m is most common
-        if (std.mem.eql(u8, upper_t, "NUMERIC")) {
-            return .{ .tps = "m", .omit = canOmitType(col_name, "m", is_auto_inc, is_default_ts), .score = 100 };
-        }
-
-        // TEXT group (s, S, j, d, t) — disambiguate with heuristics
-        if (std.mem.eql(u8, upper_t, "TEXT")) {
-            if (col_name.len > 3 and std.mem.endsWith(u8, col_name, "_at"))
-                return .{ .tps = "t", .omit = canOmitType(col_name, "t", is_auto_inc, is_default_ts), .score = 100 };
-            if (col_name.len > 3 and std.mem.endsWith(u8, col_name, "_on"))
-                return .{ .tps = "d", .omit = canOmitType(col_name, "d", is_auto_inc, is_default_ts), .score = 100 };
-            if (is_default_ts)
-                return .{ .tps = "t", .omit = canOmitType(col_name, "t", is_auto_inc, is_default_ts), .score = 100 };
-            if (isJsonColumnName(col_name))
-                return .{ .tps = "j", .omit = canOmitType(col_name, "j", is_auto_inc, is_default_ts), .score = 80 };
-            if (isTextColumnName(col_name))
-                return .{ .tps = "S", .omit = canOmitType(col_name, "S", is_auto_inc, is_default_ts), .score = 80 };
-            return .{ .tps = "s", .omit = canOmitType(col_name, "s", is_auto_inc, is_default_ts), .score = 50 };
-        }
-    }
-
-    // Fallback: return as-is (unknown type)
-    return .{ .tps = t, .omit = false, .score = 50 };
-}
-
-// ─── SQLite column name heuristics (re-exports from sqlite_hints) ──
-
-const isBooleanColumnName = sqlite_hints.isBooleanColumnName;
-const isJsonColumnName = sqlite_hints.isJsonColumnName;
-const isTextColumnName = sqlite_hints.isTextColumnName;
-
-// ─── Helper: can omit type symbol in .tps output ─────────────
-
-pub fn canOmitType(col_name: []const u8, tps_symbol: []const u8, is_auto_inc: bool, is_default_ts: bool) bool {
-    if (is_auto_inc or is_default_ts) return false;
-    if (col_name.len > 3) {
-        if (std.mem.endsWith(u8, col_name, "_id") and std.mem.eql(u8, tps_symbol, "n")) return true;
-        if (std.mem.endsWith(u8, col_name, "_on") and std.mem.eql(u8, tps_symbol, "d")) return true;
-        if (std.mem.endsWith(u8, col_name, "_at") and std.mem.eql(u8, tps_symbol, "t")) return true;
-    }
-    return std.mem.eql(u8, tps_symbol, "s");
 }
 
 // ─── Helper: classify SQL type strings (re-exports from sqlite_hints) ──
