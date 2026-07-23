@@ -35,10 +35,10 @@ pub fn main(init: std.process.Init) !void {
                 std.debug.print("error: --dialect requires a value (mysql, pg, postgres, sqlite)\n", .{});
             },
             error.DiffMissingArgs => {
-                std.debug.print("error: diff requires <old.tps> <new.tps>\n", .{});
+                std.debug.print("error: diff requires <old.ss> <new.ss>\n", .{});
             },
             error.MigrateMissingArgs => {
-                std.debug.print("error: migrate requires <old.tps> <new.tps>\n", .{});
+                std.debug.print("error: migrate requires <old.ss> <new.ss>\n", .{});
             },
             else => {
                 std.debug.print("error: {s}\n", .{@errorName(err)});

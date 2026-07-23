@@ -5,7 +5,7 @@ const reverse_codegen = @import("reverse_codegen.zig");
 const codegen = @import("codegen.zig");
 const io_mod = @import("io.zig");
 
-// ─── Reverse Pipeline: SQL → .tps ─────────────────────────────
+// ─── Reverse Pipeline: SQL → .ss ─────────────────────────────
 
 /// Auto-detect SQL dialect from content patterns using scoring.
 /// Each pattern match adds +1 to the corresponding dialect score.

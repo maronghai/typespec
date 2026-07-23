@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ── TypeSpec Diff Test Runner ──
-# Tests: rune diff <old.tps> <new.tps> produces expected diff output.
+# Tests: rune diff <old.ss> <new.ss> produces expected diff output.
 # Usage: ./test_diff.sh [test-filter]
 
 set -euo pipefail
@@ -19,9 +19,9 @@ for diff_file in "$TEST_DIR"/*.diff.txt; do
     continue
   fi
 
-  old_file="$TEST_DIR/${base}-old.tps"
-  new_file="$TEST_DIR/${base}-new.tps"
-  same_file="$TEST_DIR/${base}.tps"
+  old_file="$TEST_DIR/${base}-old.ss"
+  new_file="$TEST_DIR/${base}-new.ss"
+  same_file="$TEST_DIR/${base}.ss"
 
   if [ -f "$same_file" ]; then
     old_file="$same_file"

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ── TypeSpec Test Runner ──
-# Compiles each .tps test file and diffs against golden .sql output.
+# Compiles each .ss test file and diffs against golden .sql output.
 # Usage: ./test.sh [test-filter]
 #   e.g. ./test.sh           — run all tests
 #        ./test.sh 01         — run tests matching "01"
@@ -15,9 +15,9 @@ EXPECTED_DIR="$SCRIPT_DIR/expected"
 
 FILTER="${1:-}"
 
-for tps_file in "$TEST_DIR"/*.tps; do
+for tps_file in "$TEST_DIR"/*.ss; do
   [ -f "$tps_file" ] || continue
-  base=$(basename "$tps_file" .tps)
+  base=$(basename "$tps_file" .ss)
 
   # Apply filter
   if [ -n "$FILTER" ] && [[ "$base" != *"$FILTER"* ]]; then

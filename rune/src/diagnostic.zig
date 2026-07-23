@@ -10,7 +10,7 @@ pub const Diagnostic = struct {
     severity: Severity,
     line_no: usize,
     col: ?usize = null,
-    file: []const u8 = "input.tps",
+    file: []const u8 = "input.ss",
     message: []const u8,
     expected: ?[]const u8 = null,
     actual: ?[]const u8 = null,

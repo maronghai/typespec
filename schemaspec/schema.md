@@ -665,8 +665,8 @@ ip_addr   I             ; inet (PG: native inet; MySQL: varchar(45); SQLite: TEX
 
 ```bash
 cd rune && zig build
-./rune/zig-out/bin/rune ../schema_v1.tps -o v1.sql
-./rune/zig-out/bin/rune ../schema_v2.tps -o v2.sql
+./rune/zig-out/bin/rune ../schema_v1.ss -o v1.sql
+./rune/zig-out/bin/rune ../schema_v2.ss -o v2.sql
 diff v1.sql v2.sql
 ```
 

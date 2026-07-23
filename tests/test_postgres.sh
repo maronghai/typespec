@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ── TypeSpec PostgreSQL Test Runner ──
-# Compiles each .tps test file with -d pg and diffs against golden .pg.sql output.
+# Compiles each .ss test file with -d pg and diffs against golden .pg.sql output.
 # Usage: ./test_postgres.sh [test-filter]
 
 set -euo pipefail
@@ -12,9 +12,9 @@ EXPECTED_DIR="$SCRIPT_DIR/expected"
 
 FILTER="${1:-}"
 
-for tps_file in "$TEST_DIR"/*.tps; do
+for tps_file in "$TEST_DIR"/*.ss; do
   [ -f "$tps_file" ] || continue
-  base=$(basename "$tps_file" .tps)
+  base=$(basename "$tps_file" .ss)
 
   if [ -n "$FILTER" ] && [[ "$base" != *"$FILTER"* ]]; then
     continue

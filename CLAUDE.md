@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-TypeSpec is a minimal DSL for declaring database schemas using single-character symbols, implemented in Zig. It compiles `.tps` schema files into SQL DDL (MySQL/PostgreSQL/SQLite), and supports reverse engineering (SQL→.tps), schema diff, and migration generation.
+TypeSpec is a minimal DSL for declaring database schemas using single-character symbols, implemented in Zig. It compiles `.ss` schema files into SQL DDL (MySQL/PostgreSQL/SQLite), and supports reverse engineering (SQL→.ss), schema diff, and migration generation.
 
 ## Build & Test Commands
 
@@ -37,11 +37,11 @@ Run a single golden test by filter: `bash tests/test.sh 01` (matches test name s
 ### Quick Usage
 
 ```bash
-./rune/zig-out/bin/rune schema.tps                        # Compile to stdout
-./rune/zig-out/bin/rune schema.tps -o out.sql             # Compile to file
-./rune/zig-out/bin/rune schema.tps -d pg                  # PostgreSQL output
-./rune/zig-out/bin/rune schema.tps -d sqlite              # SQLite output
-./rune/zig-out/bin/rune migrate old.tps new.tps           # Migration SQL
+./rune/zig-out/bin/rune schema.ss                        # Compile to stdout
+./rune/zig-out/bin/rune schema.ss -o out.sql             # Compile to file
+./rune/zig-out/bin/rune schema.ss -d pg                  # PostgreSQL output
+./rune/zig-out/bin/rune schema.ss -d sqlite              # SQLite output
+./rune/zig-out/bin/rune migrate old.ss new.ss           # Migration SQL
 ./rune/zig-out/bin/rune reverse schema.sql -t             # Reverse-engineer with template extraction
 ```
 
@@ -49,9 +49,9 @@ Run a single golden test by filter: `bash tests/test.sh 01` (matches test name s
 
 ### Three Pipelines
 
-1. **Forward**: `.tps` → Tokenizer → Parser → Template Resolution → Semantic Analyzer → Type Resolver → Codegen → SQL
-2. **Reverse**: SQL DDL → SqlParser → ReverseCodegen (with optional template extraction) → `.tps`
-3. **Diff/Migrate**: Two `.tps` files each compile to `ResolvedAst` → DiffEngine produces `SchemaDiff` → MigrationGenerator outputs ALTER TABLE SQL
+1. **Forward**: `.ss` → Tokenizer → Parser → Template Resolution → Semantic Analyzer → Type Resolver → Codegen → SQL
+2. **Reverse**: SQL DDL → SqlParser → ReverseCodegen (with optional template extraction) → `.ss`
+3. **Diff/Migrate**: Two `.ss` files each compile to `ResolvedAst` → DiffEngine produces `SchemaDiff` → MigrationGenerator outputs ALTER TABLE SQL
 
 ### IR Boundaries
 
@@ -95,14 +95,14 @@ Run a single golden test by filter: `bash tests/test.sh 01` (matches test name s
 | `diff.zig` | Table-level diff engine + re-exports types from `diff_types.zig`. Tests in `diff_test.zig` |
 | `diff_types.zig` | Shared diff data structures (SchemaDiff, TableDiff, FieldDiff, etc.) — extracted to break diff↔diff_format cycle |
 | `diff_format.zig` | Diff output formatting (imports `diff_types.zig`, not `diff.zig`) |
-| `parser.zig` | Token-level `.tps` parser → AST (delegates to parse_*.zig modules; main dispatch + error recovery via parse_recovery.zig) |
+| `parser.zig` | Token-level `.ss` parser → AST (delegates to parse_*.zig modules; main dispatch + error recovery via parse_recovery.zig) |
 | `migrate.zig` | Migration SQL generation, 6 sub-functions (emitDroppedTables, emitViewDiffs, emitTableDiffs, emitFieldDiffs, emitIndexDiffs, emitMetadataDiffs, emitFkDiffs). FK rendering via `DialectBackend.emitForeignKey`. Tests in `migrate_test.zig` |
 | `ast_visitor.zig` | Comptime-generic AST traversal utilities (read-only + mutable `walkResolvedTablesMut`; `ResolvedTable.fields` is `[]Field`). Tests in `ast_visitor_test.zig` |
 | `parse_trace.zig` | Parser diagnostic trace output (debug mode, extracted from parser.zig) |
 | `parse_recovery.zig` | Error handling (handleParseError, locFromLine) + sync point detection (findNextSyncPoint) for forward parser error recovery |
 | `parse_field.zig` | Field declaration parsing (type, modifiers, default, inline FK) |
 | `diff_fields.zig` | Field-level diffing + rename detection + dialect-aware equality helpers. Tests in `diff_fields_test.zig` |
-| `tokenizer.zig` | Lexical tokenizer (.tps text → Line[]) |
+| `tokenizer.zig` | Lexical tokenizer (.ss text → Line[]) |
 | `sql_parser_create.zig` | CREATE TABLE parsing (extracted from sql_parser.zig) |
 | `reverse_map.zig` | Reverse lookup logic (SQL → TPS symbol matching via vtable + parameterized types) |
 | `reverse_column.zig` | Column reverse engineering (re-exports dialect.ReverseResult as TypeResult, suffix, inline index detection) |
@@ -111,7 +111,7 @@ Run a single golden test by filter: `bash tests/test.sh 01` (matches test name s
 | `template.zig` | Template inheritance resolution and slot-based field merging |
 | `template_extraction.zig` | Template extraction from SQL (reverse pipeline) |
 | `typed_ast.zig` | TypedAst IR: SqlType resolution + ColumnFlags bitflags |
-| `reverse_codegen.zig` | SQL → `.tps` orchestration, 4 sub-functions |
+| `reverse_codegen.zig` | SQL → `.ss` orchestration, 4 sub-functions |
 | `ast.zig` | AST type definitions (Schema, Table, Field, Template, etc.) |
 | `reverse_check.zig` | CHECK constraint reverse engineering |
 | `sql_type.zig` | Self-contained SqlType union with `toSql()` — single source of truth for type rendering |
@@ -142,8 +142,8 @@ Run a single golden test by filter: `bash tests/test.sh 01` (matches test name s
 ### Testing
 
 - **Unit tests**: Zig `test` blocks — inline in production files, or in dedicated `*_test.zig` files (`diff_test.zig`, `codegen_test.zig`, `migrate_test.zig`, `ast_visitor_test.zig`, `diff_fields_test.zig`, `sql_parser_test.zig`, `semantic.zig`). Run via `zig build test`
-- **Golden tests**: Shell scripts compile `.tps` files and `diff` against `.sql` golden files in `tests/expected/`
-- Test data: `.tps` input files in `tests/`, expected output in `tests/expected/`
+- **Golden tests**: Shell scripts compile `.ss` files and `diff` against `.sql` golden files in `tests/expected/`
+- Test data: `.ss` input files in `tests/`, expected output in `tests/expected/`
 
 ## Conventions
 

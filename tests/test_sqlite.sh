@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ── TypeSpec SQLite Test Runner ──
-# Compiles each .tps test file with SQLite dialect and diffs against golden output.
+# Compiles each .ss test file with SQLite dialect and diffs against golden output.
 # Usage: ./test_sqlite.sh [test-filter]
 
 set -euo pipefail
@@ -12,9 +12,9 @@ EXPECTED_DIR="$SCRIPT_DIR/expected"
 
 FILTER="${1:-}"
 
-for tps_file in "$TEST_DIR"/*.tps; do
+for tps_file in "$TEST_DIR"/*.ss; do
   [ -f "$tps_file" ] || continue
-  base=$(basename "$tps_file" .tps)
+  base=$(basename "$tps_file" .ss)
 
   # Only run sqlite-* test files
   if [[ "$base" != sqlite-* ]]; then

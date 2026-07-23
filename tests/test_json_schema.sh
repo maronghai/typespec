@@ -11,9 +11,9 @@ EXPECTED_DIR="$SCRIPT_DIR/expected"
 
 FILTER="${1:-}"
 
-for tps_file in "$TEST_DIR"/json-schema-*.tps; do
+for tps_file in "$TEST_DIR"/json-schema-*.ss; do
   [ -f "$tps_file" ] || continue
-  base=$(basename "$tps_file" .tps)
+  base=$(basename "$tps_file" .ss)
 
   if [ -n "$FILTER" ] && [[ "$base" != *"$FILTER"* ]]; then
     continue

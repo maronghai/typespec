@@ -19,7 +19,7 @@ pub fn main(init: std.process.Init) !void {
     const alloc = init.arena.allocator();
 
     // Parse args
-    var file_path: []const u8 = "bench/small.tps";
+    var file_path: []const u8 = "bench/small.ss";
     var iterations: usize = 10;
     var mode: enum { run, save, check } = .run;
 

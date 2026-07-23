@@ -11,7 +11,7 @@ header "Error Recovery Tests"
 
 # Test 1: Duplicate field names → should produce warning
 echo "Test: duplicate-fields"
-output=$("$COMPILER" "$SCRIPT_DIR/error-recovery/duplicate-fields.tps" -o /dev/null 2>&1) && rc=0 || rc=$?
+output=$("$COMPILER" "$SCRIPT_DIR/error-recovery/duplicate-fields.ss" -o /dev/null 2>&1) && rc=0 || rc=$?
 if echo "$output" | grep -q "duplicate field 'name'"; then
     pass "duplicate-fields"
 else
@@ -20,7 +20,7 @@ fi
 
 # Test 2: FK references non-existent table → should produce error
 echo "Test: fk-nonexistent-table"
-output=$("$COMPILER" "$SCRIPT_DIR/error-recovery/fk-nonexistent-table.tps" -o /dev/null 2>&1) && rc=0 || rc=$?
+output=$("$COMPILER" "$SCRIPT_DIR/error-recovery/fk-nonexistent-table.ss" -o /dev/null 2>&1) && rc=0 || rc=$?
 if echo "$output" | grep -q "non-existent table 'nonexistent'"; then
     pass "fk-nonexistent-table"
 else
@@ -29,7 +29,7 @@ fi
 
 # Test 3: FK references non-existent field → should produce error
 echo "Test: fk-nonexistent-field"
-output=$("$COMPILER" "$SCRIPT_DIR/error-recovery/fk-nonexistent-field.tps" -o /dev/null 2>&1) && rc=0 || rc=$?
+output=$("$COMPILER" "$SCRIPT_DIR/error-recovery/fk-nonexistent-field.ss" -o /dev/null 2>&1) && rc=0 || rc=$?
 if echo "$output" | grep -q "non-existent table 'user'" || echo "$output" | grep -q "not found in table 'order'"; then
     pass "fk-nonexistent-field"
 else
@@ -38,7 +38,7 @@ fi
 
 # Test 4: Multiple errors in one file → should produce multiple diagnostics
 echo "Test: multi-errors"
-output=$("$COMPILER" "$SCRIPT_DIR/error-recovery/multi-errors.tps" -o /dev/null 2>&1) && rc=0 || rc=$?
+output=$("$COMPILER" "$SCRIPT_DIR/error-recovery/multi-errors.ss" -o /dev/null 2>&1) && rc=0 || rc=$?
 warn_count=$(echo "$output" | grep -c "warning:" || true)
 if [ "$warn_count" -ge 2 ]; then
     pass "multi-errors ($warn_count warnings)"
@@ -48,7 +48,7 @@ fi
 
 # Test 5: Circular template inheritance → should produce fatal error
 echo "Test: circular-template"
-output=$("$COMPILER" "$SCRIPT_DIR/error-recovery/circular-template.tps" -o /dev/null 2>&1) && rc=0 || rc=$?
+output=$("$COMPILER" "$SCRIPT_DIR/error-recovery/circular-template.ss" -o /dev/null 2>&1) && rc=0 || rc=$?
 if echo "$output" | grep -qi "circular"; then
     pass "circular-template"
 else
@@ -57,7 +57,7 @@ fi
 
 # Test 6: Duplicate template names → should produce warning
 echo "Test: duplicate-template"
-output=$("$COMPILER" "$SCRIPT_DIR/error-recovery/duplicate-template.tps" -o /dev/null 2>&1) && rc=0 || rc=$?
+output=$("$COMPILER" "$SCRIPT_DIR/error-recovery/duplicate-template.ss" -o /dev/null 2>&1) && rc=0 || rc=$?
 if echo "$output" | grep -qi "duplicate\|already defined\|redefined"; then
     pass "duplicate-template"
 elif [ "$rc" -eq 0 ]; then
@@ -69,7 +69,7 @@ fi
 
 # Test 7: Invalid custom type reference → should produce warning or passthrough
 echo "Test: invalid-custom-type"
-output=$("$COMPILER" "$SCRIPT_DIR/error-recovery/invalid-custom-type.tps" -o /dev/null 2>&1) && rc=0 || rc=$?
+output=$("$COMPILER" "$SCRIPT_DIR/error-recovery/invalid-custom-type.ss" -o /dev/null 2>&1) && rc=0 || rc=$?
 if echo "$output" | grep -qi "unknown type\|undefined\|invalid.*type"; then
     pass "invalid-custom-type"
 elif [ "$rc" -eq 0 ]; then
@@ -81,7 +81,7 @@ fi
 
 # Test 8: Multi-block recovery → should parse valid blocks despite errors
 echo "Test: multi-block-recovery"
-output=$("$COMPILER" "$SCRIPT_DIR/error-recovery/multi-block-recovery.tps" -o /dev/null 2>&1) && rc=0 || rc=$?
+output=$("$COMPILER" "$SCRIPT_DIR/error-recovery/multi-block-recovery.ss" -o /dev/null 2>&1) && rc=0 || rc=$?
 # Should produce warnings about bad field and duplicates, but still parse valid tables
 warn_count=$(echo "$output" | grep -c "warning:\|error:" || true)
 if [ "$warn_count" -ge 1 ]; then
@@ -92,7 +92,7 @@ fi
 
 # Test 9: Recovery after bad template → should parse valid tables after error
 echo "Test: recovery-after-bad-template"
-output=$("$COMPILER" "$SCRIPT_DIR/error-recovery/recovery-after-bad-template.tps" -o /dev/null 2>&1) && rc=0 || rc=$?
+output=$("$COMPILER" "$SCRIPT_DIR/error-recovery/recovery-after-bad-template.ss" -o /dev/null 2>&1) && rc=0 || rc=$?
 # Should produce error about invalid syntax but still compile
 if [ "$rc" -eq 0 ] || echo "$output" | grep -qi "error\|failed"; then
     pass "recovery-after-bad-template (rc=$rc)"
@@ -102,7 +102,7 @@ fi
 
 # Test 10: Out-of-block declarations → should warn but still compile valid blocks
 echo "Test: out-of-block-decl"
-output=$("$COMPILER" "$SCRIPT_DIR/error-recovery/out-of-block-decl.tps" -o /dev/null 2>&1) && rc=0 || rc=$?
+output=$("$COMPILER" "$SCRIPT_DIR/error-recovery/out-of-block-decl.ss" -o /dev/null 2>&1) && rc=0 || rc=$?
 warn_count=$(echo "$output" | grep -c "warning:" || true)
 if [ "$warn_count" -ge 1 ] && [ "$rc" -eq 0 ]; then
     pass "out-of-block-decl ($warn_count warnings, compiled ok)"
@@ -114,7 +114,7 @@ fi
 
 # Test 11: Circular FK dependency → should warn but still compile
 echo "Test: circular-fk"
-output=$("$COMPILER" "$SCRIPT_DIR/error-recovery/circular-fk.tps" -o /dev/null 2>&1) && rc=0 || rc=$?
+output=$("$COMPILER" "$SCRIPT_DIR/error-recovery/circular-fk.ss" -o /dev/null 2>&1) && rc=0 || rc=$?
 if echo "$output" | grep -qi "circular"; then
     pass "circular-fk"
 else
@@ -123,7 +123,7 @@ fi
 
 # Test 12: FK references non-existent field in target table → should error
 echo "Test: fk-bad-field"
-output=$("$COMPILER" "$SCRIPT_DIR/error-recovery/fk-bad-field.tps" -o /dev/null 2>&1) && rc=0 || rc=$?
+output=$("$COMPILER" "$SCRIPT_DIR/error-recovery/fk-bad-field.ss" -o /dev/null 2>&1) && rc=0 || rc=$?
 if echo "$output" | grep -qi "non-existent field"; then
     pass "fk-bad-field"
 else

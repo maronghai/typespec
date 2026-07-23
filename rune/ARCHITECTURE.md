@@ -4,10 +4,10 @@
 
 ## Overview
 
-TypeSpec is a compiler that transforms `.tps` schema files into SQL DDL. It consists of two independent pipelines:
+TypeSpec is a compiler that transforms `.ss` schema files into SQL DDL. It consists of two independent pipelines:
 
-1. **Forward pipeline**: `.tps` → SQL DDL (CREATE TABLE, indexes, FKs)
-2. **Reverse pipeline**: SQL DDL → `.tps` schema
+1. **Forward pipeline**: `.ss` → SQL DDL (CREATE TABLE, indexes, FKs)
+2. **Reverse pipeline**: SQL DDL → `.ss` schema
 3. **Diff/Migrate**: compare two schemas and generate migration SQL
 
 ## Module Dependency Graph
@@ -79,7 +79,7 @@ TypeSpec is a compiler that transforms `.tps` schema files into SQL DDL. It cons
 ## Forward Pipeline
 
 ```
-Input (.tps text)
+Input (.ss text)
     │
     ▼
 [1] Tokenizer (tokenizer.zig, 399 lines)
@@ -143,13 +143,13 @@ Input (SQL DDL text)
     PG/SQLite-style "idx_table_field" as inline index suffixes (@, @u).
     Non-standard index names preserved in full form: @ idx_name (field).
     Confidence comments suppressed on fields with inline index suffixes.
-    Output: .tps text
+    Output: .ss text
 ```
 
 ## Diff/Migrate Pipeline
 
 ```
-(old.tps, new.tps)
+(old.ss, new.ss)
     │
     ▼
 [1] Compile both to ResolvedAst (forward pipeline)
@@ -349,7 +349,7 @@ ip ip_addr
 
 ### Adding a new custom type
 
-No code changes needed — users define types in `.tps` files. For built-in support of a new type:
+No code changes needed — users define types in `.ss` files. For built-in support of a new type:
 
 1. Add variant to `SqlType` union in `sql_type.zig`
 2. Add case to `SqlType.toSql()` for dialect rendering
@@ -378,16 +378,16 @@ No changes needed in `codegen.zig` — it is fully dialect-agnostic.
 
 | File | Tables | Fields | Description |
 |------|--------|--------|-------------|
-| `bench/small.tps` | 6 | ~30 | Blog-like schema (user, post, comment, tag) |
-| `bench/medium.tps` | 21 | ~200 | Project management (users, projects, issues, PRs) |
-| `bench/large.tps` | 32 | ~400 | Enterprise platform (tenants, tasks, sprints, audits) |
+| `bench/small.ss` | 6 | ~30 | Blog-like schema (user, post, comment, tag) |
+| `bench/medium.ss` | 21 | ~200 | Project management (users, projects, issues, PRs) |
+| `bench/large.ss` | 32 | ~400 | Enterprise platform (tenants, tasks, sprints, audits) |
 
 ### Usage
 
 ```bash
 zig build bench                              # default: small, 10 iterations
-zig build bench -- bench/medium.tps 20       # custom file + count
-zig build bench -- bench/large.tps 5         # large schema
+zig build bench -- bench/medium.ss 20       # custom file + count
+zig build bench -- bench/large.ss 5         # large schema
 ```
 
 ### Pipeline Stages Measured
@@ -407,7 +407,7 @@ zig build bench -- bench/large.tps 5         # large schema
 | PG golden | `tests/test_postgres.sh` | 83 | Full pipeline |
 | SQLite golden | `tests/test_sqlite.sh` | 24 | Full pipeline |
 | Migrate golden | `tests/test_migrate.sh` | 34 | Diff + migration SQL |
-| Reverse golden | `tests/test_reverse.sh` | 15 | SQL → .tps |
+| Reverse golden | `tests/test_reverse.sh` | 15 | SQL → .ss |
 | Diff golden | `tests/test_diff.sh` | 12 | Schema comparison |
 | Error recovery | `tests/test_error_recovery.sh` | 12 | Parse error handling + schema-level validation |
 | JSON Schema | `tests/test_json_schema.sh` | 1 | JSON Schema output |

@@ -1,5 +1,5 @@
 {
-  "file": "bench/small.tps",
+  "file": "bench/small.ss",
   "stages": {
     "tokenize": 0.10,
     "parse": 0.10,

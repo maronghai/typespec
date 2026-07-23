@@ -68,7 +68,7 @@ balance   m =0
 
 ### 1. Write a Schema
 
-Create a `.tps` file:
+Create a `.ss` file:
 
 ```asm
 $ myapp
@@ -113,15 +113,15 @@ paid_on               : 支付日期（suffix _on → date）
 
 ```bash
 cd rune && zig build
-./rune/zig-out/bin/rune ../myapp.tps -o myapp.sql
+./rune/zig-out/bin/rune ../myapp.ss -o myapp.sql
 
 # PostgreSQL output
-./rune/zig-out/bin/rune ../myapp.tps -d pg -o myapp_pg.sql
+./rune/zig-out/bin/rune ../myapp.ss -d pg -o myapp_pg.sql
 ```
 
 ### 3. Output
 
-See [examples/user-order.tps](schemaspec/examples/user-order.tps) for complete TypeSpec → SQL output.
+See [examples/user-order.ss](schemaspec/examples/user-order.ss) for complete TypeSpec → SQL output.
 
 ## Type System
 
@@ -402,14 +402,14 @@ Views are supported in all three dialects (MySQL, PostgreSQL, SQLite) and in sch
 
 ## Examples
 
-A full e-commerce schema with 21 tables: see [examples/complex-ecommerce.tps](schemaspec/examples/complex-ecommerce.tps) (426 lines → [430 lines SQL](examples/complex-ecommerce.sql)).
+A full e-commerce schema with 21 tables: see [examples/complex-ecommerce.ss](schemaspec/examples/complex-ecommerce.ss) (426 lines → [430 lines SQL](examples/complex-ecommerce.sql)).
 
 | Example | Description | Tables |
 |---------|-------------|--------|
-| [user-order.tps](schemaspec/examples/user-order.tps) | Templates, FK, indexes | 3 |
-| [template-inheritance.tps](schemaspec/examples/template-inheritance.tps) | 3-level inheritance | 2 |
-| [constraints.tps](schemaspec/examples/constraints.tps) | CHECK constraints, composite PKs | 3 |
-| [complex-ecommerce.tps](schemaspec/examples/complex-ecommerce.tps) | Full e-commerce platform | 21 |
+| [user-order.ss](schemaspec/examples/user-order.ss) | Templates, FK, indexes | 3 |
+| [template-inheritance.ss](schemaspec/examples/template-inheritance.ss) | 3-level inheritance | 2 |
+| [constraints.ss](schemaspec/examples/constraints.ss) | CHECK constraints, composite PKs | 3 |
+| [complex-ecommerce.ss](schemaspec/examples/complex-ecommerce.ss) | Full e-commerce platform | 21 |
 
 ## Grammar
 
@@ -468,13 +468,13 @@ Generate ALTER TABLE migration scripts from schema diffs:
 
 ```bash
 # Print to stdout
-rune migrate old.tps new.tps
+rune migrate old.ss new.ss
 
 # Write to file
-rune migrate old.tps new.tps -o migration.sql
+rune migrate old.ss new.ss -o migration.sql
 
 # PostgreSQL migration
-rune migrate old.tps new.tps -d pg -o migration_pg.sql
+rune migrate old.ss new.ss -d pg -o migration_pg.sql
 ```
 
 **What it generates:**
@@ -499,7 +499,7 @@ All operations are wrapped in a transaction. The diff engine works at the AST le
 
 ## Reverse Engineering
 
-Convert existing SQL DDL back to TypeSpec `.tps` schemas:
+Convert existing SQL DDL back to TypeSpec `.ss` schemas:
 
 ```bash
 # Basic reverse (MySQL)
@@ -515,7 +515,7 @@ rune reverse -d sqlite schema.sql
 rune reverse -t schema.sql
 
 # Write to file
-rune reverse schema.sql -o schema.tps
+rune reverse schema.sql -o schema.ss
 ```
 
 ### Roundtrip Preservation
@@ -536,7 +536,7 @@ The `-- @tps col_name type` comments are:
 - **Parsed** by the reverse compiler to restore the exact TPS type
 - **Ignored** by other dialects (MySQL, PostgreSQL) which have lossless type mappings
 
-This ensures `rune -d sqlite schema.tps | rune reverse -d sqlite` produces output identical to the original `.tps` file.
+This ensures `rune -d sqlite schema.ss | rune reverse -d sqlite` produces output identical to the original `.ss` file.
 
 **What it handles:**
 
@@ -580,11 +580,11 @@ Use `e(M,F,X)` → `ENUM('M','F','X')`. For string values: `e(pending,active,clo
 Yes. Use `-d pg` or `-d postgres` to generate PostgreSQL DDL:
 
 ```bash
-rune schema.tps -d pg          # PostgreSQL output
-rune schema.tps -d mysql       # MySQL output (default)
-rune schema.tps -d sqlite      # SQLite output
+rune schema.ss -d pg          # PostgreSQL output
+rune schema.ss -d mysql       # MySQL output (default)
+rune schema.ss -d sqlite      # SQLite output
 rune reverse -d pg schema.sql  # Reverse-engineer PG DDL
-rune migrate old.tps new.tps   # Generate ALTER TABLE migration
+rune migrate old.ss new.ss   # Generate ALTER TABLE migration
 ```
 
 Type differences between dialects:

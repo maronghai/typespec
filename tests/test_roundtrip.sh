@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ── TypeSpec Roundtrip Test Runner ──
-# Tests: .tps → SQL → reverse → .tps → SQL produces semantically equivalent output.
+# Tests: .ss → SQL → reverse → .ss → SQL produces semantically equivalent output.
 # Usage: ./test_roundtrip.sh [test-filter]
 
 set -euo pipefail
@@ -9,7 +9,7 @@ source "$(cd "$(dirname "$0")" && pwd)/lib.sh"
 
 FILTER="${1:-}"
 
-# Test schemas: .tps files that roundtrip cleanly
+# Test schemas: .ss files that roundtrip cleanly
 # NOTE: 20-index-types / 39-index-autoname excluded — MySQL FULLTEXT index name
 # double-prefixes on roundtrip (ft_content → ft_ft_content).
 ROUNDTRIP_TESTS=(
@@ -27,27 +27,27 @@ for test_name in "${ROUNDTRIP_TESTS[@]}"; do
     continue
   fi
 
-  tps_file="$SCRIPT_DIR/${test_name}.tps"
+  tps_file="$SCRIPT_DIR/${test_name}.ss"
   if [ ! -f "$tps_file" ]; then
-    skip "$test_name" "missing .tps file"
+    skip "$test_name" "missing .ss file"
     continue
   fi
 
   for dialect in mysql pg sqlite; do
-    # Step 1: .tps → SQL (original)
+    # Step 1: .ss → SQL (original)
     sql1=$("$COMPILER" "$tps_file" -d "$dialect" 2>/dev/null) || {
       fail "$test_name ($dialect): step 1" "compile failed"
       continue
     }
 
-    # Step 2: SQL → .tps (reverse)
+    # Step 2: SQL → .ss (reverse)
     reversed=$("$COMPILER" reverse - -d "$dialect" <<< "$sql1" 2>/dev/null) || {
       # Some SQL may not be perfectly reversible; skip if reverse fails
       skip "$test_name ($dialect)" "reverse failed"
       continue
     }
 
-    # Step 3: reversed .tps → SQL (roundtrip)
+    # Step 3: reversed .ss → SQL (roundtrip)
     sql2=$("$COMPILER" - -d "$dialect" <<< "$reversed" 2>/dev/null) || {
       fail "$test_name ($dialect): step 3" "re-compile failed"
       continue

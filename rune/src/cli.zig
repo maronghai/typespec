@@ -147,13 +147,13 @@ fn parseTarget(s: []const u8) !Target {
 
 pub fn printUsage() void {
     std.debug.print("Usage:\n", .{});
-    std.debug.print("  rune [input.tps] [-o output] [-t] [-d mysql|pg|sqlite] [--target sql|json-schema]\n", .{});
-    std.debug.print("                                                       Compile .tps to SQL DDL or JSON Schema\n", .{});
-    std.debug.print("  rune diff <old.tps> <new.tps> [-d mysql|pg|sqlite]         Show schema differences\n", .{});
-    std.debug.print("  rune migrate <old.tps> <new.tps> [-o migration.sql] [-d mysql|pg|sqlite]\n", .{});
+    std.debug.print("  rune [input.ss] [-o output] [-t] [-d mysql|pg|sqlite] [--target sql|json-schema]\n", .{});
+    std.debug.print("                                                       Compile .ss to SQL DDL or JSON Schema\n", .{});
+    std.debug.print("  rune diff <old.ss> <new.ss> [-d mysql|pg|sqlite]         Show schema differences\n", .{});
+    std.debug.print("  rune migrate <old.ss> <new.ss> [-o migration.sql] [-d mysql|pg|sqlite]\n", .{});
     std.debug.print("                                                       Generate ALTER TABLE migration SQL\n", .{});
-    std.debug.print("  rune reverse [input.sql] [-o output.tps] [-t] [-d mysql|pg|sqlite]\n", .{});
-    std.debug.print("                                                       Reverse SQL DDL to .tps schema\n", .{});
+    std.debug.print("  rune reverse [input.sql] [-o output.ss] [-t] [-d mysql|pg|sqlite]\n", .{});
+    std.debug.print("                                                       Reverse SQL DDL to .ss schema\n", .{});
     std.debug.print("                                                       -t: extract shared templates\n", .{});
     std.debug.print("\nOptions:\n", .{});
     std.debug.print("  -d, --dialect   Target SQL dialect: mysql (default), pg, postgres, sqlite\n", .{});

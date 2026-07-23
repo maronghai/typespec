@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ── TypeSpec Migration Test Runner ──
-# Tests: rune migrate <old.tps> <new.tps> produces expected migration SQL.
+# Tests: rune migrate <old.ss> <new.ss> produces expected migration SQL.
 # Runs each test for all available dialects (mysql, pg, sqlite).
 # Usage: ./test_migrate.sh [test-filter]
 
@@ -13,19 +13,19 @@ EXPECTED_DIR="$SCRIPT_DIR/expected"
 
 FILTER="${1:-}"
 
-for old_file in "$TEST_DIR"/migrate-*-old.tps; do
+for old_file in "$TEST_DIR"/migrate-*-old.ss; do
   [ -f "$old_file" ] || continue
-  base=$(basename "$old_file" .tps)
+  base=$(basename "$old_file" .ss)
   base="${base%-old}"
 
   if [ -n "$FILTER" ] && [[ "$base" != *"$FILTER"* ]]; then
     continue
   fi
 
-  new_file="$TEST_DIR/${base}-new.tps"
+  new_file="$TEST_DIR/${base}-new.ss"
 
   if [ ! -f "$new_file" ]; then
-    skip "$base" "no new.tps"
+    skip "$base" "no new.ss"
     continue
   fi
 

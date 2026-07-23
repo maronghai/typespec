@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ── TypeSpec Reverse Test Runner ──
-# Tests: rune reverse <sql> [-d dialect] produces expected .tps output.
+# Tests: rune reverse <sql> [-d dialect] produces expected .ss output.
 # Usage: ./test_reverse.sh [test-filter]
 
 set -euo pipefail
@@ -20,7 +20,7 @@ for sql_file in "$TEST_DIR"/*.sql; do
   fi
 
   for dialect_suffix in mysql pg sqlite; do
-    expected_file="$TEST_DIR/$base.$dialect_suffix.tps"
+    expected_file="$TEST_DIR/$base.$dialect_suffix.ss"
     if [ ! -f "$expected_file" ]; then
       continue
     fi

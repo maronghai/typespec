@@ -69,7 +69,7 @@ TMPDIR=$(mktemp -d)
 trap "rm -rf $TMPDIR" EXIT
 
 # Tiny: 3 tables, ~5 fields
-cat > "$TMPDIR/tiny.tps" << 'EOF'
+cat > "$TMPDIR/tiny.ss" << 'EOF'
 $ bench_tiny
 
 % base
@@ -90,7 +90,7 @@ text S *
 EOF
 
 # Medium: 20 tables, ~10 fields
-cat > "$TMPDIR/medium.tps" << 'EOF'
+cat > "$TMPDIR/medium.ss" << 'EOF'
 $ bench_medium
 
 % base
@@ -194,15 +194,15 @@ active b *
 EOF
 
 # Large: use the complex example if available
-if [ -f "schemaspec/examples/complex-ecommerce.tps" ]; then
-    cp "schemaspec/examples/complex-ecommerce.tps" "$TMPDIR/large.tps"
+if [ -f "schemaspec/examples/complex-ecommerce.ss" ]; then
+    cp "schemaspec/examples/complex-ecommerce.ss" "$TMPDIR/large.ss"
 fi
 
 # Run benchmarks
-bench_file "tiny (3 tables, ~5 fields)" "$TMPDIR/tiny.tps"
-bench_file "medium (20 tables, ~10 fields)" "$TMPDIR/medium.tps"
-if [ -f "$TMPDIR/large.tps" ]; then
-    bench_file "large (complex-ecommerce)" "$TMPDIR/large.tps"
+bench_file "tiny (3 tables, ~5 fields)" "$TMPDIR/tiny.ss"
+bench_file "medium (20 tables, ~10 fields)" "$TMPDIR/medium.ss"
+if [ -f "$TMPDIR/large.ss" ]; then
+    bench_file "large (complex-ecommerce)" "$TMPDIR/large.ss"
 fi
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
