@@ -114,7 +114,7 @@ field_name  [type_symbol]  [modifier...]  [check]  [: | -- | ; comment]
 | `=` | DEFAULT value | any | `status 1 =0` |
 | `*` | NOT NULL | any | `name s32 *` |
 | `*=` | NOT NULL + DEFAULT | any | `status 1 *=0` |
-| `u` | UNSIGNED | numeric | `count nu` |
+| `+n`/`+N`/`+i` | UNSIGNED | numeric | `count +n` |
 | `@` / `@u` | INDEX / UNIQUE INDEX | any | `name s32 @` |
 | `[...]` | CHECK constraint | any | `age n [0,150]` |
 | `:` | COMMENT clause | — | `name : 用户名` |
