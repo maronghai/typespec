@@ -43,12 +43,15 @@ name_char        = letter | digit | "_" ;
 
 (* ── Type Symbol ── *)
 
-type_symbol      = numeric_type
+type_symbol      = unsigned_type
+                 | numeric_type
                  | money_type
                  | string_type
                  | enum_type
                  | atomic_type ;
 
+unsigned_type    = "+", ( "n" | "N" | "i" ) ;          (* UNSIGNED int|bigint|smallint *)
+                  (* Also accepts trailing modifier: +n++ (AI+PK), +N* (NOT NULL), +n! (PK) *)
 numeric_type     = int_short | int_explicit | decimal_explicit ;
 int_short        = "n" | "N" ;                     (* MySQL: int | bigint *)
 int_explicit     = positive_int ;                  (* MySQL: int(n) *)
@@ -79,7 +82,7 @@ atomic_type      = "b" | "B" | "j" | "d" | "t" ;
 (* `+` on t/d = DEFAULT CURRENT_TIMESTAMP;                        *)
 (* `++` on n/N/\d+ = AUTO_INCREMENT PRIMARY KEY;                  *)
 (* `++` on t/d = DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP *)
-(* `u` on n/N/\d+ = UNSIGNED;                                     *)
+(* `+n`/`+N`/`+i` = UNSIGNED (prefix on numeric type symbols)    *)
 (* `@u` on any field = UNIQUE INDEX (inline)                       *)
 (* `@` on any field = INDEX (inline)                               *)
 (* `@f` is NOT a valid inline modifier — use standalone @f form.  *)
@@ -89,7 +92,7 @@ atomic_type      = "b" | "B" | "j" | "d" | "t" ;
 (* Modifier Resolution for details.                               *)
 
 modifier         = fused_not_null_default | default_val | auto_inc_pk | auto_inc
-                 | primary_key | not_null | unsigned | inline_unique | inline_index ;
+                 | primary_key | not_null | inline_unique | inline_index ;
 
 fused_not_null_default = "*", "=", default_value ;
                        (* e.g. *=0 → NOT NULL + DEFAULT 0 *)
@@ -97,7 +100,6 @@ auto_inc_pk      = "++" ;
 auto_inc         = "+" ;
 primary_key      = "!" ;
 not_null         = "*" ;
-unsigned         = "u" ;
 inline_unique    = "@", "u" ;
 inline_index     = "@" ;  (* inline regular INDEX on this field *)
 default_val      = "=", default_value ;  (* no space: =0, not = 0 *)
