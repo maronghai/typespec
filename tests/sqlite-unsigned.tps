@@ -3,7 +3,7 @@ $ demo
 
 # counters
 id       n++
-small_u  nu
-big_u    Nu
+small_u  +n
+big_u    +N
 plain_n  n
-unsigned 12u
+small_un +i

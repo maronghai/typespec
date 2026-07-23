@@ -5,9 +5,10 @@ CREATE TABLE "counters" (
   "small_u" INTEGER,
   "big_u" INTEGER,
   "plain_n" INTEGER,
-  "unsigned" INTEGER
+  "small_un" INTEGER
 );
 -- @tps id n
--- @tps small_u n
--- @tps big_u N
+-- @tps small_u +n
+-- @tps big_u +N
 -- @tps plain_n n
+-- @tps small_un +i

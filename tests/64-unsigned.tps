@@ -2,7 +2,7 @@
 $ demo
 
 # counters
-small_num  nu
-big_num    Nu
+small_num  +n
+big_num    +N
 plain_int  n
-unsigned32 12u
+small_uns  +i

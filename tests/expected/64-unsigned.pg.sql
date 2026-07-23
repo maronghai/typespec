@@ -6,5 +6,5 @@ CREATE TABLE "counters" (
   "small_num" integer,
   "big_num" bigint,
   "plain_int" integer,
-  "unsigned32" integer
+  "small_uns" smallint
 );

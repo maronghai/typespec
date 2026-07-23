@@ -104,11 +104,6 @@ fn writeColumnModifiers(w: anytype, col: sp.SqlColumn, indexes: []const sp.SqlIn
         try w.writeAll(" *");
     }
 
-    // UNSIGNED
-    if (col.unsigned) {
-        try w.writeAll(" u");
-    }
-
     // INLINE UNIQUE / INDEX from standalone indexes
     var has_inline_index = false;
     for (indexes) |idx| {

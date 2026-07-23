@@ -138,7 +138,7 @@ pub const TypeResolver = struct {
         const enum_vals = if (is_enum) field.type_info.enum_type else &[_][]const u8{};
 
         // Compute original TPS type string for roundtrip preservation
-        const tps_type: ?[]const u8 = switch (field.type_info) {
+        var tps_type: ?[]const u8 = switch (field.type_info) {
             .simple => |s| if (s.len == 1) s else null,
             .varchar_explicit => |n| if (n > 0) blk: {
                 var tbuf: [16]u8 = undefined;
@@ -153,6 +153,14 @@ pub const TypeResolver = struct {
             .none => "s",
             else => null,
         };
+        // Unsigned → prepend + prefix for roundtrip (+n, +N, +i)
+        if (unsigned) {
+            if (tps_type) |tt| {
+                if (tt.len == 1 and (tt[0] == 'n' or tt[0] == 'N' or tt[0] == 'i')) {
+                    tps_type = try std.fmt.allocPrint(self.alloc, "+{s}", .{tt});
+                }
+            }
+        }
 
         return .{
             .name = field.name,

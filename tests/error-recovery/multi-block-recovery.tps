@@ -14,7 +14,7 @@ name s32 *
 # another_valid_table
 
 id   n++
-email s u
+email s
 
 # table_with_duplicate_fields
 

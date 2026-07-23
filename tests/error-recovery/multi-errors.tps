@@ -4,7 +4,7 @@ $ mydb
 
 id      n++
 name    s32 ++
-email   s u
+email   s
 balance m +
 
 # order

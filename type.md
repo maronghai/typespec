@@ -164,11 +164,11 @@ Type symbols can be fused with certain modifiers to save 1 keystroke:
 | `s128*` | `s128 *` | varchar(128) NOT NULL |
 | `n++` | `n ++` | int AUTO_INCREMENT PRIMARY KEY (existing) |
 | `n+` | `n +` | int AUTO_INCREMENT (existing) |
-| `nu` | `n u` | int UNSIGNED |
-| `Nu` | `N u` | bigint UNSIGNED |
-| `12u` | `12 u` | int(12) UNSIGNED |
+| `+n` | `n u` | int UNSIGNED |
+| `+N` | `N u` | bigint UNSIGNED |
+| `+i` | `i u` | smallint UNSIGNED |
 
-The parser recognizes `!`, `*`, and `u` suffixes on type tokens, in addition to the existing `+` and `++` handling.
+The parser recognizes `!`, `*`, and `+` prefix on type tokens for unsigned, in addition to the existing `+` and `++` suffix handling.
 
 ---
 
@@ -376,7 +376,7 @@ typespec schema.tps -d postgres  # alias
 | `p` | `int` | `serial` | Auto-incrementing integer |
 | `e(...)` | `ENUM(...)` | `text` + `CHECK` | PG: text column with CHECK constraint |
 | `\d+` (int width) | `int(n)` | `integer` | PG ignores display width |
-| `nu` / `Nu` / `iu` | `UNSIGNED` | *(ignored)* | PG has no UNSIGNED |
+| `+n` / `+N` / `+i` | `UNSIGNED` | *(ignored)* | PG has no UNSIGNED |
 | `n++` | `AUTO_INCREMENT` | `GENERATED ALWAYS AS IDENTITY` | SQL standard identity |
 | `t+` | `DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP` | `DEFAULT CURRENT_TIMESTAMP` | PG has no ON UPDATE |
 

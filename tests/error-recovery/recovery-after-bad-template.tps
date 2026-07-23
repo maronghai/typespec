@@ -8,7 +8,7 @@ name s32 *
 # valid_after_bad_template
 
 id   n++
-email s u
+email s
 
 % >> invalid_syntax
 ...

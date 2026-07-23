@@ -54,6 +54,40 @@ pub fn parseFusedTypeModifier(tok: []const u8, line_no: usize) ?FusedTypeResult 
         };
     }
 
+    // Prefix patterns: +n, +N, +i (unsigned), +n++, +N*, +n!, etc.
+    if (tok[0] == '+' and tok.len >= 2) {
+        const rest = tok[1..];
+        // ++, +! are NOT prefix-unsigned — fall through to suffix handling
+        if (rest[0] != '+' and rest[0] != '!') {
+            // Strip trailing modifier chars to get the base type
+            var end = rest.len;
+            while (end > 1 and (rest[end - 1] == '+' or rest[end - 1] == '*' or rest[end - 1] == '!')) {
+                end -= 1;
+            }
+            if (tryParseType(rest[0..end])) |ti| {
+                const is_numeric = switch (ti) {
+                    .simple => |s| (std.mem.eql(u8, s, "n") or std.mem.eql(u8, s, "N") or std.mem.eql(u8, s, "i")),
+                    .int_explicit => true,
+                    else => false,
+                };
+                if (is_numeric) {
+                    var modifier: ?Modifier = null;
+                    if (end < rest.len) {
+                        const suffix = rest[end..];
+                        if (std.mem.eql(u8, suffix, "++")) {
+                            modifier = .{ .kind = .auto_inc_pk, .line_no = line_no };
+                        } else if (std.mem.eql(u8, suffix, "*")) {
+                            modifier = .{ .kind = .not_null, .line_no = line_no };
+                        } else if (std.mem.eql(u8, suffix, "!")) {
+                            modifier = .{ .kind = .primary_key, .line_no = line_no };
+                        }
+                    }
+                    return .{ .type_info = ti, .modifier = modifier };
+                }
+            }
+        }
+    }
+
     // Check all suffix patterns: ++, +, !, *, u
     const last = tok[tok.len - 1];
     if (last == '+' and tok.len >= 3 and tok[tok.len - 2] == '+') {
@@ -80,20 +114,6 @@ pub fn parseFusedTypeModifier(tok: []const u8, line_no: usize) ?FusedTypeResult 
             return .{ .type_info = ti, .modifier = .{ .kind = .not_null, .line_no = line_no } };
         }
     }
-    if (last == 'u' and tok.len >= 2 and tok[tok.len - 2] != '+') {
-        const prefix = tok[0 .. tok.len - 1];
-        if (tryParseType(prefix)) |ti| {
-            const is_numeric = switch (ti) {
-                .simple => |s| (std.mem.eql(u8, s, "n") or std.mem.eql(u8, s, "N") or std.mem.eql(u8, s, "i")),
-                .int_explicit => true,
-                else => false,
-            };
-            if (is_numeric) {
-                return .{ .type_info = ti, .modifier = .{ .kind = .unsigned, .line_no = line_no } };
-            }
-        }
-    }
-
     return null;
 }
 
@@ -251,6 +271,25 @@ pub fn parseField(alloc: std.mem.Allocator, line: tk.Line) !Field {
                 // Only set type and add modifier if type wasn't already set
                 if (type_info == .none) {
                     type_info = ti;
+                    // +n/+N/+i prefix = unsigned modifier
+                    if (tok.len >= 2 and tok[0] == '+') {
+                        const after_plus = tok[1..];
+                        if (after_plus[0] != '+' and after_plus[0] != '!') {
+                            // Strip trailing modifier chars to get the base type
+                            var p_end = after_plus.len;
+                            while (p_end > 1 and (after_plus[p_end - 1] == '+' or after_plus[p_end - 1] == '*' or after_plus[p_end - 1] == '!')) {
+                                p_end -= 1;
+                            }
+                            if (tryParseType(after_plus[0..p_end])) |pti| {
+                                const is_num = switch (pti) {
+                                    .simple => |s| (std.mem.eql(u8, s, "n") or std.mem.eql(u8, s, "N") or std.mem.eql(u8, s, "i")),
+                                    .int_explicit => true,
+                                    else => false,
+                                };
+                                if (is_num) try modifiers.append(alloc, .{ .kind = .unsigned, .line_no = line.line_no });
+                            }
+                        }
+                    }
                     if (result.modifier) |mod| try modifiers.append(alloc, mod);
                 }
             } else {
@@ -266,20 +305,6 @@ pub fn parseField(alloc: std.mem.Allocator, line: tk.Line) !Field {
         if (type_info == .none) {
             if (tryParseType(tok)) |ti| {
                 type_info = ti;
-                i += 1;
-                continue;
-            }
-        }
-
-        // 2b. Standalone u modifier (unsigned on any preceding numeric type)
-        if (std.mem.eql(u8, tok, "u") and type_info != .none) {
-            const is_numeric = switch (type_info) {
-                .simple => |s| (std.mem.eql(u8, s, "n") or std.mem.eql(u8, s, "N") or std.mem.eql(u8, s, "i")),
-                .int_explicit => true,
-                else => false,
-            };
-            if (is_numeric) {
-                try modifiers.append(alloc, .{ .kind = .unsigned, .line_no = line.line_no });
                 i += 1;
                 continue;
             }
