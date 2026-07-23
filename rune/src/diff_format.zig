@@ -10,7 +10,7 @@ const optionalStrEq = utils.optionalStrEq;
 
 // ─── Diff Formatter ──────────────────────────────────────────
 //
-// Renders SchemaDiff as human-readable text for `typespec diff`.
+// Renders SchemaDiff as human-readable text for `rune diff`.
 // Separated from diff.zig to allow alternative output formats
 // (JSON, machine-readable) without modifying the diff engine.
 

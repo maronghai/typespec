@@ -24,7 +24,7 @@ pub fn generate(alloc: std.mem.Allocator, typed: typed_ast.TypedAst) ![]const u8
     if (typed.schema_name) |name| {
         try w.print("  \"title\": \"{s}\",\n", .{name});
     } else {
-        try w.writeAll("  \"title\": \"typespec-schema\",\n");
+        try w.writeAll("  \"title\": \"rune-schema\",\n");
     }
 
     try w.writeAll("  \"type\": \"object\",\n");

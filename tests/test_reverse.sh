@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ── TypeSpec Reverse Test Runner ──
-# Tests: typespec reverse <sql> [-d dialect] produces expected .tps output.
+# Tests: rune reverse <sql> [-d dialect] produces expected .tps output.
 # Usage: ./test_reverse.sh [test-filter]
 
 set -euo pipefail

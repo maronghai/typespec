@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ── TypeSpec Diff Test Runner ──
-# Tests: typespec diff <old.tps> <new.tps> produces expected diff output.
+# Tests: rune diff <old.tps> <new.tps> produces expected diff output.
 # Usage: ./test_diff.sh [test-filter]
 
 set -euo pipefail

@@ -468,13 +468,13 @@ Generate ALTER TABLE migration scripts from schema diffs:
 
 ```bash
 # Print to stdout
-typespec migrate old.tps new.tps
+rune migrate old.tps new.tps
 
 # Write to file
-typespec migrate old.tps new.tps -o migration.sql
+rune migrate old.tps new.tps -o migration.sql
 
 # PostgreSQL migration
-typespec migrate old.tps new.tps -d pg -o migration_pg.sql
+rune migrate old.tps new.tps -d pg -o migration_pg.sql
 ```
 
 **What it generates:**
@@ -503,24 +503,24 @@ Convert existing SQL DDL back to TypeSpec `.tps` schemas:
 
 ```bash
 # Basic reverse (MySQL)
-typespec reverse schema.sql
+rune reverse schema.sql
 
 # PostgreSQL
-typespec reverse -d pg schema.sql
+rune reverse -d pg schema.sql
 
 # SQLite
-typespec reverse -d sqlite schema.sql
+rune reverse -d sqlite schema.sql
 
 # With template extraction
-typespec reverse -t schema.sql
+rune reverse -t schema.sql
 
 # Write to file
-typespec reverse schema.sql -o schema.tps
+rune reverse schema.sql -o schema.tps
 ```
 
 ### Roundtrip Preservation
 
-SQLite's type affinity is lossy — multiple TPS types map to the same SQL type (e.g., `N` and `n` both become `INTEGER`). To preserve the original TPS type information during roundtrips (`typespec | typespec reverse`), the compiler emits metadata comments:
+SQLite's type affinity is lossy — multiple TPS types map to the same SQL type (e.g., `N` and `n` both become `INTEGER`). To preserve the original TPS type information during roundtrips (`rune | rune reverse`), the compiler emits metadata comments:
 
 ```sql
 CREATE TABLE "users" (
@@ -536,7 +536,7 @@ The `-- @tps col_name type` comments are:
 - **Parsed** by the reverse compiler to restore the exact TPS type
 - **Ignored** by other dialects (MySQL, PostgreSQL) which have lossless type mappings
 
-This ensures `typespec -d sqlite schema.tps | typespec reverse -d sqlite` produces output identical to the original `.tps` file.
+This ensures `rune -d sqlite schema.tps | rune reverse -d sqlite` produces output identical to the original `.tps` file.
 
 **What it handles:**
 
@@ -580,11 +580,11 @@ Use `e(M,F,X)` → `ENUM('M','F','X')`. For string values: `e(pending,active,clo
 Yes. Use `-d pg` or `-d postgres` to generate PostgreSQL DDL:
 
 ```bash
-typespec schema.tps -d pg          # PostgreSQL output
-typespec schema.tps -d mysql       # MySQL output (default)
-typespec schema.tps -d sqlite      # SQLite output
-typespec reverse -d pg schema.sql  # Reverse-engineer PG DDL
-typespec migrate old.tps new.tps   # Generate ALTER TABLE migration
+rune schema.tps -d pg          # PostgreSQL output
+rune schema.tps -d mysql       # MySQL output (default)
+rune schema.tps -d sqlite      # SQLite output
+rune reverse -d pg schema.sql  # Reverse-engineer PG DDL
+rune migrate old.tps new.tps   # Generate ALTER TABLE migration
 ```
 
 Type differences between dialects:

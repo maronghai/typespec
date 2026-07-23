@@ -263,7 +263,7 @@ The `validate_schema` pass runs after all table-level passes and performs global
 
 ## Template Extraction Algorithm (Reverse Pipeline)
 
-When `typespec reverse -t` is used, the reverse codegen extracts common field sequences across tables and promotes them as reusable templates.
+When `rune reverse -t` is used, the reverse codegen extracts common field sequences across tables and promotes them as reusable templates.
 
 ### Algorithm
 

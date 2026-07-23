@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ── TypeSpec Migration Test Runner ──
-# Tests: typespec migrate <old.tps> <new.tps> produces expected migration SQL.
+# Tests: rune migrate <old.tps> <new.tps> produces expected migration SQL.
 # Runs each test for all available dialects (mysql, pg, sqlite).
 # Usage: ./test_migrate.sh [test-filter]
 

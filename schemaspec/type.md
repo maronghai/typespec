@@ -350,15 +350,15 @@ TypeSpec generates SQL DDL for different database dialects using the `-d` flag.
 ### MySQL (default)
 
 ```bash
-typespec schema.tps              # MySQL DDL
-typespec schema.tps -d mysql     # explicit MySQL
+rune schema.tps              # MySQL DDL
+rune schema.tps -d mysql     # explicit MySQL
 ```
 
 ### PostgreSQL
 
 ```bash
-typespec schema.tps -d pg        # PostgreSQL DDL
-typespec schema.tps -d postgres  # alias
+rune schema.tps -d pg        # PostgreSQL DDL
+rune schema.tps -d postgres  # alias
 ```
 
 ### Type Mapping by Dialect
@@ -521,8 +521,8 @@ table
 Use the `-d pg` flag:
 
 ```bash
-typespec schema.tps -d pg        # PostgreSQL output
-typespec reverse -d pg schema.sql  # Reverse-engineer PG DDL
+rune schema.tps -d pg        # PostgreSQL output
+rune reverse -d pg schema.sql  # Reverse-engineer PG DDL
 ```
 
 TypeSpec maps `n` → `integer`, `t` → `timestamp`, `T` → `timestamptz`, `U` → `uuid`, `p` → `serial`, `B` → `bytea`, `e(...)` → `text` + `CHECK`, and `n++` → `GENERATED ALWAYS AS IDENTITY` for PostgreSQL.
