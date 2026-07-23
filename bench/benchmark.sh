@@ -4,12 +4,12 @@
 
 set -e
 
-COMPILER="zig-typespec/zig-out/bin/typespec.exe"
+COMPILER="rune/zig-out/bin/rune.exe"
 ITERATIONS=50
 
 if [ ! -f "$COMPILER" ]; then
     echo "Compiler not found. Building..."
-    cd zig-typespec && zig build -Doptimize=ReleaseSafe && cd ..
+    cd rune && zig build -Doptimize=ReleaseSafe && cd ..
 fi
 
 echo ""
@@ -194,8 +194,8 @@ active b *
 EOF
 
 # Large: use the complex example if available
-if [ -f "examples/complex-ecommerce.tps" ]; then
-    cp "examples/complex-ecommerce.tps" "$TMPDIR/large.tps"
+if [ -f "schemaspec/examples/complex-ecommerce.tps" ]; then
+    cp "schemaspec/examples/complex-ecommerce.tps" "$TMPDIR/large.tps"
 fi
 
 # Run benchmarks

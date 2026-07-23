@@ -66,7 +66,7 @@ const VERSION = "0.4.63";
 fn dispatch(io: std.Io, alloc: std.mem.Allocator, parsed: cli.ParsedArgs) !void {
     switch (parsed.command) {
         .version => {
-            std.debug.print("typespec {s}\n", .{VERSION});
+            std.debug.print("rune {s}\n", .{VERSION});
             return;
         },
         .compile => |cmd| {

@@ -664,9 +664,9 @@ ip_addr   I             ; inet (PG: native inet; MySQL: varchar(45); SQLite: TEX
 ### Q9: Version control?
 
 ```bash
-cd zig-typespec && zig build
-./zig-out/bin/typespec ../schema_v1.tps -o v1.sql
-./zig-out/bin/typespec ../schema_v2.tps -o v2.sql
+cd rune && zig build
+./rune/zig-out/bin/rune ../schema_v1.tps -o v1.sql
+./rune/zig-out/bin/rune ../schema_v2.tps -o v2.sql
 diff v1.sql v2.sql
 ```
 

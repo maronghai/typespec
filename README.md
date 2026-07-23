@@ -112,16 +112,16 @@ paid_on               : 支付日期（suffix _on → date）
 ### 2. Generate SQL
 
 ```bash
-cd zig-typespec && zig build
-./zig-out/bin/typespec ../myapp.tps -o myapp.sql
+cd rune && zig build
+./rune/zig-out/bin/rune ../myapp.tps -o myapp.sql
 
 # PostgreSQL output
-./zig-out/bin/typespec ../myapp.tps -d pg -o myapp_pg.sql
+./rune/zig-out/bin/rune ../myapp.tps -d pg -o myapp_pg.sql
 ```
 
 ### 3. Output
 
-See [examples/user-order.tps](examples/user-order.tps) for complete TypeSpec → SQL output.
+See [examples/user-order.tps](schemaspec/examples/user-order.tps) for complete TypeSpec → SQL output.
 
 ## Type System
 
@@ -164,7 +164,7 @@ Explicit type always wins: `user_id s32` → varchar(32), not int.
 
 ## Schema Syntax
 
-See [schema.md](schema.md) for complete syntax reference.
+See [schema.md](schemaspec/schema.md) for complete syntax reference.
 
 ### Structural Marks
 
@@ -402,18 +402,18 @@ Views are supported in all three dialects (MySQL, PostgreSQL, SQLite) and in sch
 
 ## Examples
 
-A full e-commerce schema with 21 tables: see [examples/complex-ecommerce.tps](examples/complex-ecommerce.tps) (426 lines → [430 lines SQL](examples/complex-ecommerce.sql)).
+A full e-commerce schema with 21 tables: see [examples/complex-ecommerce.tps](schemaspec/examples/complex-ecommerce.tps) (426 lines → [430 lines SQL](examples/complex-ecommerce.sql)).
 
 | Example | Description | Tables |
 |---------|-------------|--------|
-| [user-order.tps](examples/user-order.tps) | Templates, FK, indexes | 3 |
-| [template-inheritance.tps](examples/template-inheritance.tps) | 3-level inheritance | 2 |
-| [constraints.tps](examples/constraints.tps) | CHECK constraints, composite PKs | 3 |
-| [complex-ecommerce.tps](examples/complex-ecommerce.tps) | Full e-commerce platform | 21 |
+| [user-order.tps](schemaspec/examples/user-order.tps) | Templates, FK, indexes | 3 |
+| [template-inheritance.tps](schemaspec/examples/template-inheritance.tps) | 3-level inheritance | 2 |
+| [constraints.tps](schemaspec/examples/constraints.tps) | CHECK constraints, composite PKs | 3 |
+| [complex-ecommerce.tps](schemaspec/examples/complex-ecommerce.tps) | Full e-commerce platform | 21 |
 
 ## Grammar
 
-The complete grammar is defined in [grammar.ebnf](grammar.ebnf). Key productions:
+The complete grammar is defined in [grammar.ebnf](schemaspec/grammar.ebnf). Key productions:
 
 ```
 spec          = { blank_line | schema_decl | engine_decl | template_def | table_decl }
@@ -446,7 +446,7 @@ composite_pk_decl = "!", field_name, {WS, field_name}, newline
 index_decl    = "@", ["u" | "f"], index_name, ["(", fields, ")"], newline
 ```
 
-See [schema.md §10](schema.md#10-grammar--diagnostics) for grammar notes and [type.md §3](type.md#3-type-symbol-grammar) for type symbol definitions.
+See [schema.md §10](schemaspec/schema.md#10-grammar--diagnostics) for grammar notes and [type.md §3](schemaspec/type.md#3-type-symbol-grammar) for type symbol definitions.
 
 ## Design Principles
 

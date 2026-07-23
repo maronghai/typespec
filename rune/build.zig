@@ -11,7 +11,7 @@ pub fn build(b: *std.Build) void {
     });
 
     const exe = b.addExecutable(.{
-        .name = "typespec",
+        .name = "rune",
         .root_module = mod,
     });
 
@@ -24,7 +24,7 @@ pub fn build(b: *std.Build) void {
         run_cmd.addArgs(args);
     }
 
-    const run_step = b.step("run", "Run the typespec compiler");
+    const run_step = b.step("run", "Run the rune compiler");
     run_step.dependOn(&run_cmd.step);
 
     // Unit tests (inline Zig test blocks)

@@ -18,13 +18,13 @@ jobs:
           version: 0.16.0
 
       - name: Check formatting
-        run: zig fmt --check zig-typespec/src/
+        run: zig fmt --check rune/src/
 
       - name: Build
-        run: cd zig-typespec && zig build -Doptimize=ReleaseSafe
+        run: cd rune && zig build -Doptimize=ReleaseSafe
 
       - name: Unit tests
-        run: cd zig-typespec && zig build test
+        run: cd rune && zig build test
 
       - name: MySQL golden tests
         run: bash tests/test.sh

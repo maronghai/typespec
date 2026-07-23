@@ -5,12 +5,12 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-COMPILER="$PROJECT_DIR/zig-typespec/zig-out/bin/typespec.exe"
+COMPILER="$PROJECT_DIR/rune/zig-out/bin/rune.exe"
 
 # Ensure compiler exists
 if [ ! -f "$COMPILER" ]; then
   echo "ERROR: Compiler not found at $COMPILER"
-  echo "Run 'cd zig-typespec && zig build' first."
+  echo "Run 'cd rune && zig build' first."
   exit 1
 fi
 

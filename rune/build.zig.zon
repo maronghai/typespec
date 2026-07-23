@@ -1,7 +1,7 @@
 .{
-    .name = .typespec,
+    .name = .rune,
     .version = "0.4.36",
-    .fingerprint = 0x8f72e825d4ccaae0,
+    .fingerprint = 0x74eece4ee11a788d,
     .dependencies = .{},
     .paths = .{
         "build.zig",

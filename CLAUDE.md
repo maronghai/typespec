@@ -9,13 +9,13 @@ TypeSpec is a minimal DSL for declaring database schemas using single-character 
 ## Build & Test Commands
 
 ```bash
-cd zig-typespec && zig build                          # Build (debug)
-cd zig-typespec && zig build -Doptimize=ReleaseSafe   # Build (release)
-cd zig-typespec && zig build test                     # Unit tests (inline Zig test blocks)
-cd zig-typespec && zig fmt --check src/               # Formatting check
-cd zig-typespec && zig build bench                    # Benchmark (per-stage pipeline timing)
-cd zig-typespec && zig build bench -- --save           # Save current timing as baseline
-cd zig-typespec && zig build bench -- --check          # Check for regressions vs baseline (>20% = exit 1)
+cd rune && zig build                          # Build (debug)
+cd rune && zig build -Doptimize=ReleaseSafe   # Build (release)
+cd rune && zig build test                     # Unit tests (inline Zig test blocks)
+cd rune && zig fmt --check src/               # Formatting check
+cd rune && zig build bench                    # Benchmark (per-stage pipeline timing)
+cd rune && zig build bench -- --save           # Save current timing as baseline
+cd rune && zig build bench -- --check          # Check for regressions vs baseline (>20% = exit 1)
 ```
 
 ### Golden File Tests (shell-based, compare compiler output against .sql golden files)
@@ -37,12 +37,12 @@ Run a single golden test by filter: `bash tests/test.sh 01` (matches test name s
 ### Quick Usage
 
 ```bash
-./zig-out/bin/typespec schema.tps                        # Compile to stdout
-./zig-out/bin/typespec schema.tps -o out.sql             # Compile to file
-./zig-out/bin/typespec schema.tps -d pg                  # PostgreSQL output
-./zig-out/bin/typespec schema.tps -d sqlite              # SQLite output
-./zig-out/bin/typespec migrate old.tps new.tps           # Migration SQL
-./zig-out/bin/typespec reverse schema.sql -t             # Reverse-engineer with template extraction
+./rune/zig-out/bin/rune schema.tps                        # Compile to stdout
+./rune/zig-out/bin/rune schema.tps -o out.sql             # Compile to file
+./rune/zig-out/bin/rune schema.tps -d pg                  # PostgreSQL output
+./rune/zig-out/bin/rune schema.tps -d sqlite              # SQLite output
+./rune/zig-out/bin/rune migrate old.tps new.tps           # Migration SQL
+./rune/zig-out/bin/rune reverse schema.sql -t             # Reverse-engineer with template extraction
 ```
 
 ## Architecture
@@ -59,21 +59,21 @@ Run a single golden test by filter: `bash tests/test.sh 01` (matches test name s
 
 ### Key Design Patterns
 
-- **DialectBackend vtable** ([dialect.zig](zig-typespec/src/dialect.zig)): 23 core + 6 optional function pointers + 3 behavioral flags for dialect-specific SQL rendering. Includes `emitForeignKey` (shared FK rendering via `dialect_common.zig:emitForeignKeyShared`) and `reverseLookup` for dialect-specific reverse engineering. [codegen.zig](zig-typespec/src/codegen.zig) is fully dialect-agnostic (zero `switch(dialect)` in production code). Per-dialect implementations: [dialect_mysql.zig](zig-typespec/src/dialect_mysql.zig), [dialect_pg.zig](zig-typespec/src/dialect_pg.zig), [dialect_sqlite.zig](zig-typespec/src/dialect_sqlite.zig); shared PG/SQLite logic in [dialect_common.zig](zig-typespec/src/dialect_common.zig). Adding a new SQL dialect = new enum variant + new `dialect_<name>.zig` (~200 lines).
+- **DialectBackend vtable** ([dialect.zig](rune/src/dialect.zig)): 23 core + 6 optional function pointers + 3 behavioral flags for dialect-specific SQL rendering. Includes `emitForeignKey` (shared FK rendering via `dialect_common.zig:emitForeignKeyShared`) and `reverseLookup` for dialect-specific reverse engineering. [codegen.zig](rune/src/codegen.zig) is fully dialect-agnostic (zero `switch(dialect)` in production code). Per-dialect implementations: [dialect_mysql.zig](rune/src/dialect_mysql.zig), [dialect_pg.zig](rune/src/dialect_pg.zig), [dialect_sqlite.zig](rune/src/dialect_sqlite.zig); shared PG/SQLite logic in [dialect_common.zig](rune/src/dialect_common.zig). Adding a new SQL dialect = new enum variant + new `dialect_<name>.zig` (~200 lines).
 
-- **Semantic Pass Manager** ([semantic.zig](zig-typespec/src/semantic.zig)): Extensible array of `SemanticPass` structs with `depends_on` dependency declarations. Pass implementations live in [pass/*.zig](zig-typespec/src/pass/) sub-modules; `semantic.zig` is the orchestrator (~150 lines production). Current passes (7): `validate_template_types` → `autofk` → `suffix_inference` → `validate` → `validate_type_modifiers` → `validate_indexes` → `validate_schema`. The `validate_schema` pass performs global consistency checks: circular FK detection (DFS, warning), FK target field existence (error), self-referencing FK field count validation (error). Debug mode validates dependency ordering. New passes: create `pass/<name>.zig` with `pub fn run(ctx: *PassContext) !void` and add to `DEFAULT_PASSES`.
+- **Semantic Pass Manager** ([semantic.zig](rune/src/semantic.zig)): Extensible array of `SemanticPass` structs with `depends_on` dependency declarations. Pass implementations live in [pass/*.zig](rune/src/pass/) sub-modules; `semantic.zig` is the orchestrator (~150 lines production). Current passes (7): `validate_template_types` → `autofk` → `suffix_inference` → `validate` → `validate_type_modifiers` → `validate_indexes` → `validate_schema`. The `validate_schema` pass performs global consistency checks: circular FK detection (DFS, warning), FK target field existence (error), self-referencing FK field count validation (error). Debug mode validates dependency ordering. New passes: create `pass/<name>.zig` with `pub fn run(ctx: *PassContext) !void` and add to `DEFAULT_PASSES`.
 
-- **TypedAst IR** ([typed_ast.zig](zig-typespec/src/typed_ast.zig)): Separates type resolution from code generation. Codegen only outputs strings — no type inference logic.
+- **TypedAst IR** ([typed_ast.zig](rune/src/typed_ast.zig)): Separates type resolution from code generation. Codegen only outputs strings — no type inference logic.
 
-- **Template Slot Merging** ([template.zig](zig-typespec/src/template.zig)): Template inheritance with `...` slot controls field insertion order. Merge formula: `parent_before + child_before + <concrete> + child_after + parent_after`. Max 4 parents via mixin syntax (`+`).
+- **Template Slot Merging** ([template.zig](rune/src/template.zig)): Template inheritance with `...` slot controls field insertion order. Merge formula: `parent_before + child_before + <concrete> + child_after + parent_after`. Max 4 parents via mixin syntax (`+`).
 
 - **Custom Type System**: `~` directives in schema block define user-defined type aliases with optional dialect overrides. Resolved during type resolution, not parsing.
 
-- **Self-contained SqlType** ([sql_type.zig](zig-typespec/src/sql_type.zig)): `SqlType.toSql()` delegates to `DialectBackend.renderType` for dialect-aware rendering. Variants: `int`, `bigint`, `smallint`, `decimal`, `varchar`, `text`, `blob`, `json`, `jsonb`, `datetime`, `date`, `timestamptz`, `boolean`, `uuid`, `inet`, `serial`, `enum_values`, `raw_sql`, `passthrough`. TPS symbols: `n`, `N`, `i`, `m`, `M`, `s`, `S`, `b`, `B`, `j`, `J`, `I`, `d`, `t`, `T`, `U`, `p`. `toJsonSchema()` provides dialect-agnostic JSON Schema output.
+- **Self-contained SqlType** ([sql_type.zig](rune/src/sql_type.zig)): `SqlType.toSql()` delegates to `DialectBackend.renderType` for dialect-aware rendering. Variants: `int`, `bigint`, `smallint`, `decimal`, `varchar`, `text`, `blob`, `json`, `jsonb`, `datetime`, `date`, `timestamptz`, `boolean`, `uuid`, `inet`, `serial`, `enum_values`, `raw_sql`, `passthrough`. TPS symbols: `n`, `N`, `i`, `m`, `M`, `s`, `S`, `b`, `B`, `j`, `J`, `I`, `d`, `t`, `T`, `U`, `p`. `toJsonSchema()` provides dialect-agnostic JSON Schema output.
 
-- **Dialect-Aware Diff** ([diff_semantic.zig](zig-typespec/src/diff_semantic.zig)): Type equivalence checking uses canonical TPS symbol mapping — different symbols that resolve to the same SQL type are equivalent (e.g. `N4` ↔ `4`), but distinct types like `n` (int) vs `N` (bigint) are NOT equivalent. Diff engine accepts optional `Dialect` parameter.
+- **Dialect-Aware Diff** ([diff_semantic.zig](rune/src/diff_semantic.zig)): Type equivalence checking uses canonical TPS symbol mapping — different symbols that resolve to the same SQL type are equivalent (e.g. `N4` ↔ `4`), but distinct types like `n` (int) vs `N` (bigint) are NOT equivalent. Diff engine accepts optional `Dialect` parameter.
 
-- **Two-Pass FK Diffing** ([diff_fks.zig](zig-typespec/src/diff_fks.zig)): First pass matches identical FKs (structure + actions). Second pass matches structurally identical FKs with different actions → `modify` (single ALTER TABLE with DROP+ADD). Remaining unmatched FKs → `drop`/`add`. Produces minimal migration SQL.
+- **Two-Pass FK Diffing** ([diff_fks.zig](rune/src/diff_fks.zig)): First pass matches identical FKs (structure + actions). Second pass matches structurally identical FKs with different actions → `modify` (single ALTER TABLE with DROP+ADD). Remaining unmatched FKs → `drop`/`add`. Produces minimal migration SQL.
 
 - **Reverse Lookup Vtable**: `DialectBackend.reverseLookup` (optional) allows dialect-specific reverse engineering (e.g. SQLite's heuristic-based INTEGER/TEXT disambiguation). Fallback to general REVERSE_MAP matching when vtable is null.
 

@@ -147,20 +147,20 @@ fn parseTarget(s: []const u8) !Target {
 
 pub fn printUsage() void {
     std.debug.print("Usage:\n", .{});
-    std.debug.print("  typespec [input.tps] [-o output] [-t] [-d mysql|pg|sqlite] [--target sql|json-schema]\n", .{});
-    std.debug.print("                                                           Compile .tps to SQL DDL or JSON Schema\n", .{});
-    std.debug.print("  typespec diff <old.tps> <new.tps> [-d mysql|pg|sqlite]         Show schema differences\n", .{});
-    std.debug.print("  typespec migrate <old.tps> <new.tps> [-o migration.sql] [-d mysql|pg|sqlite]\n", .{});
-    std.debug.print("                                                           Generate ALTER TABLE migration SQL\n", .{});
-    std.debug.print("  typespec reverse [input.sql] [-o output.tps] [-t] [-d mysql|pg|sqlite]\n", .{});
-    std.debug.print("                                                           Reverse SQL DDL to .tps schema\n", .{});
-    std.debug.print("                                                           -t: extract shared templates\n", .{});
+    std.debug.print("  rune [input.tps] [-o output] [-t] [-d mysql|pg|sqlite] [--target sql|json-schema]\n", .{});
+    std.debug.print("                                                       Compile .tps to SQL DDL or JSON Schema\n", .{});
+    std.debug.print("  rune diff <old.tps> <new.tps> [-d mysql|pg|sqlite]         Show schema differences\n", .{});
+    std.debug.print("  rune migrate <old.tps> <new.tps> [-o migration.sql] [-d mysql|pg|sqlite]\n", .{});
+    std.debug.print("                                                       Generate ALTER TABLE migration SQL\n", .{});
+    std.debug.print("  rune reverse [input.sql] [-o output.tps] [-t] [-d mysql|pg|sqlite]\n", .{});
+    std.debug.print("                                                       Reverse SQL DDL to .tps schema\n", .{});
+    std.debug.print("                                                       -t: extract shared templates\n", .{});
     std.debug.print("\nOptions:\n", .{});
     std.debug.print("  -d, --dialect   Target SQL dialect: mysql (default), pg, postgres, sqlite\n", .{});
     std.debug.print("  --target        Output format: sql (default), json-schema\n", .{});
     std.debug.print("  -v, --version   Print version and exit\n", .{});
     std.debug.print("\nPipe mode: read from stdin when no input file is given.\n", .{});
-    std.debug.print("  echo '# t\\nid n' | typespec\n", .{});
-    std.debug.print("  echo '# t\\nid n' | typespec --target json-schema\n", .{});
-    std.debug.print("  cat schema.sql | typespec reverse -t\n", .{});
+    std.debug.print("  echo '# t\\nid n' | rune\n", .{});
+    std.debug.print("  echo '# t\\nid n' | rune --target json-schema\n", .{});
+    std.debug.print("  cat schema.sql | rune reverse -t\n", .{});
 }
