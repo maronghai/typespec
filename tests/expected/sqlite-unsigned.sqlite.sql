@@ -7,8 +7,8 @@ CREATE TABLE "counters" (
   "plain_n" INTEGER,
   "small_un" INTEGER
 );
--- @tps id n
--- @tps small_u +n
--- @tps big_u +N
--- @tps plain_n n
--- @tps small_un +i
+-- @sym id n
+-- @sym small_u +n
+-- @sym big_u +N
+-- @sym plain_n n
+-- @sym small_un +i

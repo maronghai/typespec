@@ -7,6 +7,6 @@ CREATE TABLE "logs" (
   "ts" TEXT,
   UNIQUE ("ts")
 );
--- @tps id n
--- @tps ts t
+-- @sym id n
+-- @sym ts t
 CREATE INDEX "idx_level" ON "logs" ("level");

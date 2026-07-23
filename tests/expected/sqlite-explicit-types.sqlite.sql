@@ -8,8 +8,8 @@ CREATE TABLE "explicit" (
   "ver" INTEGER,
   "bigamt" NUMERIC(20, 6)
 );
--- @tps id n
--- @tps amt 10,2
--- @tps code s64
--- @tps ver N
--- @tps bigamt 20,6
+-- @sym id n
+-- @sym amt 10,2
+-- @sym code s64
+-- @sym ver N
+-- @sym bigamt 20,6

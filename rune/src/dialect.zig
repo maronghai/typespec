@@ -11,7 +11,7 @@ const SqlType = sql_type_mod.SqlType;
 // ─── Reverse Result (shared by reverse_map.zig + dialect backends) ──
 
 pub const ReverseResult = struct {
-    tps: []const u8,
+    sym: []const u8,
     omit: bool,
     /// Confidence score 0-100. Higher = more certain.
     score: u8 = 100,
@@ -22,14 +22,14 @@ pub const ReverseResult = struct {
 
 // ─── canOmitType: shared helper for reverse lookup ────────────
 
-pub fn canOmitType(col_name: []const u8, tps_symbol: []const u8, is_auto_inc: bool, is_default_ts: bool) bool {
+pub fn canOmitType(col_name: []const u8, sym: []const u8, is_auto_inc: bool, is_default_ts: bool) bool {
     if (is_auto_inc or is_default_ts) return false;
     if (col_name.len > 3) {
-        if (std.mem.endsWith(u8, col_name, "_id") and std.mem.eql(u8, tps_symbol, "n")) return true;
-        if (std.mem.endsWith(u8, col_name, "_on") and std.mem.eql(u8, tps_symbol, "d")) return true;
-        if (std.mem.endsWith(u8, col_name, "_at") and std.mem.eql(u8, tps_symbol, "t")) return true;
+        if (std.mem.endsWith(u8, col_name, "_id") and std.mem.eql(u8, sym, "n")) return true;
+        if (std.mem.endsWith(u8, col_name, "_on") and std.mem.eql(u8, sym, "d")) return true;
+        if (std.mem.endsWith(u8, col_name, "_at") and std.mem.eql(u8, sym, "t")) return true;
     }
-    return std.mem.eql(u8, tps_symbol, "s");
+    return std.mem.eql(u8, sym, "s");
 }
 
 // ─── DialectBackend: vtable for dialect-specific SQL generation ─
@@ -85,8 +85,8 @@ pub const DialectBackend = struct {
     emitUnsigned: ?*const fn (w: *Writer) anyerror!void = null,
     /// AUTO_INCREMENT keyword — only MySQL uses; PG uses GENERATED AS IDENTITY, SQLite uses PRIMARY KEY AUTOINCREMENT.
     emitAutoIncrement: ?*const fn (w: *Writer) anyerror!void = null,
-    /// SQLite-specific TPS type metadata comment (e.g. `-- @tps col_type`).
-    emitTpsTypeMetadata: ?*const fn (w: *Writer, col_name: []const u8, tps_type: []const u8) anyerror!void = null,
+    /// SQLite-specific TPS type metadata comment (e.g. `-- @sym col_type`).
+    emitTypeMetadata: ?*const fn (w: *Writer, col_name: []const u8, sym_type: []const u8) anyerror!void = null,
     /// SQLite-specific confidence comment (e.g. ` -- [score:42]`).
     emitConfidenceComment: ?*const fn (w: *Writer, confidence: []const u8) anyerror!void = null,
     /// Dialect-specific reverse lookup. Returns null to fall back to general logic.

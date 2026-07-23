@@ -511,23 +511,23 @@ pub fn readLineComment(self: *sp.SqlParser) ?[]const u8 {
 
 /// Capture trailing -- comments after a statement and attach to tables/columns.
 /// SQLite format: "-- table.col: comment" or "-- comment" (table-level).
-/// Also handles "-- @tps col_name type" for roundtrip metadata.
+/// Also handles "-- @sym col_name type" for roundtrip metadata.
 pub fn captureTrailingComments(self: *sp.SqlParser, tables: []common.SqlTable) void {
     while (self.readLineComment()) |cmt| {
         if (cmt.len == 0) continue;
-        // Check for @tps metadata comment: "-- @tps col_name type"
-        if (std.mem.startsWith(u8, cmt, "@tps ")) {
+        // Check for @sym metadata comment: "-- @sym col_name type"
+        if (std.mem.startsWith(u8, cmt, "@sym ")) {
             const rest = std.mem.trim(u8, cmt[5..], " \t");
             if (std.mem.indexOfScalar(u8, rest, ' ')) |space_pos| {
                 const col_name = std.mem.trim(u8, rest[0..space_pos], " \t");
-                const tps_type = std.mem.trim(u8, rest[space_pos + 1 ..], " \t");
-                if (col_name.len > 0 and tps_type.len > 0) {
+                const sym_type = std.mem.trim(u8, rest[space_pos + 1 ..], " \t");
+                if (col_name.len > 0 and sym_type.len > 0) {
                     // Attach to the most recently added table
                     if (tables.len > 0) {
                         const last = &tables[tables.len - 1];
                         for (last.columns) |*col| {
                             if (std.mem.eql(u8, col.name, col_name)) {
-                                col.tps_override = tps_type;
+                                col.sym_override = sym_type;
                                 break;
                             }
                         }

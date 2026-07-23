@@ -7,7 +7,7 @@ CREATE TABLE "products" (
   "big_p" NUMERIC(20, 6),
   "amt" NUMERIC(10, 2)
 );
--- @tps id n
--- @tps price m
--- @tps big_p M
--- @tps amt 10,2
+-- @sym id n
+-- @sym price m
+-- @sym big_p M
+-- @sym amt 10,2

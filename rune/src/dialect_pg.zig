@@ -153,7 +153,7 @@ pub const pg_backend = DialectBackend{
     // Optional: PG implements emitCreateDatabase, emitAutoIncrement
     .emitCreateDatabase = pgEmitCreateDatabase,
     .emitAutoIncrement = pgEmitAutoIncrement,
-    // emitUnsigned, emitTpsTypeMetadata, emitConfidenceComment default to null (no-op)
+    // emitUnsigned, emitTypeMetadata, emitConfidenceComment default to null (no-op)
     .rename_needs_column_def = false,
     .modify_needs_column_def = true,
     .modify_column_def_skips_name = true,

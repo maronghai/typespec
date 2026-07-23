@@ -43,7 +43,7 @@ TypeSpec is a compiler that transforms `.ss` schema files into SQL DDL. It consi
 **Key modules**:
 - `sql_type.zig`: `SqlType` union with `toSql()` delegating to `DialectBackend.renderType`. Variants: int, bigint, smallint, decimal, varchar, text, blob, json, jsonb, datetime, date, timestamptz, boolean, uuid, inet, serial, enum_values, raw_sql, passthrough. `toJsonSchema()` for JSON Schema output.
 - `type_map.zig`: Helper functions (`lookupCustomType`, `isNumericTpsType`, etc.) + `SqlType` re-export
-- `type_registry.zig`: TPS symbol → `SqlType` direct mapping (`lookupSqlTypeDirect`) and reverse lookup. 17 core TPS symbols: n, N, i, m, M, s, S, b, B, j, J, I, d, t, T, U, p
+- `type_registry.zig`: SS symbol → `SqlType` direct mapping (`lookupSqlTypeDirect`) and reverse lookup. 17 core SS symbols: n, N, i, m, M, s, S, b, B, j, J, I, d, t, T, U, p
 
 ### Extracted Sub-Modules
 
@@ -61,7 +61,7 @@ TypeSpec is a compiler that transforms `.ss` schema files into SQL DDL. It consi
 | `diff.zig` | `diff_fields.zig` | Field-level diffing + rename detection + equality helpers |
 | `diff.zig` | `diff_indexes.zig` | Index diffing |
 | `diff.zig` | `diff_fks.zig` | FK diffing |
-| `diff.zig` | `diff_semantic.zig` | Dialect-aware type equivalence (canonical TPS symbol mapping) |
+| `diff.zig` | `diff_semantic.zig` | Dialect-aware type equivalence (canonical SS symbol mapping) |
 | `diff.zig` | `diff_format.zig` | Human-readable diff formatting |
 | `codegen.zig` | `codegen_columns.zig` | Column definition rendering (emitColumnDef, emitColumnDefEx, emitDefault) + shared `isDominatedByExplicitIndex()` |
 | `codegen.zig` | `codegen_indexes.zig` | Inline and standalone index emission |
@@ -137,7 +137,7 @@ Input (SQL DDL text)
     │
     ▼
 [2] Reverse Codegen (reverse_codegen.zig, 298 lines, 4 sub-functions)
-    SQL types → TPS symbols (via reverse_map.zig reverse lookup)
+    SQL types → SS symbols (via reverse_map.zig reverse lookup)
     Template extraction (greedy + scoring algorithm)
     Index inline detection: recognizes both MySQL-style "idx_field" and
     PG/SQLite-style "idx_table_field" as inline index suffixes (@, @u).
@@ -298,13 +298,13 @@ When `rune reverse -t` is used, the reverse codegen extracts common field sequen
 
 TypeSpec uses a three-layer type mapping system:
 
-- **`sql_type.zig` (SqlType.toSql)**: Delegates to `DialectBackend.renderType` for dialect-aware rendering. Variants: int, bigint, smallint, decimal, varchar, text, blob, json, jsonb, datetime, date, timestamptz, boolean, uuid, inet, serial, enum_values, raw_sql, passthrough. TPS symbols: n, N, i, m, M, s, S, b, B, j, J, I, d, t, T, U, p.
+- **`sql_type.zig` (SqlType.toSql)**: Delegates to `DialectBackend.renderType` for dialect-aware rendering. Variants: int, bigint, smallint, decimal, varchar, text, blob, json, jsonb, datetime, date, timestamptz, boolean, uuid, inet, serial, enum_values, raw_sql, passthrough. SS symbols: n, N, i, m, M, s, S, b, B, j, J, I, d, t, T, U, p.
 
-- **`type_registry.zig` (CORE_TYPES)**: Static array of 17 TPS symbol entries with dialect-specific SQL names. Provides two lookup functions:
-  - `lookupSqlType(tps, dialect)` → `?[]const u8` (SQL name string, for backward compat)
-  - `lookupSqlTypeDirect(tps, dialect)` → `?SqlType` (direct variant, avoids stringly-typed round-trip)
+- **`type_registry.zig` (CORE_TYPES)**: Static array of 17 SS symbol entries with dialect-specific SQL names. Provides two lookup functions:
+  - `lookupSqlType(sym, dialect)` → `?[]const u8` (SQL name string, for backward compat)
+  - `lookupSqlTypeDirect(sym, dialect)` → `?SqlType` (direct variant, avoids stringly-typed round-trip)
 
-- **`reverse_map.zig` (REVERSE_MAP)**: ~35 entries covering all SQL type variants → TPS symbols. Used by `reverseLookup()` and `reverseLookupSqlite()`. Includes core entries (for SQLite lossy affinity) plus MySQL/PG variant types.
+- **`reverse_map.zig` (REVERSE_MAP)**: ~35 entries covering all SQL type variants → SS symbols. Used by `reverseLookup()` and `reverseLookupSqlite()`. Includes core entries (for SQLite lossy affinity) plus MySQL/PG variant types.
 
 - **`type_map.zig`**: Helper functions (`lookupCustomType`, `isNumericTpsType`, `isDatetimeTpsType`) + `SqlType` re-export for backward compatibility. No longer contains rendering logic.
 
@@ -312,16 +312,16 @@ TypeSpec uses a three-layer type mapping system:
 
 1. **TypedAst IR layer**: Separates type resolution from code generation. Codegen only outputs strings — no type inference logic.
 2. **DialectBackend vtable**: 23 core + 6 optional function pointers + 3 behavioral flags cover all dialect differences. Adding a new dialect requires < 100 lines. codegen.zig is fully dialect-agnostic (zero `switch(dialect)` in production code). FK rendering is shared via `dialect_common.zig:emitForeignKeyShared`.
-3. **Self-contained SqlType**: `SqlType.toSql()` delegates to `DialectBackend.renderType`. Adding a new type = add variant to union + add case to all `renderType` implementations + add to `type_registry.zig`. TPS symbol naming: lowercase for core types (n, s, b, j, d, t), uppercase for variants (N, M, S, B, T, U, i, p). Unsigned uses `+` prefix (`+n`, `+N`, `+i`).
-4. **Direct type lookup**: `type_registry.lookupSqlTypeDirect()` returns `SqlType` variants directly, avoiding the stringly-typed round-trip (TPS symbol → SQL string → SqlType).
-5. **AST-level diff**: Semantic comparison, not text diff. Detects renames by signature matching. Dialect-aware type equivalence (`diff_semantic.zig`) uses canonical TPS symbol mapping — different symbols that resolve to the same SQL type are equivalent (e.g., `N4` ↔ `4` in MySQL), but distinct types like `n` (int) vs `N` (bigint) are NOT equivalent.
+3. **Self-contained SqlType**: `SqlType.toSql()` delegates to `DialectBackend.renderType`. Adding a new type = add variant to union + add case to all `renderType` implementations + add to `type_registry.zig`. SS symbol naming: lowercase for core types (n, s, b, j, d, t), uppercase for variants (N, M, S, B, T, U, i, p). Unsigned uses `+` prefix (`+n`, `+N`, `+i`).
+4. **Direct type lookup**: `type_registry.lookupSqlTypeDirect()` returns `SqlType` variants directly, avoiding the stringly-typed round-trip (SS symbol → SQL string → SqlType).
+5. **AST-level diff**: Semantic comparison, not text diff. Detects renames by signature matching. Dialect-aware type equivalence (`diff_semantic.zig`) uses canonical SS symbol mapping — different symbols that resolve to the same SQL type are equivalent (e.g., `N4` ↔ `4` in MySQL), but distinct types like `n` (int) vs `N` (bigint) are NOT equivalent.
 6. **Arena allocation**: All modules take `std.mem.Allocator`. Arena-style usage for command-lifetime memory.
 7. **God function decomposition**: Large functions (>100 lines) are split into focused sub-functions. `migrate.zig:generateFromDiff` (258→7 sub-fns), `codegen.zig:generateTypedTable` (135→5 sub-fns), `reverse_codegen.zig:generateInner` (215→4 sub-fns).
 8. **Pipeline-CLI separation**: `pipeline_forward.zig` has no dependency on `cli.zig`. Output format dispatch (SQL vs JSON Schema) is the caller's responsibility.
 9. **Template/Semantic separation**: Template resolution (inheritance, slot merging) is independent of semantic passes (autofk, suffix_inference, validation). Each can be modified without affecting the other.
 10. **Custom type system**: Users can define named type aliases via `~` directives in the schema block. Custom types support dialect-specific overrides and are resolved during type resolution (not parsing).
-11. **SQLite roundtrip preservation**: `-- @tps col_name type` metadata comments preserve original TPS types through lossy SQLite type affinity. Forward compiler emits comments; reverse compiler parses them for exact type restoration.
-12. **Unified ReverseResult**: `dialect.zig` defines the single `ReverseResult` struct (`tps`, `omit`, `score`, `is_parameterized`). Both `type_registry.zig` and `reverse_column.zig` re-export it — zero type duplication across the reverse pipeline.
+11. **SQLite roundtrip preservation**: `-- @sym col_name type` metadata comments preserve original SS types through lossy SQLite type affinity. Forward compiler emits comments; reverse compiler parses them for exact type restoration.
+12. **Unified ReverseResult**: `dialect.zig` defines the single `ReverseResult` struct (`sym`, `omit`, `score`, `is_parameterized`). Both `type_registry.zig` and `reverse_column.zig` re-export it — zero type duplication across the reverse pipeline.
 
 ## Custom Type System
 

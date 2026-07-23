@@ -98,12 +98,12 @@ pub fn handleReverse(io: std.Io, alloc: std.mem.Allocator, file_data: []const u8
     }
 
     var rcg = reverse_codegen.ReverseCodegen.init(alloc, sql_dialect);
-    const tps = if (with_templates)
+    const ss_text = if (with_templates)
         try rcg.generateWithTemplates(schema)
     else
         try rcg.generate(schema);
 
-    try io_mod.writeOutput(io, tps, output_path);
+    try io_mod.writeOutput(io, ss_text, output_path);
 }
 
 // ─── Unit Tests ─────────────────────────────────────────────

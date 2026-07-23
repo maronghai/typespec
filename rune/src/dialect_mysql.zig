@@ -275,7 +275,7 @@ pub const mysql_backend = DialectBackend{
     .emitCreateDatabase = mysqlEmitCreateDatabase,
     .emitUnsigned = mysqlEmitUnsigned,
     .emitAutoIncrement = mysqlEmitAutoIncrement,
-    // emitTpsTypeMetadata and emitConfidenceComment default to null (no-op)
+    // emitTypeMetadata and emitConfidenceComment default to null (no-op)
     .rename_needs_column_def = true,
     .modify_needs_column_def = true,
     .modify_column_def_skips_name = false,

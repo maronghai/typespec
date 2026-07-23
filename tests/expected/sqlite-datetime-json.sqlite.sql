@@ -7,7 +7,7 @@ CREATE TABLE "events" (
   "updated_at" TEXT,
   "payload" TEXT
 );
--- @tps id n
--- @tps created_at t
--- @tps updated_at t
--- @tps payload j
+-- @sym id n
+-- @sym created_at t
+-- @sym updated_at t
+-- @sym payload j

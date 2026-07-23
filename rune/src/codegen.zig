@@ -133,9 +133,9 @@ pub const Codegen = struct {
             }
         }
         for (table.columns) |col| {
-            if (col.tps_type) |tps| {
-                if (self.backend.emitTpsTypeMetadata) |emit| {
-                    try emit(w, col.name, tps);
+            if (col.sym_type) |sym| {
+                if (self.backend.emitTypeMetadata) |emit| {
+                    try emit(w, col.name, sym);
                 }
             }
         }

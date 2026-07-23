@@ -6,9 +6,9 @@ CREATE TABLE "post" (
   "title" TEXT NOT NULL,
   "content" TEXT
 );
--- @tps id n
--- @tps ts t
--- @tps content S
+-- @sym id n
+-- @sym ts t
+-- @sym content S
 
 CREATE TABLE "comment" (
   "id" INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -16,7 +16,7 @@ CREATE TABLE "comment" (
   "text" TEXT NOT NULL,
   "post_id" INTEGER NOT NULL
 );
--- @tps id n
--- @tps ts t
--- @tps text S
--- @tps post_id n
+-- @sym id n
+-- @sym ts t
+-- @sym text S
+-- @sym post_id n

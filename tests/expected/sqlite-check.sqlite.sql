@@ -6,6 +6,6 @@ CREATE TABLE "scores" (
   "grade" TEXT NOT NULL CHECK (grade IN ('A', 'B', 'C', 'D', 'F')),
   "ratio" NUMERIC(16, 2) NOT NULL CHECK (ratio > 0)
 );
--- @tps id n
--- @tps value n
--- @tps ratio m
+-- @sym id n
+-- @sym value n
+-- @sym ratio m

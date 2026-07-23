@@ -6,6 +6,6 @@ CREATE TABLE "users" (
   "email" varchar(128) NOT NULL
 );
 -- User account table
--- @tps id n
--- @tps name s32
--- @tps email s128
+-- @sym id n
+-- @sym name s32
+-- @sym email s128

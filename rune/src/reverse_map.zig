@@ -31,7 +31,7 @@ pub fn reverseLookup(sql_type: []const u8, col_name: []const u8, is_auto_inc: bo
         if (std.mem.eql(u8, t, m.mysql) or std.mem.eql(u8, t, m.pg)) {
             if (m.rev_priority < best_priority) {
                 best_priority = m.rev_priority;
-                best_match = .{ .tps = m.tps, .omit = canOmitType(col_name, m.tps, is_auto_inc, is_default_ts) };
+                best_match = .{ .sym = m.sym, .omit = canOmitType(col_name, m.sym, is_auto_inc, is_default_ts) };
             }
         }
     }
@@ -41,31 +41,31 @@ pub fn reverseLookup(sql_type: []const u8, col_name: []const u8, is_auto_inc: bo
 
     // int(N) → N
     if (std.mem.startsWith(u8, t, "int(") and std.mem.endsWith(u8, t, ")"))
-        return .{ .tps = t[4 .. t.len - 1], .omit = false };
+        return .{ .sym = t[4 .. t.len - 1], .omit = false };
 
     // decimal(P,S) or decimal(P, S) → P,S
     if (std.mem.startsWith(u8, t, "decimal(") and std.mem.endsWith(u8, t, ")"))
-        return .{ .tps = t[8 .. t.len - 1], .omit = false };
+        return .{ .sym = t[8 .. t.len - 1], .omit = false };
 
     // numeric(P,S) → P,S
     if (std.mem.startsWith(u8, t, "numeric(") and std.mem.endsWith(u8, t, ")"))
-        return .{ .tps = t[8 .. t.len - 1], .omit = false };
+        return .{ .sym = t[8 .. t.len - 1], .omit = false };
 
     // varchar(255) → s (with omit check)
     if (std.mem.eql(u8, t, "varchar(255)"))
-        return .{ .tps = "s", .omit = canOmitType(col_name, "s", is_auto_inc, is_default_ts) };
+        return .{ .sym = "s", .omit = canOmitType(col_name, "s", is_auto_inc, is_default_ts) };
 
     // character varying(N) → sN
     if (std.mem.startsWith(u8, t, "character varying(") and std.mem.endsWith(u8, t, ")")) {
         const inner = std.mem.trim(u8, t[17 .. t.len - 1], " ");
         if (std.mem.eql(u8, inner, "255"))
-            return .{ .tps = "s", .omit = canOmitType(col_name, "s", is_auto_inc, is_default_ts) };
+            return .{ .sym = "s", .omit = canOmitType(col_name, "s", is_auto_inc, is_default_ts) };
         const sbuf = struct {
             var buf: [16]u8 = undefined;
         };
         sbuf.buf[0] = 's';
         for (inner, 0..) |ch, i| sbuf.buf[i + 1] = ch;
-        return .{ .tps = sbuf.buf[0 .. 1 + inner.len], .omit = false };
+        return .{ .sym = sbuf.buf[0 .. 1 + inner.len], .omit = false };
     }
 
     // varchar(N) → sN
@@ -76,14 +76,14 @@ pub fn reverseLookup(sql_type: []const u8, col_name: []const u8, is_auto_inc: bo
         };
         sbuf.buf[0] = 's';
         for (inner, 0..) |ch, i| sbuf.buf[i + 1] = ch;
-        return .{ .tps = sbuf.buf[0 .. 1 + inner.len], .omit = false };
+        return .{ .sym = sbuf.buf[0 .. 1 + inner.len], .omit = false };
     }
 
     // ENUM(...) → pass through
     if (std.mem.startsWith(u8, t, "ENUM(") or std.mem.startsWith(u8, t, "enum("))
-        return .{ .tps = t, .omit = false };
+        return .{ .sym = t, .omit = false };
 
-    return .{ .tps = t, .omit = false };
+    return .{ .sym = t, .omit = false };
 }
 
 // ─── Helper: classify SQL type strings (re-exports from sqlite_hints) ──
@@ -94,9 +94,9 @@ pub const isCurrentTimestamp = sqlite_hints.isCurrentTimestamp;
 // ─── Semantic Equivalence ────────────────────────────────────
 
 pub fn semanticEquiv(a_sql_type: []const u8, a_col_name: []const u8, a_dialect: Dialect, b_sql_type: []const u8, b_col_name: []const u8, b_dialect: Dialect) bool {
-    const a_tps = reverseLookup(a_sql_type, a_col_name, false, false, a_dialect).tps;
-    const b_tps = reverseLookup(b_sql_type, b_col_name, false, false, b_dialect).tps;
-    return std.mem.eql(u8, a_tps, b_tps);
+    const a_sym = reverseLookup(a_sql_type, a_col_name, false, false, a_dialect).sym;
+    const b_sym = reverseLookup(b_sql_type, b_col_name, false, false, b_dialect).sym;
+    return std.mem.eql(u8, a_sym, b_sym);
 }
 
 // ─── Tests ────────────────────────────────────────────────────
@@ -105,37 +105,37 @@ const testing = std.testing;
 
 test "reverse: int maps to n" {
     const r = reverseLookup("int", "col", false, false, .mysql);
-    try testing.expectEqualStrings("int", r.tps);
+    try testing.expectEqualStrings("int", r.sym);
 }
 
 test "reverse: varchar(255) maps to s" {
     const r = reverseLookup("varchar(255)", "col", false, false, .mysql);
-    try testing.expectEqualStrings("s", r.tps);
+    try testing.expectEqualStrings("s", r.sym);
 }
 
 test "reverse: varchar(128) maps to s128" {
     const r = reverseLookup("varchar(128)", "col", false, false, .mysql);
-    try testing.expectEqualStrings("s128", r.tps);
+    try testing.expectEqualStrings("s128", r.sym);
 }
 
 test "reverse: decimal(16, 2) maps to 16,2" {
     const r = reverseLookup("decimal(16, 2)", "col", false, false, .mysql);
-    try testing.expectEqualStrings("16,2", r.tps);
+    try testing.expectEqualStrings("16,2", r.sym);
 }
 
 test "reverse: numeric(16, 2) maps to 16,2" {
     const r = reverseLookup("numeric(16, 2)", "col", false, false, .pg);
-    try testing.expectEqualStrings("16,2", r.tps);
+    try testing.expectEqualStrings("16,2", r.sym);
 }
 
 test "reverse: ENUM(...) passes through" {
     const r = reverseLookup("ENUM('M', 'F')", "col", false, false, .mysql);
-    try testing.expectEqualStrings("ENUM('M', 'F')", r.tps);
+    try testing.expectEqualStrings("ENUM('M', 'F')", r.sym);
 }
 
 test "reverse: tinyint maps to n" {
     const r = reverseLookup("tinyint", "col", false, false, .mysql);
-    try testing.expectEqualStrings("n", r.tps);
+    try testing.expectEqualStrings("n", r.sym);
 }
 
 test "canOmitType: _id suffix with n omits" {
@@ -190,103 +190,103 @@ test "isCurrentTimestamp: random string" {
 
 test "reverse sqlite: INTEGER + auto_increment maps to n" {
     const r = reverseLookup("INTEGER", "id", true, false, .sqlite);
-    try testing.expectEqualStrings("n", r.tps);
+    try testing.expectEqualStrings("n", r.sym);
     try testing.expect(!r.omit);
 }
 
 test "reverse sqlite: INTEGER + _id suffix maps to n with omit" {
     const r = reverseLookup("INTEGER", "user_id", false, false, .sqlite);
-    try testing.expectEqualStrings("n", r.tps);
+    try testing.expectEqualStrings("n", r.sym);
     try testing.expect(r.omit);
 }
 
 test "reverse sqlite: INTEGER bare maps to n" {
     const r = reverseLookup("INTEGER", "count", false, false, .sqlite);
-    try testing.expectEqualStrings("n", r.tps);
+    try testing.expectEqualStrings("n", r.sym);
 }
 
 test "reverse sqlite: lowercase integer maps to n" {
     const r = reverseLookup("integer", "status", false, false, .sqlite);
-    try testing.expectEqualStrings("n", r.tps);
+    try testing.expectEqualStrings("n", r.sym);
 }
 
 test "reverse sqlite: NUMERIC maps to m" {
     const r = reverseLookup("NUMERIC", "balance", false, false, .sqlite);
-    try testing.expectEqualStrings("m", r.tps);
+    try testing.expectEqualStrings("m", r.sym);
 }
 
 test "reverse sqlite: TEXT + _at suffix maps to t with omit" {
     const r = reverseLookup("TEXT", "created_at", false, false, .sqlite);
-    try testing.expectEqualStrings("t", r.tps);
+    try testing.expectEqualStrings("t", r.sym);
     try testing.expect(r.omit);
 }
 
 test "reverse sqlite: TEXT + _on suffix maps to d with omit" {
     const r = reverseLookup("TEXT", "birth_on", false, false, .sqlite);
-    try testing.expectEqualStrings("d", r.tps);
+    try testing.expectEqualStrings("d", r.sym);
     try testing.expect(r.omit);
 }
 
 test "reverse sqlite: TEXT + is_default_ts maps to t" {
     const r = reverseLookup("TEXT", "created_at", false, true, .sqlite);
-    try testing.expectEqualStrings("t", r.tps);
+    try testing.expectEqualStrings("t", r.sym);
     try testing.expect(!r.omit);
 }
 
 test "reverse sqlite: TEXT bare maps to s with omit" {
     const r = reverseLookup("TEXT", "name", false, false, .sqlite);
-    try testing.expectEqualStrings("s", r.tps);
+    try testing.expectEqualStrings("s", r.sym);
     try testing.expect(r.omit);
 }
 
 test "reverse sqlite: BLOB maps to B" {
     const r = reverseLookup("BLOB", "data", false, false, .sqlite);
-    try testing.expectEqualStrings("B", r.tps);
+    try testing.expectEqualStrings("B", r.sym);
 }
 
 test "reverse sqlite: INTEGER + is_ prefix maps to b" {
     const r = reverseLookup("INTEGER", "is_admin", false, false, .sqlite);
-    try testing.expectEqualStrings("b", r.tps);
+    try testing.expectEqualStrings("b", r.sym);
 }
 
 test "reverse sqlite: INTEGER + has_ prefix maps to b" {
     const r = reverseLookup("INTEGER", "has_permission", false, false, .sqlite);
-    try testing.expectEqualStrings("b", r.tps);
+    try testing.expectEqualStrings("b", r.sym);
 }
 
 test "reverse sqlite: INTEGER + can_ prefix maps to b" {
     const r = reverseLookup("INTEGER", "can_edit", false, false, .sqlite);
-    try testing.expectEqualStrings("b", r.tps);
+    try testing.expectEqualStrings("b", r.sym);
 }
 
 test "reverse sqlite: TEXT + settings maps to j" {
     const r = reverseLookup("TEXT", "settings", false, false, .sqlite);
-    try testing.expectEqualStrings("j", r.tps);
+    try testing.expectEqualStrings("j", r.sym);
 }
 
 test "reverse sqlite: TEXT + metadata maps to j" {
     const r = reverseLookup("TEXT", "metadata", false, false, .sqlite);
-    try testing.expectEqualStrings("j", r.tps);
+    try testing.expectEqualStrings("j", r.sym);
 }
 
 test "reverse sqlite: TEXT + extra_data maps to j" {
     const r = reverseLookup("TEXT", "extra_data", false, false, .sqlite);
-    try testing.expectEqualStrings("j", r.tps);
+    try testing.expectEqualStrings("j", r.sym);
 }
 
 test "reverse sqlite: TEXT + description maps to S" {
     const r = reverseLookup("TEXT", "description", false, false, .sqlite);
-    try testing.expectEqualStrings("S", r.tps);
+    try testing.expectEqualStrings("S", r.sym);
 }
 
 test "reverse sqlite: TEXT + note maps to S" {
     const r = reverseLookup("TEXT", "note", false, false, .sqlite);
-    try testing.expectEqualStrings("S", r.tps);
+    try testing.expectEqualStrings("S", r.sym);
 }
 
 test "reverse sqlite: TEXT + content maps to S" {
     const r = reverseLookup("TEXT", "content", false, false, .sqlite);
-    try testing.expectEqualStrings("S", r.tps);
+    try testing.expectEqualStrings("S", r.sym);
 }
 
 // ─── semanticEquiv tests ─────────────────────────────────────

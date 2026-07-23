@@ -5,6 +5,6 @@ CREATE TABLE "log" (
   "message" TEXT,
   "created" TEXT
 );
--- @tps id n
--- @tps message S
--- @tps created t
+-- @sym id n
+-- @sym message S
+-- @sym created t

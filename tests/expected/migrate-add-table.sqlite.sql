@@ -9,9 +9,9 @@ CREATE TABLE "post" (
   "user_id" INTEGER,
   FOREIGN KEY ("user_id") REFERENCES "user"("id")
 );
--- @tps id n
--- @tps title s128
--- @tps user_id n
+-- @sym id n
+-- @sym title s128
+-- @sym user_id n
 CREATE INDEX "idx_post_user_id" ON "post" ("user_id");
 
 

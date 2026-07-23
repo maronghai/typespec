@@ -6,7 +6,7 @@ CREATE TABLE "flags" (
   "active" INTEGER,
   "enabled" INTEGER
 );
--- @tps id n
--- @tps is_admin b
--- @tps active b
--- @tps enabled b
+-- @sym id n
+-- @sym is_admin b
+-- @sym active b
+-- @sym enabled b

@@ -110,7 +110,7 @@ pub const TypeResolver = struct {
         for (field.modifiers) |mod| {
             switch (mod.kind) {
                 .auto_inc_pk => {
-                    if (type_map.isDatetimeTpsType(field.type_info)) {
+                    if (type_map.isDatetimeSymType(field.type_info)) {
                         on_update_ts = true;
                         has_timestamp_mod = true;
                     } else {
@@ -119,7 +119,7 @@ pub const TypeResolver = struct {
                     }
                 },
                 .auto_inc => {
-                    if (type_map.isDatetimeTpsType(field.type_info)) {
+                    if (type_map.isDatetimeSymType(field.type_info)) {
                         has_timestamp_mod = true;
                     } else {
                         ai = true;
@@ -133,12 +133,12 @@ pub const TypeResolver = struct {
             }
         }
 
-        const is_dt = type_map.isDatetimeTpsType(field.type_info);
+        const is_dt = type_map.isDatetimeSymType(field.type_info);
         const is_enum = field.type_info == .enum_type;
         const enum_vals = if (is_enum) field.type_info.enum_type else &[_][]const u8{};
 
         // Compute original TPS type string for roundtrip preservation
-        var tps_type: ?[]const u8 = switch (field.type_info) {
+        var sym_type: ?[]const u8 = switch (field.type_info) {
             .simple => |s| if (s.len == 1) s else null,
             .varchar_explicit => |n| if (n > 0) blk: {
                 var tbuf: [16]u8 = undefined;
@@ -155,9 +155,9 @@ pub const TypeResolver = struct {
         };
         // Unsigned → prepend + prefix for roundtrip (+n, +N, +i)
         if (unsigned) {
-            if (tps_type) |tt| {
+            if (sym_type) |tt| {
                 if (tt.len == 1 and (tt[0] == 'n' or tt[0] == 'N' or tt[0] == 'i')) {
-                    tps_type = try std.fmt.allocPrint(self.alloc, "+{s}", .{tt});
+                    sym_type = try std.fmt.allocPrint(self.alloc, "+{s}", .{tt});
                 }
             }
         }
@@ -165,7 +165,7 @@ pub const TypeResolver = struct {
         return .{
             .name = field.name,
             .sql_type = sql_type,
-            .tps_type = tps_type,
+            .sym_type = sym_type,
             .flags = .{
                 .nullable = !nn,
                 .primary_key = pk,

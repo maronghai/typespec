@@ -7,8 +7,8 @@ CREATE TABLE "post" (
   "id" INTEGER PRIMARY KEY AUTOINCREMENT,
   "title" varchar(128) NOT NULL
 );
--- @tps id n
--- @tps title s128
+-- @sym id n
+-- @sym title s128
 
 
 ALTER TABLE "user"

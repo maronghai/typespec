@@ -7,7 +7,7 @@ CREATE TABLE "order" (
   "created" TEXT,
   FOREIGN KEY ("user_id") REFERENCES "user"("id")
 );
--- @tps id n
--- @tps user_id n
--- @tps amount m
--- @tps created t
+-- @sym id n
+-- @sym user_id n
+-- @sym amount m
+-- @sym created t

@@ -4,8 +4,8 @@ CREATE TABLE "user" (
   "id" INTEGER PRIMARY KEY AUTOINCREMENT,
   "name" varchar(32) NOT NULL
 );
--- @tps id n
--- @tps name s32
+-- @sym id n
+-- @sym name s32
 
 CREATE TABLE "order" (
   "id" INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -13,14 +13,14 @@ CREATE TABLE "order" (
   "amount" NUMERIC(16, 2),
   FOREIGN KEY ("user_id") REFERENCES "user"("id") ON DELETE CASCADE
 );
--- @tps id n
--- @tps user_id n
--- @tps amount m
+-- @sym id n
+-- @sym user_id n
+-- @sym amount m
 
 CREATE TABLE "log" (
   "id" INTEGER PRIMARY KEY AUTOINCREMENT,
   "order_id" INTEGER,
   FOREIGN KEY ("order_id") REFERENCES "order"("id") ON DELETE SET NULL
 );
--- @tps id n
--- @tps order_id n
+-- @sym id n
+-- @sym order_id n

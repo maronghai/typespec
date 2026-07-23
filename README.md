@@ -520,20 +520,20 @@ rune reverse schema.sql -o schema.ss
 
 ### Roundtrip Preservation
 
-SQLite's type affinity is lossy — multiple TPS types map to the same SQL type (e.g., `N` and `n` both become `INTEGER`). To preserve the original TPS type information during roundtrips (`rune | rune reverse`), the compiler emits metadata comments:
+SQLite's type affinity is lossy — multiple SS types map to the same SQL type (e.g., `N` and `n` both become `INTEGER`). To preserve the original SS type information during roundtrips (`rune | rune reverse`), the compiler emits metadata comments:
 
 ```sql
 CREATE TABLE "users" (
   "id" INTEGER PRIMARY KEY AUTOINCREMENT,
   "name" varchar(100)
 );
--- @tps id N
--- @tps name s100
+-- @sym id N
+-- @sym name s100
 ```
 
-The `-- @tps col_name type` comments are:
+The `-- @sym col_name type` comments are:
 - **Emitted** automatically by the forward compiler for SQLite output
-- **Parsed** by the reverse compiler to restore the exact TPS type
+- **Parsed** by the reverse compiler to restore the exact SS type
 - **Ignored** by other dialects (MySQL, PostgreSQL) which have lossless type mappings
 
 This ensures `rune -d sqlite schema.ss | rune reverse -d sqlite` produces output identical to the original `.ss` file.

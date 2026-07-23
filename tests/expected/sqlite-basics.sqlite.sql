@@ -10,11 +10,11 @@ CREATE TABLE "user" (
   UNIQUE ("email")
 );
 -- 用户表
--- @tps id n
--- @tps name s32
--- @tps email s128
--- @tps balance m
--- @tps create_at t
+-- @sym id n
+-- @sym name s32
+-- @sym email s128
+-- @sym balance m
+-- @sym create_at t
 
 CREATE TABLE "order" (
   "id" INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -27,8 +27,8 @@ CREATE TABLE "order" (
 );
 -- 订单表
 -- order.user_id: 下单用户
--- @tps id n
--- @tps order_no s64
--- @tps user_id n
--- @tps amount m
--- @tps create_at t
+-- @sym id n
+-- @sym order_no s64
+-- @sym user_id n
+-- @sym amount m
+-- @sym create_at t

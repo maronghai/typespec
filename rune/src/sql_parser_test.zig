@@ -402,15 +402,15 @@ test "SQLite AUTOINCREMENT" {
     try std.testing.expect(col.auto_increment);
 }
 
-test "SQLite @tps metadata comments" {
+test "SQLite @sym metadata comments" {
     const alloc = std.testing.allocator;
     const sql =
         \\CREATE TABLE "t" (
         \\  "id" INTEGER PRIMARY KEY AUTOINCREMENT,
         \\  "name" TEXT NOT NULL
         \\);
-        \\-- @tps id n
-        \\-- @tps name s32
+        \\-- @sym id n
+        \\-- @sym name s32
     ;
     var parser = SqlParser.init(alloc, sql, .sqlite);
     const result = try parser.parse();
@@ -426,8 +426,8 @@ test "SQLite @tps metadata comments" {
     }
 
     const tbl = result.schema.tables[0];
-    try std.testing.expectEqualStrings("n", tbl.columns[0].tps_override.?);
-    try std.testing.expectEqualStrings("s32", tbl.columns[1].tps_override.?);
+    try std.testing.expectEqualStrings("n", tbl.columns[0].sym_override.?);
+    try std.testing.expectEqualStrings("s32", tbl.columns[1].sym_override.?);
 }
 
 test "SQLite column comment via -- table.col: text" {

@@ -21,7 +21,7 @@ pub const SqlColumn = struct {
     default_val: ?[]const u8,
     check_expr: ?[]const u8,
     comment: ?[]const u8,
-    tps_override: ?[]const u8 = null,
+    sym_override: ?[]const u8 = null,
 };
 
 pub const SqlIndex = struct {

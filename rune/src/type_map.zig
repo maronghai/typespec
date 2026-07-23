@@ -15,7 +15,7 @@ pub const SqlType = sql_type_mod.SqlType;
 
 // ─── Helper: classify TPS type symbols ───────────────────────
 
-pub fn isNumericTpsType(ti: TypeInfo) bool {
+pub fn isNumericSymType(ti: TypeInfo) bool {
     switch (ti) {
         .simple => |s| return std.mem.eql(u8, s, "n") or std.mem.eql(u8, s, "N") or std.mem.eql(u8, s, "i"),
         .int_explicit, .decimal_explicit => return true,
@@ -23,7 +23,7 @@ pub fn isNumericTpsType(ti: TypeInfo) bool {
     }
 }
 
-pub fn isDatetimeTpsType(ti: TypeInfo) bool {
+pub fn isDatetimeSymType(ti: TypeInfo) bool {
     switch (ti) {
         .simple => |s| return std.mem.eql(u8, s, "t") or std.mem.eql(u8, s, "d"),
         else => return false,
@@ -62,36 +62,36 @@ pub fn lookupCustomType(
 
 // ─── Tests ────────────────────────────────────────────────────
 
-test "isDatetimeTpsType: t is datetime" {
-    try std.testing.expect(isDatetimeTpsType(.{ .simple = "t" }));
+test "isDatetimeSymType: t is datetime" {
+    try std.testing.expect(isDatetimeSymType(.{ .simple = "t" }));
 }
 
-test "isDatetimeTpsType: d is datetime" {
-    try std.testing.expect(isDatetimeTpsType(.{ .simple = "d" }));
+test "isDatetimeSymType: d is datetime" {
+    try std.testing.expect(isDatetimeSymType(.{ .simple = "d" }));
 }
 
-test "isDatetimeTpsType: n is not datetime" {
-    try std.testing.expect(!isDatetimeTpsType(.{ .simple = "n" }));
+test "isDatetimeSymType: n is not datetime" {
+    try std.testing.expect(!isDatetimeSymType(.{ .simple = "n" }));
 }
 
-test "isNumericTpsType: n is numeric" {
-    try std.testing.expect(isNumericTpsType(.{ .simple = "n" }));
+test "isNumericSymType: n is numeric" {
+    try std.testing.expect(isNumericSymType(.{ .simple = "n" }));
 }
 
-test "isNumericTpsType: N is numeric" {
-    try std.testing.expect(isNumericTpsType(.{ .simple = "N" }));
+test "isNumericSymType: N is numeric" {
+    try std.testing.expect(isNumericSymType(.{ .simple = "N" }));
 }
 
-test "isNumericTpsType: s is not numeric" {
-    try std.testing.expect(!isNumericTpsType(.{ .simple = "s" }));
+test "isNumericSymType: s is not numeric" {
+    try std.testing.expect(!isNumericSymType(.{ .simple = "s" }));
 }
 
-test "isNumericTpsType: int_explicit is numeric" {
-    try std.testing.expect(isNumericTpsType(.{ .int_explicit = 11 }));
+test "isNumericSymType: int_explicit is numeric" {
+    try std.testing.expect(isNumericSymType(.{ .int_explicit = 11 }));
 }
 
-test "isNumericTpsType: decimal_explicit is numeric" {
-    try std.testing.expect(isNumericTpsType(.{ .decimal_explicit = .{ .precision = 10, .scale = 2 } }));
+test "isNumericSymType: decimal_explicit is numeric" {
+    try std.testing.expect(isNumericSymType(.{ .decimal_explicit = .{ .precision = 10, .scale = 2 } }));
 }
 
 // ─── SqlType.toSql tests (moved from old sqlTypeName tests) ─────

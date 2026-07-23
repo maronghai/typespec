@@ -4,8 +4,8 @@ CREATE TABLE "user" (
   "id" INTEGER PRIMARY KEY AUTOINCREMENT,
   "name" varchar(32) NOT NULL
 );
--- @tps id n
--- @tps name s32
+-- @sym id n
+-- @sym name s32
 
 CREATE TABLE "order" (
   "id" INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -14,8 +14,8 @@ CREATE TABLE "order" (
   "amount" NUMERIC(16, 2),
   FOREIGN KEY ("user_id") REFERENCES "user"("id")
 );
--- @tps id n
--- @tps order_no s64
--- @tps user_id n
--- @tps amount m
+-- @sym id n
+-- @sym order_no s64
+-- @sym user_id n
+-- @sym amount m
 CREATE INDEX "idx_user_id" ON "order" ("user_id");

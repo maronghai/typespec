@@ -5,4 +5,4 @@ CREATE TABLE "status_test" (
   "color" TEXT,
   "level" TEXT
 );
--- @tps id n
+-- @sym id n

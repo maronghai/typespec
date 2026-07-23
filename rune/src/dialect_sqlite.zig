@@ -87,8 +87,8 @@ fn sqliteEmitPrimaryKey(w: *Writer, auto_increment: bool) anyerror!void {
     }
 }
 
-fn sqliteEmitTpsTypeMetadata(w: *Writer, col_name: []const u8, tps_type: []const u8) anyerror!void {
-    try w.print("-- @tps {s} {s}\n", .{ col_name, tps_type });
+fn sqliteEmitTpsTypeMetadata(w: *Writer, col_name: []const u8, sym_type: []const u8) anyerror!void {
+    try w.print("-- @sym {s} {s}\n", .{ col_name, sym_type });
 }
 
 fn sqliteEmitConfidenceComment(w: *Writer, confidence: []const u8) anyerror!void {
@@ -151,68 +151,68 @@ fn sqliteReverseLookup(sql_type: []const u8, col_name: []const u8, is_auto_inc: 
     if (std.mem.startsWith(u8, upper_t, "VARCHAR(") and std.mem.endsWith(u8, upper_t, ")")) {
         const inner = std.mem.trim(u8, t[8 .. t.len - 1], " ");
         if (std.mem.eql(u8, inner, "255"))
-            return .{ .tps = "s", .omit = dialect.canOmitType(col_name, "s", is_auto_inc, is_default_ts), .score = 100 };
+            return .{ .sym = "s", .omit = dialect.canOmitType(col_name, "s", is_auto_inc, is_default_ts), .score = 100 };
         const sbuf = struct {
             var buf: [16]u8 = undefined;
         };
         sbuf.buf[0] = 's';
         for (inner, 0..) |ch, i| sbuf.buf[i + 1] = ch;
-        return .{ .tps = sbuf.buf[0 .. 1 + inner.len], .omit = false, .score = 100 };
+        return .{ .sym = sbuf.buf[0 .. 1 + inner.len], .omit = false, .score = 100 };
     }
     if (std.mem.startsWith(u8, upper_t, "NUMERIC(") and std.mem.endsWith(u8, upper_t, ")")) {
-        return .{ .tps = t[8 .. t.len - 1], .omit = false, .score = 100 };
+        return .{ .sym = t[8 .. t.len - 1], .omit = false, .score = 100 };
     }
 
     // Check against REVERSE_MAP SQLite entries
-    var found_tps: ?[]const u8 = null;
+    var found_sym: ?[]const u8 = null;
     for (reverse_map_data.REVERSE_MAP) |m| {
         if (std.mem.eql(u8, upper_t, m.sqlite)) {
-            found_tps = m.tps;
+            found_sym = m.sym;
             break;
         }
     }
 
-    if (found_tps) |tps| {
+    if (found_sym) |sym| {
         // Single-result types: BLOB, REAL — no ambiguity
-        if (std.mem.eql(u8, tps, "B") or std.mem.eql(u8, tps, "real") or
-            std.mem.eql(u8, tps, "float4") or std.mem.eql(u8, tps, "float8"))
+        if (std.mem.eql(u8, sym, "B") or std.mem.eql(u8, sym, "real") or
+            std.mem.eql(u8, sym, "float4") or std.mem.eql(u8, sym, "float8"))
         {
-            return .{ .tps = tps, .omit = dialect.canOmitType(col_name, tps, is_auto_inc, is_default_ts), .score = 100 };
+            return .{ .sym = sym, .omit = dialect.canOmitType(col_name, sym, is_auto_inc, is_default_ts), .score = 100 };
         }
 
         // INTEGER group (n, N, b) — disambiguate with heuristics
         if (std.mem.eql(u8, upper_t, "INTEGER")) {
-            if (is_auto_inc) return .{ .tps = "n", .omit = false, .score = 100 };
+            if (is_auto_inc) return .{ .sym = "n", .omit = false, .score = 100 };
             if (col_name.len > 3 and std.mem.endsWith(u8, col_name, "_id"))
-                return .{ .tps = "n", .omit = dialect.canOmitType(col_name, "n", is_auto_inc, is_default_ts), .score = 100 };
+                return .{ .sym = "n", .omit = dialect.canOmitType(col_name, "n", is_auto_inc, is_default_ts), .score = 100 };
             if (sqlite_hints.isBooleanColumnName(col_name))
-                return .{ .tps = "b", .omit = dialect.canOmitType(col_name, "b", is_auto_inc, is_default_ts), .score = 80 };
-            return .{ .tps = "n", .omit = dialect.canOmitType(col_name, "n", is_auto_inc, is_default_ts), .score = 50 };
+                return .{ .sym = "b", .omit = dialect.canOmitType(col_name, "b", is_auto_inc, is_default_ts), .score = 80 };
+            return .{ .sym = "n", .omit = dialect.canOmitType(col_name, "n", is_auto_inc, is_default_ts), .score = 50 };
         }
 
         // NUMERIC group (m, M) — m is most common
         if (std.mem.eql(u8, upper_t, "NUMERIC")) {
-            return .{ .tps = "m", .omit = dialect.canOmitType(col_name, "m", is_auto_inc, is_default_ts), .score = 100 };
+            return .{ .sym = "m", .omit = dialect.canOmitType(col_name, "m", is_auto_inc, is_default_ts), .score = 100 };
         }
 
         // TEXT group (s, S, j, d, t) — disambiguate with heuristics
         if (std.mem.eql(u8, upper_t, "TEXT")) {
             if (col_name.len > 3 and std.mem.endsWith(u8, col_name, "_at"))
-                return .{ .tps = "t", .omit = dialect.canOmitType(col_name, "t", is_auto_inc, is_default_ts), .score = 100 };
+                return .{ .sym = "t", .omit = dialect.canOmitType(col_name, "t", is_auto_inc, is_default_ts), .score = 100 };
             if (col_name.len > 3 and std.mem.endsWith(u8, col_name, "_on"))
-                return .{ .tps = "d", .omit = dialect.canOmitType(col_name, "d", is_auto_inc, is_default_ts), .score = 100 };
+                return .{ .sym = "d", .omit = dialect.canOmitType(col_name, "d", is_auto_inc, is_default_ts), .score = 100 };
             if (is_default_ts)
-                return .{ .tps = "t", .omit = dialect.canOmitType(col_name, "t", is_auto_inc, is_default_ts), .score = 100 };
+                return .{ .sym = "t", .omit = dialect.canOmitType(col_name, "t", is_auto_inc, is_default_ts), .score = 100 };
             if (sqlite_hints.isJsonColumnName(col_name))
-                return .{ .tps = "j", .omit = dialect.canOmitType(col_name, "j", is_auto_inc, is_default_ts), .score = 80 };
+                return .{ .sym = "j", .omit = dialect.canOmitType(col_name, "j", is_auto_inc, is_default_ts), .score = 80 };
             if (sqlite_hints.isTextColumnName(col_name))
-                return .{ .tps = "S", .omit = dialect.canOmitType(col_name, "S", is_auto_inc, is_default_ts), .score = 80 };
-            return .{ .tps = "s", .omit = dialect.canOmitType(col_name, "s", is_auto_inc, is_default_ts), .score = 50 };
+                return .{ .sym = "S", .omit = dialect.canOmitType(col_name, "S", is_auto_inc, is_default_ts), .score = 80 };
+            return .{ .sym = "s", .omit = dialect.canOmitType(col_name, "s", is_auto_inc, is_default_ts), .score = 50 };
         }
     }
 
     // Fallback: return as-is (unknown type)
-    return .{ .tps = t, .omit = false, .score = 50 };
+    return .{ .sym = t, .omit = false, .score = 50 };
 }
 
 // ─── Backend Instance ──────────────────────────────────────
@@ -242,8 +242,8 @@ pub const sqlite_backend = DialectBackend{
     .emitCreateView = sqliteEmitCreateView,
     .renderType = sqliteRenderType,
     .emitForeignKey = sqliteEmitForeignKey,
-    // Optional: SQLite implements emitTpsTypeMetadata, emitConfidenceComment, reverseLookup
-    .emitTpsTypeMetadata = sqliteEmitTpsTypeMetadata,
+    // Optional: SQLite implements emitTypeMetadata, emitConfidenceComment, reverseLookup
+    .emitTypeMetadata = sqliteEmitTpsTypeMetadata,
     .emitConfidenceComment = sqliteEmitConfidenceComment,
     .reverseLookup = sqliteReverseLookup,
     // emitCreateDatabase, emitUnsigned, emitAutoIncrement default to null (no-op)

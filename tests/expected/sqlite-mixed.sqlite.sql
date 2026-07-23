@@ -5,8 +5,8 @@ CREATE TABLE "user" (
   "name" varchar(32) NOT NULL,
   "status" TEXT NOT NULL CHECK ("status" IN ('active', 'inactive'))
 );
--- @tps id n
--- @tps name s32
+-- @sym id n
+-- @sym name s32
 
 CREATE TABLE "order" (
   "id" INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -15,10 +15,10 @@ CREATE TABLE "order" (
   "amount" NUMERIC(16, 2),
   FOREIGN KEY ("user_id") REFERENCES "user"("id")
 );
--- @tps id n
--- @tps order_no s64
--- @tps user_id n
--- @tps amount m
+-- @sym id n
+-- @sym order_no s64
+-- @sym user_id n
+-- @sym amount m
 CREATE INDEX "idx_user_id" ON "order" ("user_id");
 
 CREATE TABLE "user_role" (
@@ -27,7 +27,7 @@ CREATE TABLE "user_role" (
   "assigned" TEXT,
   FOREIGN KEY ("user_id") REFERENCES "user"("id")
 );
--- @tps user_id n
--- @tps role_id n
--- @tps assigned t
+-- @sym user_id n
+-- @sym role_id n
+-- @sym assigned t
 CREATE INDEX "idx_user_id" ON "user_role" ("user_id");

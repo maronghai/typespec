@@ -69,15 +69,15 @@ Run a single golden test by filter: `bash tests/test.sh 01` (matches test name s
 
 - **Custom Type System**: `~` directives in schema block define user-defined type aliases with optional dialect overrides. Resolved during type resolution, not parsing.
 
-- **Self-contained SqlType** ([sql_type.zig](rune/src/sql_type.zig)): `SqlType.toSql()` delegates to `DialectBackend.renderType` for dialect-aware rendering. Variants: `int`, `bigint`, `smallint`, `decimal`, `varchar`, `text`, `blob`, `json`, `jsonb`, `datetime`, `date`, `timestamptz`, `boolean`, `uuid`, `inet`, `serial`, `enum_values`, `raw_sql`, `passthrough`. TPS symbols: `n`, `N`, `i`, `m`, `M`, `s`, `S`, `b`, `B`, `j`, `J`, `I`, `d`, `t`, `T`, `U`, `p`. `toJsonSchema()` provides dialect-agnostic JSON Schema output.
+- **Self-contained SqlType** ([sql_type.zig](rune/src/sql_type.zig)): `SqlType.toSql()` delegates to `DialectBackend.renderType` for dialect-aware rendering. Variants: `int`, `bigint`, `smallint`, `decimal`, `varchar`, `text`, `blob`, `json`, `jsonb`, `datetime`, `date`, `timestamptz`, `boolean`, `uuid`, `inet`, `serial`, `enum_values`, `raw_sql`, `passthrough`. SS symbols: `n`, `N`, `i`, `m`, `M`, `s`, `S`, `b`, `B`, `j`, `J`, `I`, `d`, `t`, `T`, `U`, `p`. `toJsonSchema()` provides dialect-agnostic JSON Schema output.
 
-- **Dialect-Aware Diff** ([diff_semantic.zig](rune/src/diff_semantic.zig)): Type equivalence checking uses canonical TPS symbol mapping — different symbols that resolve to the same SQL type are equivalent (e.g. `N4` ↔ `4`), but distinct types like `n` (int) vs `N` (bigint) are NOT equivalent. Diff engine accepts optional `Dialect` parameter.
+- **Dialect-Aware Diff** ([diff_semantic.zig](rune/src/diff_semantic.zig)): Type equivalence checking uses canonical SS symbol mapping — different symbols that resolve to the same SQL type are equivalent (e.g. `N4` ↔ `4`), but distinct types like `n` (int) vs `N` (bigint) are NOT equivalent. Diff engine accepts optional `Dialect` parameter.
 
 - **Two-Pass FK Diffing** ([diff_fks.zig](rune/src/diff_fks.zig)): First pass matches identical FKs (structure + actions). Second pass matches structurally identical FKs with different actions → `modify` (single ALTER TABLE with DROP+ADD). Remaining unmatched FKs → `drop`/`add`. Produces minimal migration SQL.
 
 - **Reverse Lookup Vtable**: `DialectBackend.reverseLookup` (optional) allows dialect-specific reverse engineering (e.g. SQLite's heuristic-based INTEGER/TEXT disambiguation). Fallback to general REVERSE_MAP matching when vtable is null.
 
-- **Unified ReverseResult**: `dialect.zig` defines the single `ReverseResult` struct (`tps`, `omit`, `score`, `is_parameterized`). Both `type_registry.zig` and `reverse_column.zig` re-export it — zero duplication across the reverse pipeline.
+- **Unified ReverseResult**: `dialect.zig` defines the single `ReverseResult` struct (`sym`, `omit`, `score`, `is_parameterized`). Both `type_registry.zig` and `reverse_column.zig` re-export it — zero duplication across the reverse pipeline.
 
 ### Module Roles (by size, largest first)
 
@@ -104,7 +104,7 @@ Run a single golden test by filter: `bash tests/test.sh 01` (matches test name s
 | `diff_fields.zig` | Field-level diffing + rename detection + dialect-aware equality helpers. Tests in `diff_fields_test.zig` |
 | `tokenizer.zig` | Lexical tokenizer (.ss text → Line[]) |
 | `sql_parser_create.zig` | CREATE TABLE parsing (extracted from sql_parser.zig) |
-| `reverse_map.zig` | Reverse lookup logic (SQL → TPS symbol matching via vtable + parameterized types) |
+| `reverse_map.zig` | Reverse lookup logic (SQL → SS symbol matching via vtable + parameterized types) |
 | `reverse_column.zig` | Column reverse engineering (re-exports dialect.ReverseResult as TypeResult, suffix, inline index detection) |
 | `diagnostic.zig` | Multi-error diagnostic collector with JSON output. Unified across forward and reverse pipelines (`SqlParser` uses `DiagnosticCollector` directly) |
 | `trace.zig` | Shared AST trace formatting (FK actions, FK declarations, index declarations, `fmtTypeInfo`, `fmtModifiers`) used by parser.zig and semantic.zig diagnosticTrace |
@@ -120,14 +120,14 @@ Run a single golden test by filter: `bash tests/test.sh 01` (matches test name s
 | `dialect_sqlite.zig` | SQLite DialectBackend implementation + reverse lookup heuristics (~244 lines) |
 | `dialect_common.zig` | Shared PG/SQLite dialect functions (quoting, indexes, ALTER) |
 | `sqlite_hints.zig` | SQLite-specific type affinity hints + column name heuristics |
-| `reverse_map_data.zig` | REVERSE_MAP data table (SQL ↔ TPS type mappings, 46 entries) |
+| `reverse_map_data.zig` | REVERSE_MAP data table (SQL ↔ SS type mappings, 46 entries) |
 | `reverse_fk.zig` | FK classification for reverse pipeline |
 | `type_map.zig` | Helper functions (lookupCustomType, isNumericTpsType) + SqlType re-export |
-| `type_registry.zig` | TPS symbol → SqlType direct mapping (lookupSqlTypeDirect) + CORE_TYPES; re-exports dialect.ReverseResult |
+| `type_registry.zig` | SS symbol → SqlType direct mapping (lookupSqlTypeDirect) + CORE_TYPES; re-exports dialect.ReverseResult |
 | `type_resolver.zig` | ResolvedAst → TypedAst type resolution |
 | `diff_indexes.zig` | Index diffing |
 | `diff_fks.zig` | FK diffing — two-pass matching: exact (structure+actions) → structural (structure only, actions changed → modify) |
-| `diff_semantic.zig` | Dialect-aware type equivalence (canonical TPS symbol mapping; n≠N, b≠B) |
+| `diff_semantic.zig` | Dialect-aware type equivalence (canonical SS symbol mapping; n≠N, b≠B) |
 | `parse_template.zig` | Template header parsing + slot detection + flush logic |
 | `parse_table.zig` | Table header parsing + engine token stripping + view line parsing |
 | `json_schema.zig` | JSON Schema output (dialect-agnostic) |

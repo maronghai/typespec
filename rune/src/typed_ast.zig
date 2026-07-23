@@ -115,7 +115,7 @@ pub const TypedTable = struct {
 pub const TypedColumn = struct {
     name: []const u8,
     sql_type: SqlType,
-    tps_type: ?[]const u8 = null,
+    sym_type: ?[]const u8 = null,
     flags: ColumnFlags = .{},
     default: ?[]const u8,
     check: ?CheckConstraint,

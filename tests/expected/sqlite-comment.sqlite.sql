@@ -5,4 +5,4 @@ CREATE TABLE "users" (
   "name" TEXT NOT NULL
 );
 -- User account table
--- @tps id n
+-- @sym id n

@@ -16,7 +16,7 @@ fn visitFieldCheckModifiers(ctx: *ModifierValidationCtx, field: *const Field, _:
     for (field.modifiers) |mod| {
         switch (mod.kind) {
             .auto_inc_pk, .auto_inc => {
-                if (!type_map.isNumericTpsType(field.type_info) and !type_map.isDatetimeTpsType(field.type_info)) {
+                if (!type_map.isNumericSymType(field.type_info) and !type_map.isDatetimeSymType(field.type_info)) {
                     const mod_name = if (mod.kind == .auto_inc_pk) "auto_increment" else "auto_increment";
                     ctx.diagnostics.push(.{
                         .severity = .warning,
@@ -28,7 +28,7 @@ fn visitFieldCheckModifiers(ctx: *ModifierValidationCtx, field: *const Field, _:
             .primary_key => {},
             .not_null => {},
             .unsigned => {
-                if (!type_map.isNumericTpsType(field.type_info)) {
+                if (!type_map.isNumericSymType(field.type_info)) {
                     ctx.diagnostics.push(.{
                         .severity = .warning,
                         .line_no = mod.line_no,

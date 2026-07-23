@@ -5,6 +5,6 @@ CREATE TABLE "user_role" (
   "role_id" INTEGER NOT NULL PRIMARY KEY,
   "granted" TEXT
 );
--- @tps user_id n
--- @tps role_id n
--- @tps granted t
+-- @sym user_id n
+-- @sym role_id n
+-- @sym granted t

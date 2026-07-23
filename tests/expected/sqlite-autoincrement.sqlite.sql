@@ -5,5 +5,5 @@ CREATE TABLE "todo" (
   "title" TEXT NOT NULL,
   "done" INTEGER
 );
--- @tps id n
--- @tps done b
+-- @sym id n
+-- @sym done b

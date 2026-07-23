@@ -6,7 +6,7 @@ CREATE TABLE "accounts" (
   "contact" varchar(128) NOT NULL,
   "name" varchar(32) NOT NULL
 );
--- @tps id n
--- @tps balance 16,2
--- @tps contact s128
--- @tps name s32
+-- @sym id n
+-- @sym balance 16,2
+-- @sym contact s128
+-- @sym name s32

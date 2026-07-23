@@ -5,13 +5,13 @@ CREATE TABLE "mid" (
   "name" varchar(32) NOT NULL
 );
 -- user
--- @tps id n
--- @tps name s32
+-- @sym id n
+-- @sym name s32
 
 CREATE TABLE "mid" (
   "id" INTEGER PRIMARY KEY AUTOINCREMENT,
   "amount" NUMERIC(16, 2)
 );
 -- order
--- @tps id n
--- @tps amount m
+-- @sym id n
+-- @sym amount m

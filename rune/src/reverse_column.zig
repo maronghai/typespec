@@ -14,7 +14,7 @@ pub const TypeResult = dialect_mod.ReverseResult;
 
 pub fn reverseType(sql_type: []const u8, col_name: []const u8, is_auto_inc: bool, is_default_ts: bool, dialect: Dialect) TypeResult {
     const r = reverse_map.reverseLookup(sql_type, col_name, is_auto_inc, is_default_ts, dialect);
-    return .{ .tps = r.tps, .omit = r.omit, .score = r.score };
+    return .{ .sym = r.sym, .omit = r.omit, .score = r.score };
 }
 
 pub fn isDatetime(sql_type: []const u8) bool {
@@ -47,13 +47,13 @@ pub fn writeColumnSuffix(w: anytype, col: sp.SqlColumn, indexes: []const sp.SqlI
 fn writeColumnType(w: anytype, col: sp.SqlColumn, dialect: Dialect) !TypeResult {
     const is_ai = col.auto_increment;
     const is_ts = if (col.default_val) |dv| isCurrentTimestamp(dv) else false;
-    const tr: TypeResult = if (col.tps_override) |tps|
-        .{ .tps = tps, .omit = false, .score = 100 }
+    const tr: TypeResult = if (col.sym_override) |sym|
+        .{ .sym = sym, .omit = false, .score = 100 }
     else
         reverseType(col.type_sql, col.name, is_ai, is_ts, dialect);
     if (!tr.omit) {
         try w.writeAll(" ");
-        try w.writeAll(tr.tps);
+        try w.writeAll(tr.sym);
     }
     return tr;
 }
@@ -78,7 +78,7 @@ fn writeColumnModifiers(w: anytype, col: sp.SqlColumn, indexes: []const sp.SqlIn
         try w.writeAll(" ++");
     } else if (col.auto_increment) {
         try w.writeAll(" +");
-    } else if (isDatetime(col.type_sql) or std.mem.eql(u8, tr.tps, "t")) {
+    } else if (isDatetime(col.type_sql) or std.mem.eql(u8, tr.sym, "t")) {
         if (col.default_val) |dv| {
             if (isCurrentTimestamp(dv)) {
                 // Heuristic: column name contains "update"/"updated" -> on_update_current_timestamp (++)
@@ -125,7 +125,7 @@ fn writeColumnModifiers(w: anytype, col: sp.SqlColumn, indexes: []const sp.SqlIn
 fn writeColumnDefault(w: anytype, col: sp.SqlColumn, tr: TypeResult) !void {
     if (col.default_val) |dv| {
         // datetime + CURRENT_TIMESTAMP/now() is already handled above (via + or ++)
-        if ((isDatetime(col.type_sql) or std.mem.eql(u8, tr.tps, "t")) and isCurrentTimestamp(dv)) {
+        if ((isDatetime(col.type_sql) or std.mem.eql(u8, tr.sym, "t")) and isCurrentTimestamp(dv)) {
             // already emitted + or ++ above — skip
         } else if (std.mem.eql(u8, dv, "")) {
             // Empty string default — skip

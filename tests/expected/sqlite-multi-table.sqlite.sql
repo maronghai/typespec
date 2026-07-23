@@ -6,16 +6,16 @@ CREATE TABLE "customer" (
   "email" varchar(128) NOT NULL,
   UNIQUE ("email")
 );
--- @tps id n
--- @tps email s128
+-- @sym id n
+-- @sym email s128
 
 CREATE TABLE "product" (
   "id" INTEGER PRIMARY KEY AUTOINCREMENT,
   "name" TEXT NOT NULL,
   "price" NUMERIC(16, 2) NOT NULL
 );
--- @tps id n
--- @tps price m
+-- @sym id n
+-- @sym price m
 
 CREATE TABLE "order_item" (
   "id" INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -23,7 +23,7 @@ CREATE TABLE "order_item" (
   "product_id" INTEGER,
   "quantity" INTEGER NOT NULL
 );
--- @tps id n
--- @tps customer_id n
--- @tps product_id n
--- @tps quantity n
+-- @sym id n
+-- @sym customer_id n
+-- @sym product_id n
+-- @sym quantity n

@@ -6,6 +6,6 @@ CREATE TABLE "attachments" (
   "content" BLOB,
   "avatar" BLOB
 );
--- @tps id n
--- @tps content B
--- @tps avatar B
+-- @sym id n
+-- @sym content B
+-- @sym avatar B

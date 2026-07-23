@@ -17,28 +17,28 @@ const Dialect = dialect_enum.Dialect;
 /// Look up SqlType variant directly for a TPS symbol in a given dialect.
 /// This is the primary lookup used by production code (SqlType.fromTypeInfo).
 /// Avoids the stringly-typed round-trip (TPS → SQL string → SqlType).
-pub fn lookupSqlTypeDirect(tps_symbol: []const u8, dialect: Dialect) ?sql_type_mod.SqlType {
-    const SYMBOL_MAP = [_]struct { tps: []const u8, mysql: sql_type_mod.SqlType, pg: sql_type_mod.SqlType, sqlite: sql_type_mod.SqlType }{
-        .{ .tps = "n", .mysql = .int, .pg = .int, .sqlite = .int },
-        .{ .tps = "N", .mysql = .bigint, .pg = .bigint, .sqlite = .int },
-        .{ .tps = "i", .mysql = .smallint, .pg = .smallint, .sqlite = .smallint },
-        .{ .tps = "m", .mysql = .{ .decimal = .{ .precision = 16, .scale = 2 } }, .pg = .{ .decimal = .{ .precision = 16, .scale = 2 } }, .sqlite = .{ .decimal = .{ .precision = 16, .scale = 2 } } },
-        .{ .tps = "M", .mysql = .{ .decimal = .{ .precision = 20, .scale = 6 } }, .pg = .{ .decimal = .{ .precision = 20, .scale = 6 } }, .sqlite = .{ .decimal = .{ .precision = 20, .scale = 6 } } },
-        .{ .tps = "S", .mysql = .text, .pg = .text, .sqlite = .text },
-        .{ .tps = "b", .mysql = .boolean, .pg = .boolean, .sqlite = .boolean },
-        .{ .tps = "B", .mysql = .blob, .pg = .blob, .sqlite = .blob },
-        .{ .tps = "j", .mysql = .json, .pg = .json, .sqlite = .json },
-        .{ .tps = "d", .mysql = .date, .pg = .date, .sqlite = .date },
-        .{ .tps = "t", .mysql = .datetime, .pg = .datetime, .sqlite = .datetime },
-        .{ .tps = "T", .mysql = .timestamptz, .pg = .timestamptz, .sqlite = .timestamptz },
-        .{ .tps = "s", .mysql = .{ .varchar = 0 }, .pg = .{ .varchar = 0 }, .sqlite = .{ .varchar = 0 } },
-        .{ .tps = "U", .mysql = .uuid, .pg = .uuid, .sqlite = .{ .passthrough = "TEXT" } },
-        .{ .tps = "p", .mysql = .serial, .pg = .serial, .sqlite = .{ .passthrough = "INTEGER" } },
-        .{ .tps = "J", .mysql = .jsonb, .pg = .jsonb, .sqlite = .jsonb },
-        .{ .tps = "I", .mysql = .inet, .pg = .inet, .sqlite = .inet },
+pub fn lookupSqlTypeDirect(sym: []const u8, dialect: Dialect) ?sql_type_mod.SqlType {
+    const SYMBOL_MAP = [_]struct { sym: []const u8, mysql: sql_type_mod.SqlType, pg: sql_type_mod.SqlType, sqlite: sql_type_mod.SqlType }{
+        .{ .sym = "n", .mysql = .int, .pg = .int, .sqlite = .int },
+        .{ .sym = "N", .mysql = .bigint, .pg = .bigint, .sqlite = .int },
+        .{ .sym = "i", .mysql = .smallint, .pg = .smallint, .sqlite = .smallint },
+        .{ .sym = "m", .mysql = .{ .decimal = .{ .precision = 16, .scale = 2 } }, .pg = .{ .decimal = .{ .precision = 16, .scale = 2 } }, .sqlite = .{ .decimal = .{ .precision = 16, .scale = 2 } } },
+        .{ .sym = "M", .mysql = .{ .decimal = .{ .precision = 20, .scale = 6 } }, .pg = .{ .decimal = .{ .precision = 20, .scale = 6 } }, .sqlite = .{ .decimal = .{ .precision = 20, .scale = 6 } } },
+        .{ .sym = "S", .mysql = .text, .pg = .text, .sqlite = .text },
+        .{ .sym = "b", .mysql = .boolean, .pg = .boolean, .sqlite = .boolean },
+        .{ .sym = "B", .mysql = .blob, .pg = .blob, .sqlite = .blob },
+        .{ .sym = "j", .mysql = .json, .pg = .json, .sqlite = .json },
+        .{ .sym = "d", .mysql = .date, .pg = .date, .sqlite = .date },
+        .{ .sym = "t", .mysql = .datetime, .pg = .datetime, .sqlite = .datetime },
+        .{ .sym = "T", .mysql = .timestamptz, .pg = .timestamptz, .sqlite = .timestamptz },
+        .{ .sym = "s", .mysql = .{ .varchar = 0 }, .pg = .{ .varchar = 0 }, .sqlite = .{ .varchar = 0 } },
+        .{ .sym = "U", .mysql = .uuid, .pg = .uuid, .sqlite = .{ .passthrough = "TEXT" } },
+        .{ .sym = "p", .mysql = .serial, .pg = .serial, .sqlite = .{ .passthrough = "INTEGER" } },
+        .{ .sym = "J", .mysql = .jsonb, .pg = .jsonb, .sqlite = .jsonb },
+        .{ .sym = "I", .mysql = .inet, .pg = .inet, .sqlite = .inet },
     };
     for (&SYMBOL_MAP) |entry| {
-        if (std.mem.eql(u8, entry.tps, tps_symbol)) {
+        if (std.mem.eql(u8, entry.sym, sym)) {
             return switch (dialect) {
                 .mysql => entry.mysql,
                 .pg => entry.pg,
@@ -51,24 +51,24 @@ pub fn lookupSqlTypeDirect(tps_symbol: []const u8, dialect: Dialect) ?sql_type_m
 
 /// Look up SQL type name for a TPS symbol in a given dialect.
 /// Convenience wrapper — delegates to lookupSqlTypeDirect + SqlType.toSql.
-pub fn lookupSqlType(tps_symbol: []const u8, dialect: Dialect) ?[]const u8 {
-    const sql_type = lookupSqlTypeDirect(tps_symbol, dialect) orelse return null;
+pub fn lookupSqlType(sym: []const u8, dialect: Dialect) ?[]const u8 {
+    const sql_type = lookupSqlTypeDirect(sym, dialect) orelse return null;
     var aw = std.Io.Writer.Allocating.init(std.heap.page_allocator);
     sql_type.toSql(dialect, &aw.writer) catch return null;
     return aw.toOwnedSlice(std.heap.page_allocator) catch null;
 }
 
 /// Look up TPS symbol for a SQL type in a given dialect.
-/// Returns .{ .tps, .omit } where omit indicates the symbol should be omitted in reverse output.
+/// Returns .{ .sym, .omit } where omit indicates the symbol should be omitted in reverse output.
 pub const ReverseResult = dialect_mod.ReverseResult;
 
 pub fn lookupTpsSymbol(sql_type: []const u8, dialect: Dialect) ?ReverseResult {
     // Parameterized types: check prefix matches
     if (std.mem.startsWith(u8, sql_type, "varchar(")) {
-        return .{ .tps = "s", .omit = true, .is_parameterized = true };
+        return .{ .sym = "s", .omit = true, .is_parameterized = true };
     }
     if (std.mem.startsWith(u8, sql_type, "decimal(") or std.mem.startsWith(u8, sql_type, "numeric(")) {
-        return .{ .tps = "m", .omit = false, .is_parameterized = true };
+        return .{ .sym = "m", .omit = false, .is_parameterized = true };
     }
     // Exact match via reverse_map
     const reverse_map = @import("reverse_map.zig");
@@ -79,15 +79,15 @@ pub fn lookupTpsSymbol(sql_type: []const u8, dialect: Dialect) ?ReverseResult {
             .sqlite => entry.sqlite,
         };
         if (std.mem.eql(u8, sql_type, dialect_type)) {
-            return .{ .tps = entry.tps, .omit = false };
+            return .{ .sym = entry.sym, .omit = false };
         }
     }
     return null;
 }
 
 /// Check if a TPS symbol is a known core type.
-pub fn isCoreType(tps_symbol: []const u8) bool {
-    return lookupSqlTypeDirect(tps_symbol, .mysql) != null;
+pub fn isCoreType(sym: []const u8) bool {
+    return lookupSqlTypeDirect(sym, .mysql) != null;
 }
 
 // ─── Unit Tests ──────────────────────────────────────────────

@@ -7,7 +7,7 @@ CREATE TABLE "documents" (
   "bio" TEXT,
   "short" varchar(64)
 );
--- @tps id n
--- @tps body S
--- @tps bio S
--- @tps short s64
+-- @sym id n
+-- @sym body S
+-- @sym bio S
+-- @sym short s64
