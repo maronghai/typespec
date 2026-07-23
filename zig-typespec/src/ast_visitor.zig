@@ -133,6 +133,46 @@ pub fn AstVisitor(comptime Context: type) type {
                 }
             }
         }
+
+        /// Walk resolved tables with mutable field access — for semantic passes that
+        /// modify fields (autofk, suffix_inference, etc.). Only visitField receives
+        /// a mutable pointer; other callbacks remain read-only.
+        pub fn walkResolvedTablesMut(self: Self, tables: []ResolvedTable) void {
+            for (tables) |*table| {
+                if (self.visitTable) |visit| {
+                    visit(self.context, .{
+                        .name = table.name,
+                        .template_ref = null,
+                        .comment = table.comment,
+                        .engine = table.engine,
+                        .fields = table.fields,
+                        .fks = table.fks,
+                        .indexes = table.indexes,
+                        .line_no = table.line_no,
+                    });
+                }
+                for (table.fields) |*field| {
+                    if (self.visitField) |visit| {
+                        visit(self.context, field, table.name);
+                    }
+                    if (field.fk) |fk| {
+                        if (self.visitFk) |visit| {
+                            visit(self.context, fk, table.name);
+                        }
+                    }
+                }
+                for (table.fks) |fk| {
+                    if (self.visitFk) |visit| {
+                        visit(self.context, fk, table.name);
+                    }
+                }
+                for (table.indexes) |index| {
+                    if (self.visitIndex) |visit| {
+                        visit(self.context, index, table.name);
+                    }
+                }
+            }
+        }
     };
 }
 
@@ -389,10 +429,10 @@ test "visitor: walkResolvedTables" {
         .name = "users",
         .comment = null,
         .engine = null,
-        .fields = &.{
+        .fields = try alloc.dupe(Field, &.{
             makeTestField("id", .{ .simple = "n" }),
             makeTestField("name", .{ .simple = "s" }),
-        },
+        }),
         .fks = &.{},
         .indexes = &.{},
         .line_no = 1,

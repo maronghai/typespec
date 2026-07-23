@@ -41,9 +41,9 @@ TypeSpec is a compiler that transforms `.tps` schema files into SQL DDL. It cons
 **Leaf modules** (zero internal dependencies): `ast.zig`, `dialect_enum.zig`, `diagnostic.zig`
 
 **Key modules**:
-- `sql_type.zig`: `SqlType` union with `toSql()` delegating to `DialectBackend.renderType`. Variants: int, bigint, smallint, decimal, varchar, text, blob, json, datetime, date, timestamptz, boolean, uuid, serial, enum_values, raw_sql, passthrough. `toJsonSchema()` for JSON Schema output.
+- `sql_type.zig`: `SqlType` union with `toSql()` delegating to `DialectBackend.renderType`. Variants: int, bigint, smallint, decimal, varchar, text, blob, json, jsonb, datetime, date, timestamptz, boolean, uuid, inet, serial, enum_values, raw_sql, passthrough. `toJsonSchema()` for JSON Schema output.
 - `type_map.zig`: Helper functions (`lookupCustomType`, `isNumericTpsType`, etc.) + `SqlType` re-export
-- `type_registry.zig`: TPS symbol → `SqlType` direct mapping (`lookupSqlTypeDirect`) and reverse lookup. 15 core TPS symbols: n, N, i, m, M, s, S, b, B, j, d, t, T, U, p
+- `type_registry.zig`: TPS symbol → `SqlType` direct mapping (`lookupSqlTypeDirect`) and reverse lookup. 17 core TPS symbols: n, N, i, m, M, s, S, b, B, j, J, I, d, t, T, U, p
 
 ### Extracted Sub-Modules
 
@@ -62,7 +62,9 @@ TypeSpec is a compiler that transforms `.tps` schema files into SQL DDL. It cons
 | `diff.zig` | `diff_fks.zig` | FK diffing |
 | `diff.zig` | `diff_semantic.zig` | Dialect-aware type equivalence (canonical TPS symbol mapping) |
 | `diff.zig` | `diff_format.zig` | Human-readable diff formatting |
-| `sql_parser.zig` | `sql_parser_helpers.zig` | Identifier/literal/word parsing, whitespace/comment skipping, trailing comment capture |
+| `codegen.zig` | `codegen_columns.zig` | Column definition rendering (emitColumnDef, emitColumnDefEx, emitDefault) + shared `isDominatedByExplicitIndex()` |
+| `codegen.zig` | `codegen_indexes.zig` | Inline and standalone index emission |
+| `sql_parser.zig` | `sql_parser_helpers.zig` | Identifier/literal/word parsing, whitespace/comment skipping, trailing comment capture, `parseExpression` |
 | `sql_parser.zig` | `sql_parser_alter.zig` | ALTER TABLE statement parsing |
 | `sql_parser.zig` | `sql_parser_comment.zig` | COMMENT ON TABLE/COLUMN parsing |
 | `sql_parser.zig` | `sql_parser_create.zig` | CREATE DATABASE/TABLE/column parsing |
@@ -94,8 +96,8 @@ Input (.tps text)
     Output: []ResolvedTable (templates applied to each table)
     │
     ▼
-[4] Semantic Analyzer (semantic.zig, 749 lines)
-    Pass manager: validate_template_types, autofk, suffix_inference, validate, validate_type_modifiers
+[4] Semantic Analyzer (semantic.zig, 789 lines)
+    Pass manager: validate_template_types, autofk, suffix_inference, validate, validate_type_modifiers, validate_indexes
     Output: ResolvedAst (templates resolved + passes applied)
     │
     ▼
@@ -105,7 +107,7 @@ Input (.tps text)
     Output: TypedAst (dialect-agnostic IR)
     │
     ▼
-[6] Code Generator (codegen.zig, 812 lines, 5 sub-functions)
+[6] Code Generator (codegen.zig + codegen_columns.zig + codegen_indexes.zig)
     TypedAst → SQL DDL text
     Dialect-specific rendering via DialectBackend vtable
     Output: SQL string
@@ -243,7 +245,7 @@ PG and SQLite share 4/5 method implementations. `emitCheckExpr` is a shared stan
 
 ```zig
 SemanticPass = struct { name: []const u8, run: fn(*PassContext) !void, depends_on: []const []const u8 };
-DEFAULT_PASSES = [_]SemanticPass{ validate_template_types, autofk, suffix_inference, validate, validate_type_modifiers };
+DEFAULT_PASSES = [_]SemanticPass{ validate_template_types, autofk, suffix_inference, validate, validate_type_modifiers, validate_indexes };
 ```
 
 New passes can be added by:
@@ -287,9 +289,9 @@ When `typespec reverse -t` is used, the reverse codegen extracts common field se
 
 TypeSpec uses a three-layer type mapping system:
 
-- **`sql_type.zig` (SqlType.toSql)**: Delegates to `DialectBackend.renderType` for dialect-aware rendering. Variants: int, bigint, smallint, decimal, varchar, text, blob, json, datetime, date, timestamptz, boolean, uuid, serial, enum_values, raw_sql, passthrough. TPS symbols: n, N, i, m, M, s, S, b, B, j, d, t, T, U, p.
+- **`sql_type.zig` (SqlType.toSql)**: Delegates to `DialectBackend.renderType` for dialect-aware rendering. Variants: int, bigint, smallint, decimal, varchar, text, blob, json, jsonb, datetime, date, timestamptz, boolean, uuid, inet, serial, enum_values, raw_sql, passthrough. TPS symbols: n, N, i, m, M, s, S, b, B, j, J, I, d, t, T, U, p.
 
-- **`type_registry.zig` (CORE_TYPES)**: Static array of 15 TPS symbol entries with dialect-specific SQL names. Provides two lookup functions:
+- **`type_registry.zig` (CORE_TYPES)**: Static array of 17 TPS symbol entries with dialect-specific SQL names. Provides two lookup functions:
   - `lookupSqlType(tps, dialect)` → `?[]const u8` (SQL name string, for backward compat)
   - `lookupSqlTypeDirect(tps, dialect)` → `?SqlType` (direct variant, avoids stringly-typed round-trip)
 

@@ -65,7 +65,7 @@ pub fn resolveAndApply(
             .name = t.name,
             .comment = t.comment,
             .engine = t.engine,
-            .fields = fields,
+            .fields = try alloc.dupe(Field, fields),
             .fks = t.fks,
             .indexes = t.indexes,
             .line_no = t.line_no,

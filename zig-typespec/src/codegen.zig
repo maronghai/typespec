@@ -3,6 +3,8 @@ const ast_mod = @import("ast.zig");
 const dialect_mod = @import("dialect.zig");
 const dialect_enum = @import("dialect_enum.zig");
 const typed_ast_mod = @import("typed_ast.zig");
+const columns_mod = @import("codegen_columns.zig");
+const indexes_mod = @import("codegen_indexes.zig");
 const CheckConstraint = ast_mod.CheckConstraint;
 const Writer = std.Io.Writer;
 
@@ -89,7 +91,7 @@ pub const Codegen = struct {
         var needs_comma = false;
 
         try emitColumnDefs(self, w, table, &needs_comma);
-        try emitInlineIndexes(self, w, table, &needs_comma);
+        try indexes_mod.emitInlineIndexes(self.backend, w, table, &needs_comma);
         for (table.indexes) |idx| {
             try self.backend.emitIndex(w, idx, &needs_comma);
         }
@@ -99,8 +101,8 @@ pub const Codegen = struct {
 
         try self.backend.emitTableFooter(w, table.engine, null, table.comment);
         try emitTableMetadata(self, w, table);
-        try emitStandaloneIndexes(self, w, table);
-        try emitInlineColumnStandaloneIndexes(self, w, table);
+        try indexes_mod.emitStandaloneIndexes(self.backend, w, table);
+        try indexes_mod.emitInlineColumnStandaloneIndexes(self.backend, w, table);
     }
 
     fn emitColumnDefs(self: Codegen, w: *Writer, table: typed_ast_mod.TypedTable, needs_comma: *bool) !void {
@@ -108,32 +110,7 @@ pub const Codegen = struct {
             if (needs_comma.*) try w.writeAll(",\n");
             needs_comma.* = true;
             try w.writeAll("  ");
-            try self.emitColumnDef(w, col);
-        }
-    }
-
-    fn isDominatedByExplicitIndex(col_name: []const u8, explicit_indexes: []const ast_mod.IndexDecl, require_unique: bool) bool {
-        for (explicit_indexes) |idx| {
-            if (require_unique and idx.kind != .unique and idx.kind != .primary_key) continue;
-            for (idx.fields) |f| {
-                if (std.mem.eql(u8, f, col_name)) return true;
-            }
-        }
-        return false;
-    }
-
-    fn emitInlineIndexes(self: Codegen, w: *Writer, table: typed_ast_mod.TypedTable, needs_comma: *bool) !void {
-        for (table.columns) |col| {
-            if (col.flags.inline_unique) {
-                if (!isDominatedByExplicitIndex(col.name, table.indexes, true)) {
-                    try self.backend.emitInlineIndex(w, col.name, true, needs_comma);
-                }
-            }
-            if (col.flags.inline_index) {
-                if (!isDominatedByExplicitIndex(col.name, table.indexes, false)) {
-                    try self.backend.emitInlineIndex(w, col.name, false, needs_comma);
-                }
-            }
+            try columns_mod.emitColumnDef(self.backend, w, col);
         }
     }
 
@@ -164,22 +141,6 @@ pub const Codegen = struct {
         }
     }
 
-    fn emitStandaloneIndexes(self: Codegen, w: *Writer, table: typed_ast_mod.TypedTable) !void {
-        for (table.indexes) |idx| {
-            try self.backend.emitStandaloneIndex(w, table.name, idx);
-        }
-    }
-
-    fn emitInlineColumnStandaloneIndexes(self: Codegen, w: *Writer, table: typed_ast_mod.TypedTable) !void {
-        for (table.columns) |col| {
-            if (col.flags.inline_index) {
-                if (!isDominatedByExplicitIndex(col.name, table.indexes, false)) {
-                    try self.backend.emitInlineColumnStandaloneIndex(w, table.name, col.name);
-                }
-            }
-        }
-    }
-
     /// Emit a CREATE VIEW statement.
     pub fn generateTypedView(self: Codegen, w: *Writer, view: typed_ast_mod.TypedView) !void {
         try self.backend.emitCreateView(w, view.name, view.query);
@@ -191,63 +152,11 @@ pub const Codegen = struct {
     /// Render a single column definition (shared by CREATE TABLE and ALTER TABLE paths).
     /// When skip_name is true, the column name is not emitted (used by PG ALTER COLUMN TYPE).
     pub fn emitColumnDef(self: Codegen, w: *Writer, col: typed_ast_mod.TypedColumn) !void {
-        return self.emitColumnDefEx(w, col, false);
+        return columns_mod.emitColumnDef(self.backend, w, col);
     }
 
     pub fn emitColumnDefEx(self: Codegen, w: *Writer, col: typed_ast_mod.TypedColumn, skip_name: bool) !void {
-        if (!skip_name) {
-            try self.backend.quoteIdent(w, col.name);
-            try w.writeAll(" ");
-        }
-        try self.backend.renderType(w, col.sql_type);
-
-        if (col.flags.unsigned) {
-            if (self.backend.emitUnsigned) |emit| try emit(w);
-        }
-
-        if (!col.flags.nullable) try w.writeAll(" NOT NULL");
-
-        if (col.flags.auto_increment) {
-            if (self.backend.emitAutoIncrement) |emit| try emit(w);
-        }
-
-        if (col.flags.has_timestamp_default) {
-            try self.backend.emitTimestampModifier(w, col.flags.on_update_current_timestamp);
-        }
-
-        if (col.flags.primary_key) {
-            try self.backend.emitPrimaryKey(w, col.flags.auto_increment);
-        }
-
-        if (col.default) |dv| try emitDefault(w, dv);
-        if (col.check) |ck| {
-            try w.writeAll(" CHECK (");
-            try dialect_mod.emitCheckExpr(w, col.name, ck);
-            try w.writeAll(")");
-        }
-        // Inline column comment (MySQL uses COMMENT '...' syntax; PG/SQLite use standalone)
-        if (col.comment) |c| {
-            try self.backend.emitInlineColumnComment(w, c);
-        }
-        // Enum type check constraint (PG/SQLite only; MySQL uses native ENUM)
-        if (col.flags.is_enum) {
-            try self.backend.emitEnumTypeCheck(w, col.name, col.enum_values);
-        }
-    }
-
-    fn emitDefault(w: *Writer, value: []const u8) !void {
-        const is_num_val = blk: {
-            _ = std.fmt.parseFloat(f64, value) catch break :blk false;
-            break :blk true;
-        };
-        const is_sql_keyword = std.mem.eql(u8, value, "CURRENT_TIMESTAMP") or
-            std.mem.eql(u8, value, "NULL") or
-            std.mem.eql(u8, value, "NOW()");
-        if (is_num_val or is_sql_keyword) {
-            try w.print(" DEFAULT {s}", .{value});
-        } else {
-            try w.print(" DEFAULT '{s}'", .{value});
-        }
+        return columns_mod.emitColumnDefEx(self.backend, w, col, skip_name);
     }
 
     pub fn generateCheckExpr(self: Codegen, w: *Writer, field_name: []const u8, ck: CheckConstraint) !void {
@@ -385,49 +294,6 @@ test "codegen: PostgreSQL table uses double quotes" {
     try testing.expect(std.mem.indexOf(u8, sql, "GENERATED ALWAYS AS IDENTITY") != null);
     // PG should not have backtick-quoted identifiers
     try testing.expect(std.mem.indexOf(u8, sql, "`") == null);
-}
-
-test "codegen: emitColumnDef shared path" {
-    const alloc = testing.allocator;
-    var aw = std.Io.Writer.Allocating.init(alloc);
-    const w = &aw.writer;
-
-    const col = makeTestColumn("balance", "decimal(16, 2)");
-    col.flags.nullable = false;
-    col.flags.unsigned = true;
-    col.default = "0";
-
-    var cg = Codegen.init(alloc, .mysql);
-    try cg.emitColumnDef(w, col);
-    try w.flush();
-
-    var out = aw.toArrayList();
-    const result = try out.toOwnedSlice(alloc);
-
-    try testing.expect(std.mem.indexOf(u8, result, "`balance`") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "decimal(16, 2)") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "UNSIGNED") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "NOT NULL") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "DEFAULT 0") != null);
-}
-
-test "codegen: emitColumnDef PG omits UNSIGNED" {
-    const alloc = testing.allocator;
-    var aw = std.Io.Writer.Allocating.init(alloc);
-    const w = &aw.writer;
-
-    const col = makeTestColumn("count", "integer");
-    col.flags.unsigned = true;
-
-    var cg = Codegen.init(alloc, .pg);
-    try cg.emitColumnDef(w, col);
-    try w.flush();
-
-    var out = aw.toArrayList();
-    const result = try out.toOwnedSlice(alloc);
-
-    try testing.expect(std.mem.indexOf(u8, result, "UNSIGNED") == null);
-    try testing.expect(std.mem.indexOf(u8, result, "\"count\"") != null);
 }
 
 // ─── Additional codegen dialect tests ────────────────────────────

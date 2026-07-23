@@ -100,9 +100,9 @@ field_name  [type_symbol]  [modifier...]  [check]  [: | -- | ; comment]
 | `_at` | datetime | `created_at` → datetime |
 | *(none)* | varchar(255) | `name` → varchar(255) |
 
-> **Note**: See [Type Spec](type.md) for the full type symbol reference including `i` (smallint), `T` (timestamptz), `U` (uuid), `p` (serial).
+> **Note**: See [Type Spec](type.md) for the full type symbol reference including `i` (smallint), `T` (timestamptz), `U` (uuid), `p` (serial), `J` (jsonb), `I` (inet).
 
-> **Note**: See [Type Spec](type.md) for the full type symbol reference including `i` (smallint), `T` (timestamptz), `U` (uuid), `p` (serial).
+> **Note**: See [Type Spec](type.md) for the full type symbol reference including `i` (smallint), `T` (timestamptz), `U` (uuid), `p` (serial), `J` (jsonb), `I` (inet).
 
 ### Modifiers
 
@@ -650,14 +650,16 @@ email s128 *
 
 `-C` = ON DELETE CASCADE, `-N` = ON DELETE SET NULL, `C` = ON UPDATE CASCADE, `N` = ON UPDATE SET NULL. Omit for RESTRICT (default).
 
-### Q8: UUID and serial types?
+### Q8: UUID, serial, jsonb, and inet types?
 
 ```asm
 token     U             ; uuid (PG: native uuid; MySQL: char(36))
 id        p             ; serial (PG: serial; MySQL/SQLite: int)
+config    J             ; jsonb (PG: native jsonb; MySQL: json; SQLite: TEXT)
+ip_addr   I             ; inet (PG: native inet; MySQL: varchar(45); SQLite: TEXT)
 ```
 
-`U` is especially useful for primary keys in PostgreSQL. `p` provides a shorthand for auto-incrementing integer columns.
+`U` is especially useful for primary keys in PostgreSQL. `p` provides a shorthand for auto-incrementing integer columns. `J` gives you PG's native jsonb binary JSON type. `I` gives you PG's native inet type for IP addresses.
 
 ### Q9: Version control?
 

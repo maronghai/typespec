@@ -117,12 +117,12 @@ pub fn parseFusedTypeModifier(tok: []const u8, line_no: usize) ?FusedTypeResult 
     return null;
 }
 
-/// Parse type token: n, N, i, m, M, s, S, b, B, j, d, t, T, U, p, s128, 16,2, 11
+/// Parse type token: n, N, i, m, M, s, S, b, B, j, J, I, d, t, T, U, p, s128, 16,2, 11
 pub fn tryParseType(tok: []const u8) ?TypeInfo {
     if (tok.len == 0) return null;
     const c = tok[0];
     switch (c) {
-        'n', 'N', 'i', 'm', 'M', 's', 'S', 'b', 'B', 'j', 'd', 't', 'T', 'U', 'p' => {
+        'n', 'N', 'i', 'm', 'M', 's', 'S', 'b', 'B', 'j', 'J', 'I', 'd', 't', 'T', 'U', 'p' => {
             if (tok.len == 1) {
                 if (c == 's') return .{ .varchar_explicit = 0 };
                 return .{ .simple = tok };

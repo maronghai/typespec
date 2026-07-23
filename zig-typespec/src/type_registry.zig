@@ -34,6 +34,8 @@ pub fn lookupSqlTypeDirect(tps_symbol: []const u8, dialect: Dialect) ?sql_type_m
         .{ .tps = "s", .mysql = .{ .varchar = 0 }, .pg = .{ .varchar = 0 }, .sqlite = .{ .varchar = 0 } },
         .{ .tps = "U", .mysql = .uuid, .pg = .uuid, .sqlite = .{ .passthrough = "TEXT" } },
         .{ .tps = "p", .mysql = .serial, .pg = .serial, .sqlite = .{ .passthrough = "INTEGER" } },
+        .{ .tps = "J", .mysql = .jsonb, .pg = .jsonb, .sqlite = .jsonb },
+        .{ .tps = "I", .mysql = .inet, .pg = .inet, .sqlite = .inet },
     };
     for (&SYMBOL_MAP) |entry| {
         if (std.mem.eql(u8, entry.tps, tps_symbol)) {

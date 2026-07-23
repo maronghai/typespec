@@ -25,11 +25,13 @@ pub const SqlType = union(enum) {
     text,
     blob,
     json,
+    jsonb,
     datetime,
     date,
     timestamptz,
     boolean,
     uuid,
+    inet,
     serial,
     enum_values: []const []const u8,
     /// Raw SQL pass-through (custom type override).
@@ -70,10 +72,12 @@ pub const SqlType = union(enum) {
             .text => try w.writeAll("{\"type\":\"string\"}"),
             .blob => try w.writeAll("{\"type\":\"string\",\"contentEncoding\":\"base64\"}"),
             .json => try w.writeAll("{\"type\":\"object\"}"),
+            .jsonb => try w.writeAll("{\"type\":\"object\"}"),
             .datetime, .timestamptz => try w.writeAll("{\"type\":\"string\",\"format\":\"date-time\"}"),
             .date => try w.writeAll("{\"type\":\"string\",\"format\":\"date\"}"),
             .boolean => try w.writeAll("{\"type\":\"boolean\"}"),
             .uuid => try w.writeAll("{\"type\":\"string\",\"format\":\"uuid\"}"),
+            .inet => try w.writeAll("{\"type\":\"string\",\"format\":\"ipv4\"}"),
             .enum_values => |vals| {
                 try w.writeAll("{\"type\":\"string\",\"enum\":[");
                 for (vals, 0..) |v, vi| {

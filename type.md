@@ -19,6 +19,8 @@ A minimal DSL for declaring database field types using single-character symbols 
 | `b` | boolean | `active b` |
 | `B` | blob | `data B` |
 | `j` | json | `meta j` |
+| `J` | jsonb | `config J` |
+| `I` | inet | `ip_addr I` |
 | `d` | date | `vip_on d` |
 | `t` | datetime | `create_at t` |
 | `T` | timestamptz | `created T` |
@@ -93,13 +95,15 @@ When a field has no type symbol, it defaults to `s` (varchar). This makes the sy
 |--------|----------|-------------|
 | `B` | blob | Binary data (images, files, serialized objects) |
 | `j` | json | JSON document (MySQL 5.7+, PostgreSQL, etc.) |
+| `J` | jsonb | Binary JSON (PostgreSQL native; MySQL maps to json, SQLite to TEXT) |
 
-### 1.7 UUID & Serial
+### 1.7 Network & UUID
 
 | Symbol | SQL Type | Description |
 |--------|----------|-------------|
-| `U` | uuid | UUID type (PG: native uuid; MySQL: char(36); SQLite: TEXT) |
-| `p` | serial | Auto-incrementing integer (PG: serial; MySQL/SQLite: int) |
+| `I` | inet | IP address (PostgreSQL native inet; MySQL maps to varchar(45), SQLite to TEXT) |
+| `U` | uuid | UUID (MySQL maps to char(36), PG to uuid, SQLite to TEXT) |
+| `p` | serial | Auto-incrementing integer primary key |
 
 ### 1.8 Enum
 
@@ -189,7 +193,7 @@ The complete type symbol EBNF is defined in [`grammar.ebnf`](grammar.ebnf). Here
 | `varchar_explicit` | `"s", positive_int` (e.g. `s128` → varchar(128)) |
 | `text_type` | `"S"` |
 | `enum_type` | `"e", "(", (word \| string_literal), {",", (word \| string_literal)}, ")"` |
-| `atomic_type` | `"b" \| "B" \| "j" \| "d" \| "t" \| "T" \| "U" \| "p"` |
+| `atomic_type` | `"b" \| "B" \| "j" \| "J" \| "I" \| "d" \| "t" \| "T" \| "U" \| "p"` |
 
 ### Disambiguation
 
@@ -307,6 +311,8 @@ n             ; int
 |b            ; boolean
 |B            ; blob
 |j            ; json
+|J            ; jsonb
+|I            ; inet
 |t            ; datetime
 |d            ; date
 |T            ; timestamptz
@@ -319,7 +325,7 @@ n             ; int
 ZZ concatenates the branches into a single alternation, wrapped with word boundaries:
 
 ```
-\b(?:[nNiImMSBbdjtTUp]|\d+(?:,\d+)?|s\d+|e\([^)]+\))\b
+\b(?:[nNiImMSBbdjJItTUp]|\d+(?:,\d+)?|s\d+|e\([^)]+\))\b
 ```
 
 **Breakdown:**
@@ -369,6 +375,8 @@ typespec schema.tps -d postgres  # alias
 | `b` | `boolean` | `boolean` | Same (MySQL stores as tinyint(1)) |
 | `B` | `blob` | `bytea` | PG uses bytea for binary |
 | `j` | `json` | `json` | Same |
+| `J` | `json` | `jsonb` | PG has native jsonb; MySQL maps to json |
+| `I` | `varchar(45)` | `inet` | PG has native inet; MySQL uses varchar for IP storage |
 | `d` | `date` | `date` | Same |
 | `t` | `datetime` | `timestamp` | PG has no datetime type |
 | `T` | `timestamp` | `timestamptz` | Timestamp with time zone |

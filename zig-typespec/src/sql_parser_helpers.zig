@@ -127,8 +127,25 @@ pub fn parseDefaultValue(self: *sp.SqlParser) ![]const u8 {
     if (self.peek() == '\'') {
         return self.parseStringLiteral();
     }
-    // Unquoted default value: number, NULL, CURRENT_TIMESTAMP, NOW(), gen_random_uuid(), etc.
+    // Parenthesized expression: (1 + 2), (NOW()), etc.
+    if (self.peek() == '(') {
+        const start = self.pos;
+        self.advance(); // (
+        var depth: usize = 1;
+        while (self.pos < self.src.len and depth > 0) {
+            const c = self.peek();
+            if (c == '(') depth += 1 else if (c == ')') depth -= 1;
+            if (depth > 0) self.advance();
+        }
+        if (self.peek() == ')') self.advance();
+        return self.src[start..self.pos];
+    }
+    // Unquoted default value: -1, number, NULL, CURRENT_TIMESTAMP, NOW(), gen_random_uuid(), TRUE, FALSE, etc.
     const start = self.pos;
+    // Handle leading sign: -1, +1
+    if (self.peek() == '-' or self.peek() == '+') {
+        self.advance();
+    }
     self.skipWord();
     // Handle decimal numbers: 0.00, 1.5, etc.
     if (self.peek() == '.' and self.pos + 1 < self.src.len) {
@@ -156,6 +173,40 @@ pub fn parseDefaultValue(self: *sp.SqlParser) ![]const u8 {
         if (self.peek() == ')') self.advance();
     }
     return self.src[start..self.pos];
+}
+
+/// Parse a general SQL expression — captures everything up to the given delimiter
+/// (comma, closing paren, or end of input). Handles balanced parentheses and
+/// quoted strings. Returns the raw expression text.
+pub fn parseExpression(self: *sp.SqlParser) []const u8 {
+    const start = self.pos;
+    var depth: usize = 0;
+    while (self.pos < self.src.len) {
+        const c = self.peek();
+        if (c == '(') {
+            depth += 1;
+            self.advance();
+        } else if (c == ')') {
+            if (depth == 0) break;
+            depth -= 1;
+            self.advance();
+        } else if (c == '\'') {
+            // Skip quoted string
+            self.advance();
+            while (self.pos < self.src.len and self.peek() != '\'') {
+                if (self.peek() == '\\' and self.pos + 1 < self.src.len) {
+                    self.advance(); // skip backslash
+                }
+                self.advance();
+            }
+            if (self.peek() == '\'') self.advance();
+        } else if (c == ',' and depth == 0) {
+            break;
+        } else {
+            self.advance();
+        }
+    }
+    return std.mem.trim(u8, self.src[start..self.pos], " \t\r\n");
 }
 
 // ─── Expression Parsing ────────────────────────────────────────

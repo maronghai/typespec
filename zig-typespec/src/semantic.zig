@@ -45,6 +45,7 @@ pub const DEFAULT_PASSES = [_]SemanticPass{
     .{ .name = "suffix_inference", .run = runSuffixInference, .depends_on = &.{"autofk"} },
     .{ .name = "validate", .run = runValidate, .depends_on = &.{ "autofk", "suffix_inference" } },
     .{ .name = "validate_type_modifiers", .run = runValidateTypeModifiers, .depends_on = &.{"suffix_inference"} },
+    .{ .name = "validate_indexes", .run = runValidateIndexes, .depends_on = &.{"autofk"} },
 };
 
 // ─── SemanticAnalyzer ──────────────────────────────────────────
@@ -464,6 +465,45 @@ pub fn diagnosticTrace(resolved: ResolvedAst) void {
             std.debug.print("  L{d}: {s}\n", .{ sc.line_no, sc.text });
         }
         std.debug.print("\n", .{});
+    }
+}
+
+// ─── validate_indexes Pass ───────────────────────────────────────
+
+fn runValidateIndexes(ctx: *PassContext) !void {
+    for (ctx.tables.items) |*table| {
+        // Check for duplicate index names within a table
+        for (table.indexes, 0..) |idx, i| {
+            if (idx.name.len == 0) continue;
+            for (table.indexes[i + 1 ..]) |other| {
+                if (std.mem.eql(u8, idx.name, other.name)) {
+                    ctx.diagnostics.push(.{
+                        .severity = .warning,
+                        .line_no = other.line_no,
+                        .message = std.fmt.allocPrint(ctx.alloc, "duplicate index name '{s}' in table '{s}'", .{ idx.name, table.name }) catch return,
+                    });
+                }
+            }
+        }
+        // Check for index fields referencing non-existent columns
+        for (table.indexes) |idx| {
+            for (idx.fields) |field_name| {
+                var found = false;
+                for (table.fields) |col| {
+                    if (std.mem.eql(u8, col.name, field_name)) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    ctx.diagnostics.push(.{
+                        .severity = .warning,
+                        .line_no = idx.line_no,
+                        .message = std.fmt.allocPrint(ctx.alloc, "index '{s}' references non-existent column '{s}' in table '{s}'", .{ idx.name, field_name, table.name }) catch return,
+                    });
+                }
+            }
+        }
     }
 }
 

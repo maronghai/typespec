@@ -184,7 +184,7 @@ pub const ResolvedTable = struct {
     name: []const u8,
     comment: ?[]const u8,
     engine: ?[]const u8,
-    fields: []const Field,
+    fields: []Field,
     fks: []const FkDecl,
     indexes: []const IndexDecl,
     line_no: usize,

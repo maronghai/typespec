@@ -142,6 +142,8 @@ One character = one type. Case matters.
 | `b` | boolean | boolean | True/false |
 | `B` | blob | bytea | Binary data |
 | `j` | json | json | JSON document |
+| `J` | json | jsonb | Binary JSON (PG native jsonb) |
+| `I` | varchar(45) | inet | IP address (PG native inet) |
 | `d` | date | date | Date only |
 | `t` | datetime | timestamp | Date + time |
 | `T` | timestamp | timestamptz | Timestamp with time zone |
@@ -434,7 +436,7 @@ decimal_type  = "m" | "M"
 string_type   = "s" | varchar_explicit | "S"
 varchar_explicit = "s", positive_int
 enum_type     = "e", "(", (word | quoted_word), {",", (word | quoted_word)}, ")"
-atomic_type   = "b" | "B" | "j" | "d" | "t" | "T" | "U" | "p"
+atomic_type   = "b" | "B" | "j" | "J" | "I" | "d" | "t" | "T" | "U" | "p"
 quoted_word   = "'", word, "'"
 modifier      = "++" | "+" | "!" | "*=" | "*" | "=" | "u" | "@u" | "@"
 foreign_key_decl = ">", field_name, WS, ref_table, [".", ref_field],

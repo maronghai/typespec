@@ -68,12 +68,17 @@ text_type        = "S" ;                           (* MySQL: text *)
 enum_type        = "e", "(", enum_val, { ",", enum_val }, ")" ;
 enum_val         = word | string_literal ;
 
-atomic_type      = "b" | "B" | "j" | "d" | "t" ;
+atomic_type      = "b" | "B" | "j" | "J" | "I" | "d" | "t" | "T" | "U" | "p" ;
                    (* b → MySQL: tinyint(1) (boolean) *)
                    (* B → MySQL: blob *)
                    (* j → MySQL: json *)
+                   (* J → MySQL: json, PG: jsonb — JSONB variant *)
+                   (* I → MySQL: varchar(45), PG: inet — IP address *)
                    (* d → MySQL: date *)
                    (* t → MySQL: datetime *)
+                   (* T → timestamptz *)
+                   (* U → uuid *)
+                   (* p → serial *)
 
 (* ── Modifiers ── *)
 (* `+` is syntactically unambiguous but semantically               *)

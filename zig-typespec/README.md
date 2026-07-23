@@ -124,7 +124,7 @@ typespec reverse schema.sql -t -o schema.tps
 
 | Feature | Input (SQL) | Output (.tps) |
 |---------|-------------|---------------|
-| Types | `int`, `bigint`, `smallint`, `varchar(N)`, `decimal(P,S)`, `text`, `boolean`, `blob`, `json`, `date`, `datetime`, `timestamptz`, `uuid`, `serial`, `bit(1)`, `ENUM(...)` | `n`, `N`, `i`, `sN`, `m`/`M`, `S`, `b`, `B`, `j`, `d`, `t`, `T`, `U`, `p`, `b`, `e(...)` |
+| Types | `int`, `bigint`, `smallint`, `varchar(N)`, `decimal(P,S)`, `text`, `boolean`, `blob`, `json`, `jsonb`, `inet`, `date`, `datetime`, `timestamptz`, `uuid`, `serial`, `bit(1)`, `ENUM(...)` | `n`, `N`, `i`, `sN`, `m`/`M`, `S`, `b`, `B`, `j`, `J`, `I`, `d`, `t`, `T`, `U`, `p`, `b`, `e(...)` |
 | Modifiers | `NOT NULL`, `AUTO_INCREMENT`, `PRIMARY KEY`, `UNSIGNED` | `*`, `+`, `!`, `+n`/`+N`/`+i` prefix (fused: `++` = AI+PK) |
 | Defaults | `DEFAULT 0`, `DEFAULT 'val'`, `DEFAULT CURRENT_TIMESTAMP`, `DEFAULT b'0'` | `=0`, `=val`, `+`/`++` on datetime, `=0` |
 | Suffix inference | `user_id int` → `user_id` (type omitted) | `_id`→int, `_on`→date, `_at`→datetime, default→varchar(255) |
@@ -300,7 +300,7 @@ Tokenizer    Line classification + token splitting
 Parser       AST construction (tokens → AST via ast.zig types)
   │
   ▼
-Semantic     Template resolution, inheritance merging, suffix inference, autofk
+Semantic     Template resolution, inheritance merging, suffix inference, autofk, validate_indexes
   │
   ▼
 ResolvedAst
@@ -396,7 +396,9 @@ src/
 ├── dialect_common.zig   Shared PG/SQLite dialect functions
 ├── dialect_enum.zig     Dialect enum (mysql, pg, sqlite)
 ├── sql_type.zig         SqlType union + toSql() (single source of truth)
-├── codegen.zig          SQL DDL generation via DialectBackend vtable
+├── codegen.zig          SQL DDL generation via DialectBackend vtable (orchestrator)
+├── codegen_columns.zig  Column definition rendering + isDominatedByExplicitIndex helper
+├── codegen_indexes.zig  Inline and standalone index emission
 ├── diagnostic.zig       Error/warning reporting with source context
 ├── diff.zig             Schema diff engine (AST-level, rename detection)
 ├── diff_fields.zig      Field-level diffing + rename detection

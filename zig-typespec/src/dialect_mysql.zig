@@ -213,11 +213,13 @@ fn mysqlRenderType(w: *Writer, sql_type: SqlType) anyerror!void {
         .text => try w.writeAll("text"),
         .blob => try w.writeAll("blob"),
         .json => try w.writeAll("json"),
+        .jsonb => try w.writeAll("json"),
         .datetime => try w.writeAll("datetime"),
         .date => try w.writeAll("date"),
         .timestamptz => try w.writeAll("timestamp"),
         .boolean => try w.writeAll("boolean"),
         .uuid => try w.writeAll("char(36)"),
+        .inet => try w.writeAll("varchar(45)"),
         .serial => try w.writeAll("int"),
         .enum_values => |vals| {
             try w.writeAll("ENUM(");
