@@ -57,6 +57,7 @@ TypeSpec is a compiler that transforms `.tps` schema files into SQL DDL. It cons
 | `parser.zig` | `parse_template.zig` | Template header parsing + slot detection |
 | `parser.zig` | `parse_table.zig` | Table header parsing + engine token stripping |
 | `parser.zig` | `parse_trace.zig` | Parser diagnostic trace output (debug mode) |
+| `parser.zig` | `parse_recovery.zig` | Error handling + sync point detection for error recovery |
 | `diff.zig` | `diff_fields.zig` | Field-level diffing + rename detection + equality helpers |
 | `diff.zig` | `diff_indexes.zig` | Index diffing |
 | `diff.zig` | `diff_fks.zig` | FK diffing |
@@ -86,7 +87,7 @@ Input (.tps text)
     Output: []Line (line_type + tokens)
     │
     ▼
-[2] Parser (parser.zig, 440 lines + 8 parse_*.zig modules)
+[2] Parser (parser.zig, 425 lines + 9 parse_*.zig modules)
     Token-level parsing into AST
     Output: Ast (schema, templates, tables, sql_comments)
     │
@@ -97,7 +98,7 @@ Input (.tps text)
     │
     ▼
 [4] Semantic Analyzer (semantic.zig, 789 lines)
-    Pass manager: validate_template_types, autofk, suffix_inference, validate, validate_type_modifiers, validate_indexes
+    Pass manager: validate_template_types, autofk, suffix_inference, validate, validate_type_modifiers, validate_indexes, validate_schema
     Output: ResolvedAst (templates resolved + passes applied)
     │
     ▼
@@ -245,12 +246,20 @@ PG and SQLite share 4/5 method implementations. `emitCheckExpr` is a shared stan
 
 ```zig
 SemanticPass = struct { name: []const u8, run: fn(*PassContext) !void, depends_on: []const []const u8 };
-DEFAULT_PASSES = [_]SemanticPass{ validate_template_types, autofk, suffix_inference, validate, validate_type_modifiers, validate_indexes };
+DEFAULT_PASSES = [_]SemanticPass{ validate_template_types, autofk, suffix_inference, validate, validate_type_modifiers, validate_indexes, validate_schema };
 ```
 
 New passes can be added by:
 1. Writing a function with signature `fn(*PassContext) !void`
 2. Adding a `SemanticPass` entry to `DEFAULT_PASSES`
+
+### Schema-Level Validation (validate_schema pass)
+
+The `validate_schema` pass runs after all table-level passes and performs global consistency checks:
+
+- **Circular FK detection**: DFS traversal of the FK dependency graph. Detects A→B→C→A cycles and reports them as warnings (non-blocking).
+- **FK target field existence**: Validates that all FK referenced fields exist in the target table. Reports errors (blocking).
+- **Self-referencing FK field count**: Validates that self-referencing FKs have matching local/referenced field counts. Reports errors (blocking).
 
 ## Template Extraction Algorithm (Reverse Pipeline)
 
@@ -394,13 +403,13 @@ zig build bench -- bench/large.tps 5         # large schema
 | Layer | Files | Count | Coverage |
 |-------|-------|-------|----------|
 | Unit tests | `type_map.zig`, `type_registry.zig`, `sql_type.zig`, `tokenizer.zig`, `parser.zig`, `diff.zig`, `diff_semantic.zig`, `semantic.zig`, `template.zig`, `reverse_column.zig`, `sql_parser_test.zig` | ~160 | Core logic |
-| MySQL golden | `tests/test.sh` | 84 | Full pipeline |
-| PG golden | `tests/test_postgres.sh` | 82 | Full pipeline |
+| MySQL golden | `tests/test.sh` | 85 | Full pipeline |
+| PG golden | `tests/test_postgres.sh` | 83 | Full pipeline |
 | SQLite golden | `tests/test_sqlite.sh` | 24 | Full pipeline |
 | Migrate golden | `tests/test_migrate.sh` | 34 | Diff + migration SQL |
 | Reverse golden | `tests/test_reverse.sh` | 15 | SQL → .tps |
 | Diff golden | `tests/test_diff.sh` | 12 | Schema comparison |
-| Error recovery | `tests/test_error_recovery.sh` | 9 | Parse error handling |
+| Error recovery | `tests/test_error_recovery.sh` | 12 | Parse error handling + schema-level validation |
 | JSON Schema | `tests/test_json_schema.sh` | 1 | JSON Schema output |
 | Roundtrip | `tests/test_roundtrip.sh` | 20 | Forward → reverse fidelity |
-| **Total** | | **~440+** | |
+| **Total** | | **~450+** | |

@@ -10,6 +10,7 @@ const parse_typedef = @import("parse_typedef.zig");
 const parse_template = @import("parse_template.zig");
 const parse_table = @import("parse_table.zig");
 const parse_trace = @import("parse_trace.zig");
+const parse_recovery = @import("parse_recovery.zig");
 const Ast = ast_mod.Ast;
 const Table = ast_mod.Table;
 const Field = ast_mod.Field;
@@ -46,28 +47,12 @@ pub const Parser = struct {
     /// Record a parse error via DiagnosticCollector, or signal caller to propagate.
     /// Returns true if error was recorded (caller should continue), false to propagate.
     fn handleParseError(self: *Parser, err: anyerror, line: tk.Line, comptime message: []const u8) bool {
-        if (self.diagnostics) |dc| {
-            dc.record(.{
-                .severity = .@"error",
-                .line_no = line.line_no,
-                .col = if (line.tokens.len > 0) diag.tokenColumn(line.tokens[0], line.raw) else null,
-                .message = message,
-                .actual = @errorName(err),
-                .source_line = line.raw,
-            });
-            return true;
-        }
-        return false;
+        return parse_recovery.handleParseError(self.diagnostics, err, line, message);
     }
 
     /// Compute SourceLocation from a tokenized line and a token within it.
     fn locFromLine(line: tk.Line, tok: []const u8) SourceLocation {
-        const col = diag.tokenColumn(tok, line.raw);
-        return .{
-            .line = line.line_no,
-            .col = col,
-            .offset = line.offset + col - 1,
-        };
+        return parse_recovery.locFromLine(line, tok);
     }
 
     pub fn parse(self: *Parser, lines: []const tk.Line) !Ast {
@@ -216,6 +201,14 @@ pub const Parser = struct {
                             continue;
                         };
                         try cur_fields.append(self.alloc, fld);
+                    } else {
+                        diag.printDiagnostic(.{
+                            .severity = .warning,
+                            .line_no = line.line_no,
+                            .col = if (line.tokens.len > 0) diag.tokenColumn(line.tokens[0], line.raw) else null,
+                            .message = "field declaration outside table or template — ignored",
+                            .source_line = line.raw,
+                        });
                     }
                 },
                 .Slot => {
@@ -230,6 +223,14 @@ pub const Parser = struct {
                             .comment = null,
                             .line_no = line.line_no,
                             .loc = if (line.tokens.len > 0) Parser.locFromLine(line, line.tokens[0]) else null,
+                        });
+                    } else {
+                        diag.printDiagnostic(.{
+                            .severity = .warning,
+                            .line_no = line.line_no,
+                            .col = if (line.tokens.len > 0) diag.tokenColumn(line.tokens[0], line.raw) else null,
+                            .message = "slot declaration outside template — ignored",
+                            .source_line = line.raw,
                         });
                     }
                 },
@@ -302,11 +303,25 @@ pub const Parser = struct {
             }
         }
 
-        // Flush last block
+        // Flush last block — catch allocation errors gracefully
         if (in_block == .template) {
-            try self.flushCurrentTemplate(&templates, cur_name, cur_parents_buf, cur_parents_len, &cur_fields, cur_line_no, cur_loc);
+            self.flushCurrentTemplate(&templates, cur_name, cur_parents_buf, cur_parents_len, &cur_fields, cur_line_no, cur_loc) catch |err| {
+                diag.printDiagnostic(.{
+                    .severity = .@"error",
+                    .line_no = cur_line_no,
+                    .message = "failed to flush template block",
+                    .actual = @errorName(err),
+                });
+            };
         } else if (in_block == .table) {
-            try self.flushCurrentTable(&tables, cur_name, cur_comment, cur_template_ref, cur_engine, &cur_fields, &cur_fks, &cur_indexes, cur_line_no, cur_loc);
+            self.flushCurrentTable(&tables, cur_name, cur_comment, cur_template_ref, cur_engine, &cur_fields, &cur_fks, &cur_indexes, cur_line_no, cur_loc) catch |err| {
+                diag.printDiagnostic(.{
+                    .severity = .@"error",
+                    .line_no = cur_line_no,
+                    .message = "failed to flush table block",
+                    .actual = @errorName(err),
+                });
+            };
         }
 
         // Merge custom_types into schema

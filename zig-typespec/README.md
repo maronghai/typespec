@@ -300,7 +300,7 @@ Tokenizer    Line classification + token splitting
 Parser       AST construction (tokens → AST via ast.zig types)
   │
   ▼
-Semantic     Template resolution, inheritance merging, suffix inference, autofk, validate_indexes
+Semantic     Template resolution, inheritance merging, suffix inference, autofk, validate_indexes, validate_schema
   │
   ▼
 ResolvedAst
@@ -376,7 +376,7 @@ src/
 ├── main.zig             Entry point, CLI parsing, pipeline orchestration
 ├── tokenizer.zig        Line classification (Schema/Table/Field/FK/Index/Slot/Comment)
 ├── ast.zig              AST type definitions (Field, Table, Template, TypeInfo, etc.)
-├── parser.zig           Parser (tokens → AST, 440 lines + 8 parse_*.zig modules)
+├── parser.zig           Parser (tokens → AST, 425 lines + 9 parse_*.zig modules)
 ├── parse_field.zig      Field parsing (fused type, enum, modifier, inline FK/CHECK)
 ├── parse_fk.zig         Foreign key parsing (inline + standalone FK)
 ├── parse_check.zig      CHECK constraint parsing (range, IN, comparison)
@@ -385,7 +385,8 @@ src/
 ├── parse_template.zig   Template header parsing + slot detection
 ├── parse_table.zig      Table header parsing + engine token stripping
 ├── parse_trace.zig      Parser diagnostic trace output (debug mode)
-├── semantic.zig         Template resolution, suffix inference, autofk + PassManager
+├── parse_recovery.zig   Error handling + sync point detection for error recovery
+├── semantic.zig         Template resolution, suffix inference, autofk + PassManager (7 passes)
 ├── type_map.zig         Helper functions (isNumericTpsType, etc.) + SqlType re-export
 ├── type_registry.zig    TPS symbol → SqlType direct mapping (CORE_TYPES)
 ├── typed_ast.zig        TypeResolver: TypeInfo → SqlType per dialect (TypedAst IR)
@@ -425,9 +426,9 @@ src/
 └── test_helpers.zig     Shared test factory functions
 ```
 
-### Parser Module Split (v0.4.6)
+### Parser Module Split
 
-The parser was split into 4 extracted modules (~790 lines total) for modularity and unit testing. The main `parser.zig` retains its own implementations; the extracted modules serve as standalone reference implementations that can be tested independently.
+The parser was split into 9 extracted modules for modularity and unit testing. `parser.zig` (425 lines) retains the main parse loop and state machine; extracted modules handle field, FK, CHECK, index, typedef, template, table, trace, and error recovery parsing.
 
 ## Testing
 
@@ -435,14 +436,15 @@ The parser was split into 4 extracted modules (~790 lines total) for modularity 
 
 | Script | Tests | Description |
 |--------|-------|-------------|
-| `tests/test.sh` | 84 | MySQL forward compilation golden files |
-| `tests/test_postgres.sh` | 82 | PostgreSQL forward compilation golden files |
+| `tests/test.sh` | 85 | MySQL forward compilation golden files |
+| `tests/test_postgres.sh` | 83 | PostgreSQL forward compilation golden files |
 | `tests/test_sqlite.sh` | 24 | SQLite forward compilation |
 | `tests/test_migrate.sh` | 34 | Migration SQL golden files |
 | `tests/test_reverse.sh` | 15 | Reverse engineering golden files (MySQL/PG/SQLite) |
 | `tests/test_diff.sh` | 12 | Schema diff golden files |
+| `tests/test_error_recovery.sh` | 12 | Parse error handling + schema-level validation |
 | `zig build test` | ~160 | Zig inline unit tests |
-| **Total** | **~411+** | |
+| **Total** | **~423+** | |
 
 ### Golden-file tests (compile)
 

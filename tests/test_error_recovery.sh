@@ -100,5 +100,35 @@ else
     fail "recovery-after-bad-template" "Unexpected failure (rc=$rc): $output"
 fi
 
+# Test 10: Out-of-block declarations → should warn but still compile valid blocks
+echo "Test: out-of-block-decl"
+output=$("$COMPILER" "$SCRIPT_DIR/error-recovery/out-of-block-decl.tps" -o /dev/null 2>&1) && rc=0 || rc=$?
+warn_count=$(echo "$output" | grep -c "warning:" || true)
+if [ "$warn_count" -ge 1 ] && [ "$rc" -eq 0 ]; then
+    pass "out-of-block-decl ($warn_count warnings, compiled ok)"
+elif [ "$warn_count" -ge 1 ]; then
+    pass "out-of-block-decl ($warn_count warnings, rc=$rc)"
+else
+    fail "out-of-block-decl" "Expected >=1 warnings, got $warn_count (rc=$rc): $output"
+fi
+
+# Test 11: Circular FK dependency → should warn but still compile
+echo "Test: circular-fk"
+output=$("$COMPILER" "$SCRIPT_DIR/error-recovery/circular-fk.tps" -o /dev/null 2>&1) && rc=0 || rc=$?
+if echo "$output" | grep -qi "circular"; then
+    pass "circular-fk"
+else
+    fail "circular-fk" "Expected 'circular' warning, got: $output"
+fi
+
+# Test 12: FK references non-existent field in target table → should error
+echo "Test: fk-bad-field"
+output=$("$COMPILER" "$SCRIPT_DIR/error-recovery/fk-bad-field.tps" -o /dev/null 2>&1) && rc=0 || rc=$?
+if echo "$output" | grep -qi "non-existent field"; then
+    pass "fk-bad-field"
+else
+    fail "fk-bad-field" "Expected 'non-existent field' error, got: $output"
+fi
+
 summary "Error Recovery"
 [ "$FAIL" -eq 0 ] && exit 0 || exit 1

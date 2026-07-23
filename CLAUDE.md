@@ -21,13 +21,13 @@ cd zig-typespec && zig build bench -- --check          # Check for regressions v
 ### Golden File Tests (shell-based, compare compiler output against .sql golden files)
 
 ```bash
-bash tests/test.sh                  # MySQL (84 tests)
-bash tests/test_postgres.sh         # PostgreSQL (82 tests)
+bash tests/test.sh                  # MySQL (85 tests)
+bash tests/test_postgres.sh         # PostgreSQL (83 tests)
 bash tests/test_sqlite.sh           # SQLite (24 tests)
 bash tests/test_migrate.sh          # Migration (34 tests)
 bash tests/test_reverse.sh          # Reverse engineering (15 tests)
 bash tests/test_diff.sh             # Schema diff (12 tests)
-bash tests/test_error_recovery.sh   # Error recovery (9 tests)
+bash tests/test_error_recovery.sh   # Error recovery (12 tests)
 bash tests/test_json_schema.sh      # JSON Schema (1 test)
 bash tests/test_roundtrip.sh        # Round-trip (20 tests)
 ```
@@ -61,7 +61,7 @@ Run a single golden test by filter: `bash tests/test.sh 01` (matches test name s
 
 - **DialectBackend vtable** ([dialect.zig](zig-typespec/src/dialect.zig)): 23 core + 6 optional function pointers + 3 behavioral flags for dialect-specific SQL rendering. Includes `emitForeignKey` (shared FK rendering via `dialect_common.zig:emitForeignKeyShared`) and `reverseLookup` for dialect-specific reverse engineering. [codegen.zig](zig-typespec/src/codegen.zig) is fully dialect-agnostic (zero `switch(dialect)` in production code). Per-dialect implementations: [dialect_mysql.zig](zig-typespec/src/dialect_mysql.zig), [dialect_pg.zig](zig-typespec/src/dialect_pg.zig), [dialect_sqlite.zig](zig-typespec/src/dialect_sqlite.zig); shared PG/SQLite logic in [dialect_common.zig](zig-typespec/src/dialect_common.zig). Adding a new SQL dialect = new enum variant + new `dialect_<name>.zig` (~200 lines).
 
-- **Semantic Pass Manager** ([semantic.zig](zig-typespec/src/semantic.zig)): Extensible array of `SemanticPass` structs with `depends_on` dependency declarations. Current passes: `autofk` → `suffix_inference` → `validate` → `validate_type_modifiers` → `validate_indexes`. Debug mode validates dependency ordering. New passes: write a `fn(*PassContext) !void` and add to `DEFAULT_PASSES`.
+- **Semantic Pass Manager** ([semantic.zig](zig-typespec/src/semantic.zig)): Extensible array of `SemanticPass` structs with `depends_on` dependency declarations. Current passes (7): `validate_template_types` → `autofk` → `suffix_inference` → `validate` → `validate_type_modifiers` → `validate_indexes` → `validate_schema`. The `validate_schema` pass performs global consistency checks: circular FK detection (DFS, warning), FK target field existence (error), self-referencing FK field count validation (error). Debug mode validates dependency ordering. New passes: write a `fn(*PassContext) !void` and add to `DEFAULT_PASSES`.
 
 - **TypedAst IR** ([typed_ast.zig](zig-typespec/src/typed_ast.zig)): Separates type resolution from code generation. Codegen only outputs strings — no type inference logic.
 
@@ -90,12 +90,13 @@ Run a single golden test by filter: `bash tests/test.sh 01` (matches test name s
 | `sql_parser_helpers.zig` | Identifier/literal/word parsing, whitespace/comment skipping, trailing comment capture, `parseExpression` general expression parser, enhanced `parseDefaultValue` (parentheses, sign support) |
 | `sql_parser_alter.zig` | ALTER TABLE statement parsing |
 | `sql_parser_comment.zig` | COMMENT ON TABLE/COLUMN parsing |
-| `semantic.zig` | Pass manager + template resolution orchestration |
+| `semantic.zig` | Pass manager (7 passes: validate_template_types, autofk, suffix_inference, validate, validate_type_modifiers, validate_indexes, validate_schema) + template resolution orchestration |
 | `diff.zig` | Table-level diff orchestration + SchemaDiff types (accepts optional Dialect for semantic comparison) |
-| `parser.zig` | Token-level `.tps` parser → AST (delegates to parse_*.zig modules; main dispatch + error recovery) |
+| `parser.zig` | Token-level `.tps` parser → AST (delegates to parse_*.zig modules; main dispatch + error recovery via parse_recovery.zig) |
 | `migrate.zig` | Migration SQL generation, 6 sub-functions (emitDroppedTables, emitViewDiffs, emitTableDiffs, emitFieldDiffs, emitIndexDiffs, emitMetadataDiffs, emitFkDiffs). FK rendering via `DialectBackend.emitForeignKey` |
 | `ast_visitor.zig` | Comptime-generic AST traversal utilities (read-only + mutable `walkResolvedTablesMut`; `ResolvedTable.fields` is `[]Field`) |
 | `parse_trace.zig` | Parser diagnostic trace output (debug mode, extracted from parser.zig) |
+| `parse_recovery.zig` | Error handling (handleParseError, locFromLine) + sync point detection (findNextSyncPoint) for forward parser error recovery |
 | `parse_field.zig` | Field declaration parsing (type, modifiers, default, inline FK) |
 | `diff_fields.zig` | Field-level diffing + rename detection + dialect-aware equality helpers |
 | `tokenizer.zig` | Lexical tokenizer (.tps text → Line[]) |
