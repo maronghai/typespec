@@ -9,8 +9,8 @@ id n++
 created t
 ...
 
-#base mid user
+# mid user
 name s32 *
 
-#base mid order
+# mid order
 amount m

@@ -1,6 +1,9 @@
 ; SQLite: foreign key with actions
 $ demo
 
+# user
+id    n++
+
 # order
 id        n++
 user_id   n *
