@@ -47,6 +47,30 @@ Run a single golden test by filter: `bash tests/test.sh 01` (matches test name s
 
 ## Architecture
 
+### Source Layout
+
+```
+rune/src/
+  main.zig, cli.zig, compiler.zig, io.zig, utils.zig   # CLI + glue
+  bench.zig, json_schema.zig, ast_visitor.zig            # standalone modules
+  pipeline/    forward.zig, reverse.zig, diff.zig        # pipeline orchestration
+  parser/      tokenizer.zig, parser.zig, parse_*.zig,   # forward parser (13 files)
+               sql_parser*.zig, sql_parser_test.zig
+  codegen/     codegen.zig, columns.zig, indexes.zig     # SQL code generation
+  dialect/     dialect.zig, enum.zig, mysql.zig,          # dialect backends (7 files)
+               pg.zig, sqlite.zig, common.zig, sqlite_hints.zig
+  reverse/     codegen.zig, column.zig, map.zig,          # reverse engineering (7 files)
+               map_data.zig, fk.zig, check.zig, template_extraction.zig
+  diff/        engine.zig, types.zig, fields.zig,         # diff/migrate (9 files)
+               fks.zig, indexes.zig, format.zig, semantic.zig, migrate.zig
+  types/       ast.zig, resolved_ast.zig, typed_ast.zig,  # type system (8 files)
+               sql_type.zig, type_map.zig, type_registry.zig,
+               type_resolver.zig, symbol_table.zig
+  semantic/    analyzer.zig, pass_manager.zig,            # semantic analysis (6 files)
+               trace.zig, diagnostic.zig, template.zig,
+               test_helpers.zig, pass/*.zig               # 8 pass implementations
+```
+
 ### Three Pipelines
 
 1. **Forward**: `.ss` → Tokenizer → Parser → Template Resolution → Semantic Analyzer → Type Resolver → Codegen → SQL
@@ -59,89 +83,86 @@ Run a single golden test by filter: `bash tests/test.sh 01` (matches test name s
 
 ### Key Design Patterns
 
-- **DialectBackend vtable** ([dialect.zig](rune/src/dialect.zig)): 23 core + 6 optional function pointers + 3 behavioral flags for dialect-specific SQL rendering. Includes `emitForeignKey` (shared FK rendering via `dialect_common.zig:emitForeignKeyShared`) and `reverseLookup` for dialect-specific reverse engineering. [codegen.zig](rune/src/codegen.zig) is fully dialect-agnostic (zero `switch(dialect)` in production code). Per-dialect implementations: [dialect_mysql.zig](rune/src/dialect_mysql.zig), [dialect_pg.zig](rune/src/dialect_pg.zig), [dialect_sqlite.zig](rune/src/dialect_sqlite.zig); shared PG/SQLite logic in [dialect_common.zig](rune/src/dialect_common.zig). Adding a new SQL dialect = new enum variant + new `dialect_<name>.zig` (~200 lines).
+- **DialectBackend vtable** (`dialect/dialect.zig`): 30 function pointers (24 required + 6 optional) + 3 behavioral flags for dialect-specific SQL rendering. `codegen/codegen.zig` is fully dialect-agnostic (zero `switch(dialect)` in production code). Per-dialect: `dialect/mysql.zig`, `dialect/pg.zig`, `dialect/sqlite.zig`; shared logic in `dialect/common.zig`. Adding a new SQL dialect = new enum variant + new `dialect/<name>.zig` (~200 lines).
 
-- **Semantic Pass Manager** ([semantic.zig](rune/src/semantic.zig)): Extensible array of `SemanticPass` structs with `depends_on` dependency declarations. Pass implementations live in [pass/*.zig](rune/src/pass/) sub-modules; `semantic.zig` is the orchestrator (~150 lines production). Current passes (7): `validate_template_types` → `autofk` → `suffix_inference` → `validate` → `validate_type_modifiers` → `validate_indexes` → `validate_schema`. The `validate_schema` pass performs global consistency checks: circular FK detection (DFS, warning), FK target field existence (error), self-referencing FK field count validation (error). Debug mode validates dependency ordering. New passes: create `pass/<name>.zig` with `pub fn run(ctx: *PassContext) !void` and add to `DEFAULT_PASSES`.
+- **Semantic Pass Manager** (`semantic/pass_manager.zig`): `PassContext` + `SemanticPass` interface + `DEFAULT_PASSES` array. Pass implementations in `semantic/pass/*.zig` (8 passes). `semantic/analyzer.zig` orchestrates template resolution + pass execution. Dependency ordering validated at comptime. New passes: create `semantic/pass/<name>.zig` with `pub fn run(ctx: *PassContext) !void` and add to `DEFAULT_PASSES`.
 
-- **TypedAst IR** ([typed_ast.zig](rune/src/typed_ast.zig)): Separates type resolution from code generation. Codegen only outputs strings — no type inference logic.
+- **ResolvedAst IR** (`types/resolved_ast.zig`): `ResolvedTable` + `ResolvedAst` — output of template resolution + semantic passes. Separated from `types/ast.zig` (parser output) for clean IR boundary. Re-exported from `ast.zig` for backward compatibility.
 
-- **Template Slot Merging** ([template.zig](rune/src/template.zig)): Template inheritance with `...` slot controls field insertion order. Merge formula: `parent_before + child_before + <concrete> + child_after + parent_after`. Max 4 parents via mixin syntax (`+`).
+- **TypedAst IR** (`types/typed_ast.zig`): Separates type resolution from code generation. Codegen only outputs strings — no type inference logic.
 
-- **Custom Type System**: `~` directives in schema block define user-defined type aliases with optional dialect overrides. Resolved during type resolution, not parsing.
+- **Template Slot Merging** (`semantic/template.zig`): Template inheritance with `...` slot controls field insertion order. Merge formula: `parent_before + child_before + <concrete> + child_after + parent_after`. Max 4 parents via mixin syntax (`+`).
 
-- **Self-contained SqlType** ([sql_type.zig](rune/src/sql_type.zig)): `SqlType.toSql()` delegates to `DialectBackend.renderType` for dialect-aware rendering. Variants: `int`, `bigint`, `smallint`, `decimal`, `varchar`, `text`, `blob`, `json`, `jsonb`, `datetime`, `date`, `timestamptz`, `boolean`, `uuid`, `inet`, `serial`, `enum_values`, `raw_sql`, `passthrough`. SS symbols: `n`, `N`, `i`, `m`, `M`, `s`, `S`, `b`, `B`, `j`, `J`, `I`, `d`, `t`, `T`, `U`, `p`. `toJsonSchema()` provides dialect-agnostic JSON Schema output.
+- **Self-contained SqlType** (`types/sql_type.zig`): `SqlType.toSql()` delegates to `DialectBackend.renderType` for dialect-aware rendering. `toJsonSchema()` provides dialect-agnostic JSON Schema output.
 
-- **Dialect-Aware Diff** ([diff_semantic.zig](rune/src/diff_semantic.zig)): Type equivalence checking uses canonical SS symbol mapping — different symbols that resolve to the same SQL type are equivalent (e.g. `N4` ↔ `4`), but distinct types like `n` (int) vs `N` (bigint) are NOT equivalent. Diff engine accepts optional `Dialect` parameter.
+- **Dialect-Aware Diff** (`diff/semantic.zig`): Type equivalence checking uses canonical SS symbol mapping — different symbols that resolve to the same SQL type are equivalent (e.g. `N4` ↔ `4`), but distinct types like `n` (int) vs `N` (bigint) are NOT equivalent.
 
-- **Two-Pass FK Diffing** ([diff_fks.zig](rune/src/diff_fks.zig)): First pass matches identical FKs (structure + actions). Second pass matches structurally identical FKs with different actions → `modify` (single ALTER TABLE with DROP+ADD). Remaining unmatched FKs → `drop`/`add`. Produces minimal migration SQL.
+- **Two-Pass FK Diffing** (`diff/fks.zig`): First pass matches identical FKs (structure + actions). Second pass matches structurally identical FKs with different actions → `modify`. Remaining unmatched FKs → `drop`/`add`.
 
-- **Reverse Lookup Vtable**: `DialectBackend.reverseLookup` (optional) allows dialect-specific reverse engineering (e.g. SQLite's heuristic-based INTEGER/TEXT disambiguation). Fallback to general REVERSE_MAP matching when vtable is null.
+- **Reverse Lookup Vtable**: `DialectBackend.reverseLookup` (optional) allows dialect-specific reverse engineering (e.g. SQLite's heuristic-based INTEGER/TEXT disambiguation). Fallback to general `reverse/map.zig` matching when vtable is null.
 
-- **Unified ReverseResult**: `dialect.zig` defines the single `ReverseResult` struct (`sym`, `omit`, `score`, `is_parameterized`). Both `type_registry.zig` and `reverse_column.zig` re-export it — zero duplication across the reverse pipeline.
+- **Unified ReverseResult** (`dialect/dialect.zig`): Single `ReverseResult` struct shared by `types/type_registry.zig` and `reverse/column.zig` — zero duplication across the reverse pipeline.
 
-### Module Roles (by size, largest first)
+### Module Roles
 
-| Module | Role |
-|--------|------|
-| `codegen.zig` | TypedAst → SQL DDL text, orchestrates column/index/constraint emission. FK rendering via `DialectBackend.emitForeignKey`. Tests in `codegen_test.zig` |
-| `codegen_columns.zig` | Column definition rendering (emitColumnDef, emitColumnDefEx, emitDefault) + shared `isDominatedByExplicitIndex()` helper |
-| `codegen_indexes.zig` | Inline and standalone index emission (emitInlineIndexes, emitStandaloneIndexes, emitInlineColumnStandaloneIndexes) |
-| `sql_parser.zig` | Recursive-descent SQL DDL parser (reverse pipeline), delegates to 8 sub-modules |
-| `sql_parser_helpers.zig` | Identifier/literal/word parsing, whitespace/comment skipping, trailing comment capture, `parseExpression` general expression parser, enhanced `parseDefaultValue` (parentheses, sign support) |
-| `sql_parser_alter.zig` | ALTER TABLE statement parsing |
-| `sql_parser_comment.zig` | COMMENT ON TABLE/COLUMN parsing |
-| `semantic.zig` | Pass manager orchestrator + `PassContext` type + `DEFAULT_PASSES` array + `diagnosticTrace`. Pass implementations in `pass/*.zig` sub-modules |
-| `pass/*.zig` | 7 semantic pass implementations: `autofk`, `suffix_inference`, `validate`, `validate_template_types`, `validate_type_modifiers`, `validate_indexes`, `validate_schema` |
-| `diff.zig` | Table-level diff engine + re-exports types from `diff_types.zig`. Tests in `diff_test.zig` |
-| `diff_types.zig` | Shared diff data structures (SchemaDiff, TableDiff, FieldDiff, etc.) — extracted to break diff↔diff_format cycle |
-| `diff_format.zig` | Diff output formatting (imports `diff_types.zig`, not `diff.zig`) |
-| `parser.zig` | Token-level `.ss` parser → AST (delegates to parse_*.zig modules; main dispatch + error recovery via parse_recovery.zig) |
-| `migrate.zig` | Migration SQL generation, 6 sub-functions (emitDroppedTables, emitViewDiffs, emitTableDiffs, emitFieldDiffs, emitIndexDiffs, emitMetadataDiffs, emitFkDiffs). FK rendering via `DialectBackend.emitForeignKey`. Tests in `migrate_test.zig` |
-| `ast_visitor.zig` | Comptime-generic AST traversal utilities (read-only + mutable `walkResolvedTablesMut`; `ResolvedTable.fields` is `[]Field`). Tests in `ast_visitor_test.zig` |
-| `parse_trace.zig` | Parser diagnostic trace output (debug mode, extracted from parser.zig) |
-| `parse_recovery.zig` | Error handling (handleParseError, locFromLine) + sync point detection (findNextSyncPoint) for forward parser error recovery |
-| `parse_field.zig` | Field declaration parsing (type, modifiers, default, inline FK) |
-| `diff_fields.zig` | Field-level diffing + rename detection + dialect-aware equality helpers. Tests in `diff_fields_test.zig` |
-| `tokenizer.zig` | Lexical tokenizer (.ss text → Line[]) |
-| `sql_parser_create.zig` | CREATE TABLE parsing (extracted from sql_parser.zig) |
-| `reverse_map.zig` | Reverse lookup logic (SQL → SS symbol matching via vtable + parameterized types) |
-| `reverse_column.zig` | Column reverse engineering (re-exports dialect.ReverseResult as TypeResult, suffix, inline index detection) |
-| `diagnostic.zig` | Multi-error diagnostic collector with JSON output. Unified across forward and reverse pipelines (`SqlParser` uses `DiagnosticCollector` directly) |
-| `trace.zig` | Shared AST trace formatting (FK actions, FK declarations, index declarations, `fmtTypeInfo`, `fmtModifiers`) used by parser.zig and semantic.zig diagnosticTrace |
-| `template.zig` | Template inheritance resolution and slot-based field merging |
-| `template_extraction.zig` | Template extraction from SQL (reverse pipeline) |
-| `typed_ast.zig` | TypedAst IR: SqlType resolution + ColumnFlags bitflags |
-| `reverse_codegen.zig` | SQL → `.ss` orchestration, 4 sub-functions |
-| `ast.zig` | AST type definitions (Schema, Table, Field, Template, etc.) |
-| `reverse_check.zig` | CHECK constraint reverse engineering |
-| `sql_type.zig` | Self-contained SqlType union with `toSql()` — single source of truth for type rendering |
-| `dialect.zig` | DialectBackend vtable + getBackend() + unified ReverseResult (score + is_parameterized) + canOmitType + emitCheckExpr |
-| `dialect_mysql.zig` | MySQL DialectBackend implementation (~270 lines) |
-| `dialect_sqlite.zig` | SQLite DialectBackend implementation + reverse lookup heuristics (~244 lines) |
-| `dialect_common.zig` | Shared PG/SQLite dialect functions (quoting, indexes, ALTER) |
-| `sqlite_hints.zig` | SQLite-specific type affinity hints + column name heuristics |
-| `reverse_map_data.zig` | REVERSE_MAP data table (SQL ↔ SS type mappings, 46 entries) |
-| `reverse_fk.zig` | FK classification for reverse pipeline |
-| `type_map.zig` | Helper functions (lookupCustomType, isNumericSymType) + SqlType re-export |
-| `type_registry.zig` | SS symbol → SqlType direct mapping (lookupSqlTypeDirect) + CORE_TYPES; re-exports dialect.ReverseResult |
-| `type_resolver.zig` | ResolvedAst → TypedAst type resolution |
-| `diff_indexes.zig` | Index diffing |
-| `diff_fks.zig` | FK diffing — two-pass matching: exact (structure+actions) → structural (structure only, actions changed → modify) |
-| `diff_semantic.zig` | Dialect-aware type equivalence (canonical SS symbol mapping; n≠N, b≠B) |
-| `parse_template.zig` | Template header parsing + slot detection + flush logic |
-| `parse_table.zig` | Table header parsing + engine token stripping + view line parsing |
-| `json_schema.zig` | JSON Schema output (dialect-agnostic) |
-| `pipeline_forward.zig` | Forward pipeline orchestration (no cli.zig dependency) |
-| `pipeline_reverse.zig` | Reverse pipeline + dialect auto-detection |
-| `cli.zig` | CLI argument parsing, help text, Command/ParsedArgs type definitions |
-| `pipeline_diff.zig` | Diff/migrate pipeline orchestration |
-| `compiler.zig` | Re-export hub for pipeline modules |
-| `bench.zig` | Benchmark entry point: per-stage pipeline timing via Io.Clock.Timestamp |
-| `main.zig` | CLI entry point, command dispatch, output format routing |
+| Directory | Module | Role |
+|-----------|--------|------|
+| `pipeline/` | `forward.zig` | `.ss` → SQL orchestration (tokenizer → parser → semantic → type resolver → codegen) |
+| | `reverse.zig` | SQL → `.ss` orchestration + dialect auto-detection |
+| | `diff.zig` | Diff/migrate pipeline orchestration |
+| `parser/` | `parser.zig` | Token-level `.ss` parser → AST, dispatches to parse_* modules |
+| | `parse_field.zig` | Field declaration parsing (type, modifiers, default, inline FK) |
+| | `parse_fk.zig`, `parse_check.zig`, `parse_index.zig` | FK/Check/Index parsing |
+| | `parse_template.zig`, `parse_table.zig` | Template and table header parsing |
+| | `parse_recovery.zig` | Forward parser error recovery |
+| | `sql_parser.zig` | Recursive-descent SQL DDL parser (reverse pipeline) |
+| | `sql_parser_helpers.zig` | Identifier/literal parsing, expression parser |
+| | `sql_parser_create.zig`, `sql_parser_alter.zig`, etc. | SQL sub-statement parsing |
+| `codegen/` | `codegen.zig` | TypedAst → SQL DDL text, orchestrates column/index/constraint emission |
+| | `columns.zig` | Column definition rendering |
+| | `indexes.zig` | Inline and standalone index emission |
+| `dialect/` | `dialect.zig` | DialectBackend vtable + getBackend() + ReverseResult |
+| | `enum.zig` | Dialect enum (mysql, pg, sqlite) |
+| | `mysql.zig`, `pg.zig`, `sqlite.zig` | Per-dialect backend implementations |
+| | `common.zig` | Shared PG/SQLite dialect functions |
+| | `sqlite_hints.zig` | SQLite type affinity hints + column heuristics |
+| `reverse/` | `codegen.zig` | SQL → `.ss` orchestration |
+| | `column.zig` | Column reverse engineering |
+| | `map.zig`, `map_data.zig` | Reverse lookup logic + REVERSE_MAP data (46 entries) |
+| | `fk.zig`, `check.zig` | FK/Check constraint reverse engineering |
+| | `template_extraction.zig` | Template extraction from SQL |
+| `diff/` | `engine.zig` | Table-level diff engine |
+| | `types.zig` | SchemaDiff, TableDiff, FieldDiff data structures |
+| | `fields.zig` | Field-level diffing + rename detection |
+| | `fks.zig` | FK diffing — two-pass matching |
+| | `indexes.zig` | Index diffing |
+| | `format.zig` | Diff output formatting |
+| | `semantic.zig` | Dialect-aware type equivalence |
+| | `migrate.zig` | Migration SQL generation |
+| `types/` | `ast.zig` | AST type definitions (Schema, Table, Field, Template, etc.) |
+| | `resolved_ast.zig` | ResolvedTable + ResolvedAst (semantic output) |
+| | `typed_ast.zig` | TypedAst IR + ColumnFlags bitflags |
+| | `sql_type.zig` | Self-contained SqlType union with toSql()/toJsonSchema() |
+| | `type_map.zig` | Helper functions (lookupCustomType, isNumericSymType) |
+| | `type_registry.zig` | SS symbol → SqlType direct mapping |
+| | `type_resolver.zig` | ResolvedAst → TypedAst type resolution |
+| | `symbol_table.zig` | Schema-level symbol table for name resolution |
+| `semantic/` | `analyzer.zig` | SemanticAnalyzer + diagnosticTrace |
+| | `pass_manager.zig` | PassContext + SemanticPass + DEFAULT_PASSES |
+| | `trace.zig` | Shared AST trace formatting |
+| | `diagnostic.zig` | Multi-error diagnostic collector |
+| | `template.zig` | Template inheritance resolution |
+| | `pass/*.zig` | 8 semantic passes (autofk, suffix_inference, validate, etc.) |
+| root | `main.zig` | CLI entry point, command dispatch |
+| | `cli.zig` | Argument parsing, Command/ParsedArgs types |
+| | `compiler.zig` | Re-export hub for pipeline modules |
+| | `io.zig` | File I/O, stdin reading, output writing |
+| | `bench.zig` | Benchmark entry point |
+| | `json_schema.zig` | JSON Schema output |
 
 ### Testing
 
-- **Unit tests**: Zig `test` blocks — inline in production files, or in dedicated `*_test.zig` files (`diff_test.zig`, `codegen_test.zig`, `migrate_test.zig`, `ast_visitor_test.zig`, `diff_fields_test.zig`, `sql_parser_test.zig`, `semantic.zig`). Run via `zig build test`
+- **Unit tests**: Zig `test` blocks — inline in production files, or in dedicated `*_test.zig` files (`diff_test.zig`, `codegen_test.zig`, `diff/migrate_test.zig`, `ast_visitor_test.zig`, `diff_fields_test.zig`, `parser/sql_parser_test.zig`, `semantic/analyzer.zig`). Run via `zig build test`
 - **Golden tests**: Shell scripts compile `.ss` files and `diff` against `.sql` golden files in `tests/expected/`
 - Test data: `.ss` input files in `tests/`, expected output in `tests/expected/`
 
