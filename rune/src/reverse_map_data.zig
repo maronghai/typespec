@@ -78,7 +78,7 @@ pub const REVERSE_MAP = [_]ReverseMapping{
     .{ .sym = "t", .mysql = "timestamp without time zone", .pg = "timestamp without time zone", .sqlite = "TEXT", .rev_priority = 25 },
     .{ .sym = "t", .mysql = "timestamp with time zone", .pg = "timestamp with time zone", .sqlite = "TEXT", .rev_priority = 25 },
 
-    // ─── Passthrough types (not in TypeSpec DSL, emitted as-is) ───
+    // ─── Passthrough types (not in Rune DSL, emitted as-is) ───
     .{ .sym = "uuid", .mysql = "uuid", .pg = "uuid", .sqlite = "TEXT" },
     .{ .sym = "real", .mysql = "real", .pg = "real", .sqlite = "REAL" },
     .{ .sym = "float4", .mysql = "float4", .pg = "float4", .sqlite = "REAL" },

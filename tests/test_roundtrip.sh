@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ── TypeSpec Roundtrip Test Runner ──
+# ── Rune Roundtrip Test Runner ──
 # Tests: .ss → SQL → reverse → .ss → SQL produces semantically equivalent output.
 # Usage: ./test_roundtrip.sh [test-filter]
 

@@ -1,5 +1,5 @@
 #!/bin/bash
-# ── TypeSpec Test Library ──
+# ── Rune Test Library ──
 # Shared functions for all test runners.
 # Source this file: source "$(dirname "$0")/lib.sh"
 

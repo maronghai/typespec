@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ── TypeSpec Diff Test Runner ──
+# ── Rune Diff Test Runner ──
 # Tests: rune diff <old.ss> <new.ss> produces expected diff output.
 # Usage: ./test_diff.sh [test-filter]
 

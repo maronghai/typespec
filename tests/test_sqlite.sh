@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ── TypeSpec SQLite Test Runner ──
+# ── Rune SQLite Test Runner ──
 # Compiles each .ss test file with SQLite dialect and diffs against golden output.
 # Usage: ./test_sqlite.sh [test-filter]
 

@@ -7,7 +7,7 @@ const codegen = @import("codegen.zig");
 const typed_ast = @import("typed_ast.zig");
 const diag = @import("diagnostic.zig");
 
-// ─── TypeSpec Benchmark ─────────────────────────────────────────
+// ─── Rune Benchmark ─────────────────────────────────────────
 // Measures per-stage latency for the forward pipeline.
 // Usage:
 //   zig build bench                          — run benchmark, output JSON

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ── TypeSpec JSON Schema Test Runner ──
+# ── Rune JSON Schema Test Runner ──
 # Tests: rune --target json-schema produces expected JSON Schema output.
 
 set -euo pipefail

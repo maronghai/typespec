@@ -345,7 +345,7 @@ ZZ concatenates the branches into a single alternation, wrapped with word bounda
 
 ## 6. Dialect Mapping
 
-TypeSpec generates SQL DDL for different database dialects using the `-d` flag.
+Rune generates SQL DDL for different database dialects using the `-d` flag.
 
 ### MySQL (default)
 
@@ -459,7 +459,7 @@ user_id s32   ; _id says INT, explicit s32 overrides → VARCHAR(32)
 
 ### Q6: What about BOOLEAN type?
 
-TypeSpec uses `b` for BOOLEAN. In MySQL, this maps to `TINYINT(1)`:
+Rune uses `b` for BOOLEAN. In MySQL, this maps to `TINYINT(1)`:
 
 ```asm
 active b       ; BOOLEAN (MySQL: TINYINT(1))
@@ -525,4 +525,4 @@ rune schema.ss -d pg        # PostgreSQL output
 rune reverse -d pg schema.sql  # Reverse-engineer PG DDL
 ```
 
-TypeSpec maps `n` → `integer`, `t` → `timestamp`, `T` → `timestamptz`, `U` → `uuid`, `p` → `serial`, `B` → `bytea`, `e(...)` → `text` + `CHECK`, and `n++` → `GENERATED ALWAYS AS IDENTITY` for PostgreSQL.
+Rune maps `n` → `integer`, `t` → `timestamp`, `T` → `timestamptz`, `U` → `uuid`, `p` → `serial`, `B` → `bytea`, `e(...)` → `text` + `CHECK`, and `n++` → `GENERATED ALWAYS AS IDENTITY` for PostgreSQL.

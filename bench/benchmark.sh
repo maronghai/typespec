@@ -1,5 +1,5 @@
 #!/bin/bash
-# TypeSpec Compiler Benchmark Suite
+# Rune Compiler Benchmark Suite
 # Measures compilation time for different schema sizes
 
 set -e
@@ -14,7 +14,7 @@ fi
 
 echo ""
 echo "╔══════════════════════════════════════════════════════════╗"
-echo "║          TypeSpec Compiler Benchmark Suite               ║"
+echo "║          Rune Compiler Benchmark Suite               ║"
 echo "╚══════════════════════════════════════════════════════════╝"
 echo ""
 echo "Iterations per scenario: $ITERATIONS"

@@ -604,11 +604,11 @@ role    e('admin user','guest')      ; ENUM('admin user','guest')
 
 ### Q2: Complex CHECK expressions?
 
-TypeSpec supports simple CHECK (see [§7](#7-check-constraints)). For complex ones, write SQL manually.
+Rune supports simple CHECK (see [§7](#7-check-constraints)). For complex ones, write SQL manually.
 
 ### Q3: Database-specific features?
 
-TypeSpec is DB-agnostic. Use SQL comments for DB-specific behavior:
+Rune is DB-agnostic. Use SQL comments for DB-specific behavior:
 
 ```asm
 -- MySQL

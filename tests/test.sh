@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ── TypeSpec Test Runner ──
+# ── Rune Test Runner ──
 # Compiles each .ss test file and diffs against golden .sql output.
 # Usage: ./test.sh [test-filter]
 #   e.g. ./test.sh           — run all tests

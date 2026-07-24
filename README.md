@@ -1,4 +1,4 @@
-# TypeSpec
+# Rune
 
 > A minimal DSL for declaring database schemas using single-character symbols.
 > One character = one type. Convention over configuration. Template-driven.
@@ -38,7 +38,7 @@ balance   m =0
 
 ## Features
 
-| Feature | TypeSpec | Raw SQL |
+| Feature | Rune | Raw SQL |
 |---------|---------|---------|
 | `id n++` | `int AUTO_INCREMENT PRIMARY KEY` | 30 chars |
 | `balance m =0` | `decimal(16, 2) DEFAULT 0` | 24 chars |
@@ -121,7 +121,7 @@ cd rune && zig build
 
 ### 3. Output
 
-See [examples/user-order.ss](schemaspec/examples/user-order.ss) for complete TypeSpec → SQL output.
+See [examples/user-order.ss](schemaspec/examples/user-order.ss) for complete Rune → SQL output.
 
 ## Type System
 
@@ -499,7 +499,7 @@ All operations are wrapped in a transaction. The diff engine works at the AST le
 
 ## Reverse Engineering
 
-Convert existing SQL DDL back to TypeSpec `.ss` schemas:
+Convert existing SQL DDL back to Rune `.ss` schemas:
 
 ```bash
 # Basic reverse (MySQL)
@@ -609,7 +609,7 @@ Type differences between dialects:
 PostgreSQL does not support: `UNSIGNED`, `ENGINE=`, `CHARSET=`, inline `FULLTEXT INDEX`, or `ON UPDATE CURRENT_TIMESTAMP`.
 
 **Q: What about SQLite support?**
-SQLite uses a simplified type affinity system. The compiler maps TypeSpec types to SQLite affinities (`INTEGER`, `NUMERIC`, `TEXT`, `REAL`, `BLOB`). Key differences:
+SQLite uses a simplified type affinity system. The compiler maps Rune types to SQLite affinities (`INTEGER`, `NUMERIC`, `TEXT`, `REAL`, `BLOB`). Key differences:
 
 - No `CREATE DATABASE` (file-based)
 - No `COMMENT` syntax

@@ -1,4 +1,4 @@
-# TypeSpec Benchmark
+# Rune Benchmark
 
 Measures per-stage latency for the forward pipeline (tokenize → parse → semantic → type_resolve → codegen).
 

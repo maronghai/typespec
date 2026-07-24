@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ── TypeSpec Reverse Test Runner ──
+# ── Rune Reverse Test Runner ──
 # Tests: rune reverse <sql> [-d dialect] produces expected .ss output.
 # Usage: ./test_reverse.sh [test-filter]
 

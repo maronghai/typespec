@@ -1,10 +1,10 @@
-# TypeSpec Architecture
+# Rune Architecture
 
 > Internal architecture documentation for contributors.
 
 ## Overview
 
-TypeSpec is a compiler that transforms `.ss` schema files into SQL DDL. It consists of two independent pipelines:
+Rune is a compiler that transforms `.ss` schema files into SQL DDL. It consists of two independent pipelines:
 
 1. **Forward pipeline**: `.ss` → SQL DDL (CREATE TABLE, indexes, FKs)
 2. **Reverse pipeline**: SQL DDL → `.ss` schema
@@ -296,7 +296,7 @@ When `rune reverse -t` is used, the reverse codegen extracts common field sequen
 
 ## Type Mapping System
 
-TypeSpec uses a three-layer type mapping system:
+Rune uses a three-layer type mapping system:
 
 - **`sql_type.zig` (SqlType.toSql)**: Delegates to `DialectBackend.renderType` for dialect-aware rendering. Variants: int, bigint, smallint, decimal, varchar, text, blob, json, jsonb, datetime, date, timestamptz, boolean, uuid, inet, serial, enum_values, raw_sql, passthrough. SS symbols: n, N, i, m, M, s, S, b, B, j, J, I, d, t, T, U, p.
 

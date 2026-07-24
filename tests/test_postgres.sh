@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ── TypeSpec PostgreSQL Test Runner ──
+# ── Rune PostgreSQL Test Runner ──
 # Compiles each .ss test file with -d pg and diffs against golden .pg.sql output.
 # Usage: ./test_postgres.sh [test-filter]
 

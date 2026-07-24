@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ── TypeSpec Migration Test Runner ──
+# ── Rune Migration Test Runner ──
 # Tests: rune migrate <old.ss> <new.ss> produces expected migration SQL.
 # Runs each test for all available dialects (mysql, pg, sqlite).
 # Usage: ./test_migrate.sh [test-filter]

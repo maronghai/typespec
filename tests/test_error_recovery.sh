@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ── TypeSpec Error Recovery Tests ──
+# ── Rune Error Recovery Tests ──
 # Verifies that the compiler collects and reports multiple diagnostics.
 # Usage: ./test_error_recovery.sh
 
