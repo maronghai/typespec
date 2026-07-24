@@ -56,4 +56,22 @@ pub fn build(b: *std.Build) void {
 
     const bench_step = b.step("bench", "Run benchmark (bench/bench.zig [file] [iterations])");
     bench_step.dependOn(&run_bench.step);
+
+    // ─── Fuzzing ───────────────────────────────────────────────────
+    const fuzz_exe = b.addExecutable(.{
+        .name = "fuzz",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("fuzz.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+
+    const run_fuzz = b.addRunArtifact(fuzz_exe);
+    if (b.args) |fuzz_args| {
+        run_fuzz.addArgs(fuzz_args);
+    }
+
+    const fuzz_step = b.step("fuzz", "Run fuzzing (fuzz <target> <corpus_dir>)");
+    fuzz_step.dependOn(&run_fuzz.step);
 }

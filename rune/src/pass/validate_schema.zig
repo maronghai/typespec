@@ -9,22 +9,13 @@ const VisitStatus = enum { visiting, visited };
 /// Validate that FK target fields exist in the referenced table.
 fn validateFkTargetFields(
     ctx: *PassContext,
-    table_map: *const std.StringHashMap(*const ResolvedTable),
     table: ResolvedTable,
     fk: FkDecl,
 ) !void {
     if (fk.ref_table.len == 0) return;
-    const target = table_map.get(fk.ref_table) orelse return;
 
     for (fk.ref_fields) |ref_field| {
-        var found = false;
-        for (target.fields) |field| {
-            if (std.mem.eql(u8, field.name, ref_field)) {
-                found = true;
-                break;
-            }
-        }
-        if (!found) {
+        if (ctx.symbol_table.lookupField(fk.ref_table, ref_field) == null) {
             ctx.diagnostics.push(.{
                 .severity = .@"error",
                 .line_no = fk.line_no,
@@ -74,12 +65,9 @@ fn detectCycle(
 
 /// Schema-level semantic validation: circular FKs, FK target field existence,
 /// self-referencing FK field count mismatch.
+/// Uses the SymbolTable built by the resolve_names pass.
 pub fn run(ctx: *PassContext) !void {
-    var table_map = std.StringHashMap(*const ResolvedTable).init(ctx.alloc);
-    for (ctx.tables.items) |*t| {
-        try table_map.put(t.name, t);
-    }
-
+    // Build FK dependency graph for cycle detection
     var fk_graph = std.StringHashMap(std.ArrayList([]const u8)).init(ctx.alloc);
     defer {
         var git = fk_graph.iterator();
@@ -106,6 +94,7 @@ pub fn run(ctx: *PassContext) !void {
         try fk_graph.put(table.name, refs);
     }
 
+    // DFS cycle detection
     var visited = std.StringHashMap(VisitStatus).init(ctx.alloc);
     defer visited.deinit();
 
@@ -117,17 +106,19 @@ pub fn run(ctx: *PassContext) !void {
         try detectCycle(ctx, &fk_graph, &visited, &cycle_stack, table.name);
     }
 
+    // Validate FK target fields using SymbolTable
     for (ctx.tables.items) |table| {
         for (table.fks) |fk| {
-            try validateFkTargetFields(ctx, &table_map, table, fk);
+            try validateFkTargetFields(ctx, table, fk);
         }
         for (table.fields) |field| {
             if (field.fk) |fk| {
-                try validateFkTargetFields(ctx, &table_map, table, fk);
+                try validateFkTargetFields(ctx, table, fk);
             }
         }
     }
 
+    // Validate self-referencing FK field count
     for (ctx.tables.items) |table| {
         for (table.fks) |fk| {
             if (std.mem.eql(u8, fk.ref_table, table.name)) {

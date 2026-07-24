@@ -2,6 +2,10 @@
 
 CREATE DATABASE "demo" ENCODING 'UTF8';
 
+CREATE TABLE "user" (
+  "id" integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+);
+
 CREATE TABLE "order" (
   "id" integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   "order_no" varchar(64) NOT NULL,

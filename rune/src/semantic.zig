@@ -2,6 +2,7 @@ const std = @import("std");
 pub const ast_mod = @import("ast.zig");
 const diag = @import("diagnostic.zig");
 const template_mod = @import("template.zig");
+const symbol_table_mod = @import("symbol_table.zig");
 const ast = ast_mod.Ast;
 const Ast = ast_mod.Ast;
 const Template = ast_mod.Template;
@@ -17,6 +18,7 @@ pub const PassContext = struct {
     schema: ?ast_mod.Schema,
     templates: std.StringHashMap(*const Template) = undefined,
     diagnostics: *diag.DiagnosticCollector = undefined,
+    symbol_table: symbol_table_mod.SymbolTable = undefined,
 };
 
 /// A semantic analysis pass that transforms the tables in PassContext.
@@ -29,12 +31,13 @@ pub const SemanticPass = struct {
 /// Default pass pipeline — order matters!
 pub const DEFAULT_PASSES = [_]SemanticPass{
     .{ .name = "validate_template_types", .run = @import("pass/validate_template_types.zig").run, .depends_on = &.{} },
+    .{ .name = "resolve_names", .run = @import("pass/resolve_names.zig").run, .depends_on = &.{"validate_template_types"} },
     .{ .name = "autofk", .run = @import("pass/autofk.zig").run, .depends_on = &.{} },
     .{ .name = "suffix_inference", .run = @import("pass/suffix_inference.zig").run, .depends_on = &.{"autofk"} },
     .{ .name = "validate", .run = @import("pass/validate.zig").run, .depends_on = &.{ "autofk", "suffix_inference" } },
     .{ .name = "validate_type_modifiers", .run = @import("pass/validate_type_modifiers.zig").run, .depends_on = &.{"suffix_inference"} },
     .{ .name = "validate_indexes", .run = @import("pass/validate_indexes.zig").run, .depends_on = &.{"autofk"} },
-    .{ .name = "validate_schema", .run = @import("pass/validate_schema.zig").run, .depends_on = &.{"validate"} },
+    .{ .name = "validate_schema", .run = @import("pass/validate_schema.zig").run, .depends_on = &.{ "validate", "resolve_names" } },
 };
 
 // ─── SemanticAnalyzer ──────────────────────────────────────────

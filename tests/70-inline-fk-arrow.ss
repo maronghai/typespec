@@ -1,6 +1,9 @@
 ; ── Test 70: Inline FK ──
 $ demo
 
+# user
+id    n++
+
 # order
 id        n++
 order_no  s64 *

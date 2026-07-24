@@ -2,6 +2,10 @@
 
 CREATE DATABASE "demo" ENCODING 'UTF8';
 
+CREATE TABLE "auth" (
+  "email" varchar(128) NOT NULL
+);
+
 CREATE TABLE "user" (
   "id" integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   "email" varchar(128) NOT NULL,
