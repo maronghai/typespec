@@ -1,5 +1,5 @@
 const std = @import("std");
-const typed_ast = @import("typed_ast.zig");
+const typed_ast = @import("types/typed_ast.zig");
 const Writer = std.Io.Writer;
 
 // ─── JSON Schema Generator ──────────────────────────────────

@@ -1,5 +1,5 @@
 const std = @import("std");
-const ast_mod = @import("ast.zig");
+const ast_mod = @import("types/ast.zig");
 const Ast = ast_mod.Ast;
 const Schema = ast_mod.Schema;
 const Template = ast_mod.Template;

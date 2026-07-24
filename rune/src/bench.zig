@@ -1,11 +1,11 @@
 const std = @import("std");
-const tokenizer = @import("tokenizer.zig");
-const parser = @import("parser.zig");
-const ast_mod = @import("ast.zig");
-const semantic = @import("semantic.zig");
-const codegen = @import("codegen.zig");
-const typed_ast = @import("typed_ast.zig");
-const diag = @import("diagnostic.zig");
+const tokenizer = @import("parser/tokenizer.zig");
+const parser = @import("parser/parser.zig");
+const ast_mod = @import("types/ast.zig");
+const semantic = @import("semantic/analyzer.zig");
+const codegen = @import("codegen/codegen.zig");
+const typed_ast = @import("types/typed_ast.zig");
+const diag = @import("semantic/diagnostic.zig");
 
 // ─── Rune Benchmark ─────────────────────────────────────────
 // Measures per-stage latency for the forward pipeline.

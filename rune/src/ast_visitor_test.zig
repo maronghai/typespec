@@ -1,6 +1,6 @@
 const std = @import("std");
 const visitor_mod = @import("ast_visitor.zig");
-const ast_mod = @import("ast.zig");
+const ast_mod = @import("types/ast.zig");
 const AstVisitor = visitor_mod.AstVisitor;
 const VisitCounts = visitor_mod.VisitCounts;
 const Ast = ast_mod.Ast;
@@ -14,7 +14,7 @@ const ResolvedTable = ast_mod.ResolvedTable;
 const SqlComment = ast_mod.SqlComment;
 
 const testing = std.testing;
-const makeTestField = @import("test_helpers.zig").makeTestField;
+const makeTestField = @import("semantic/test_helpers.zig").makeTestField;
 
 fn countVisitSchema(_: *VisitCounts, _: Schema) void {}
 fn countVisitTemplate(_: *VisitCounts, _: Template) void {}

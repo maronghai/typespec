@@ -1,6 +1,6 @@
 const std = @import("std");
-const codegen_mod = @import("codegen.zig");
-const typed_ast_mod = @import("typed_ast.zig");
+const codegen_mod = @import("codegen/codegen.zig");
+const typed_ast_mod = @import("types/typed_ast.zig");
 const Codegen = codegen_mod.Codegen;
 
 const testing = std.testing;

@@ -1,5 +1,5 @@
 const std = @import("std");
-const dialect_enum = @import("dialect_enum.zig");
+const dialect_enum = @import("dialect/enum.zig");
 
 // ─── Command Types ─────────────────────────────────────────────
 

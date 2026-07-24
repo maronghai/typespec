@@ -1,0 +1,112 @@
+const std = @import("std");
+const tokenizer = @import("../parser/tokenizer.zig");
+const parser = @import("../parser/parser.zig");
+const ast_mod = @import("../types/ast.zig");
+const resolved_ast = @import("../types/resolved_ast.zig");
+const semantic = @import("../semantic/analyzer.zig");
+const codegen = @import("../codegen/codegen.zig");
+const typed_ast = @import("../types/typed_ast.zig");
+const diag = @import("../semantic/diagnostic.zig");
+const io_mod = @import("../io.zig");
+
+// ─── Forward Pipeline: .ss → SQL ─────────────────────────────
+// No dependency on cli.zig — output format dispatch is the caller's responsibility.
+
+/// Intermediate results from the compilation pipeline.
+/// Returned by compilePipeline so trace mode can inspect each stage
+/// without re-running the pipeline.
+pub const PipelineResult = struct {
+    resolved: resolved_ast.ResolvedAst,
+    lines: []tokenizer.Line,
+    tree: ast_mod.Ast,
+};
+
+/// Shared tokenizer → parser → semantic pipeline.
+/// Returns PipelineResult with all intermediate IRs for trace inspection.
+pub fn compilePipeline(io: std.Io, alloc: std.mem.Allocator, file_data: []const u8) !PipelineResult {
+    _ = io;
+    var lines = try std.ArrayList([]const u8).initCapacity(alloc, 256);
+
+    var line_it = std.mem.splitScalar(u8, file_data, '\n');
+    while (line_it.next()) |line| {
+        try lines.append(alloc, std.mem.trimEnd(u8, line, "\r"));
+    }
+
+    const tok = tokenizer.Tokenizer.init(try lines.toOwnedSlice(alloc));
+    const tokenized = try tok.tokenizeAll(alloc);
+
+    // Use DiagnosticCollector for multi-error recovery
+    var diagnostics = try diag.DiagnosticCollector.init(alloc);
+    var p = parser.Parser.initWithDiagnostics(alloc, &diagnostics);
+    const tree = p.parse(tokenized) catch |err| {
+        // Allocation errors propagate; syntax errors are collected
+        if (!diagnostics.hasErrors()) {
+            std.debug.print("error: {s}\n", .{@errorName(err)});
+        }
+        return err;
+    };
+
+    // Print collected diagnostics and abort if any errors
+    if (diagnostics.hasErrors()) {
+        diagnostics.printAll();
+        diagnostics.printSummary();
+        return error.DiagnosticsError;
+    }
+
+    var sa = semantic.SemanticAnalyzer.init(alloc);
+    const resolved = sa.analyze(tree) catch |err| {
+        return err;
+    };
+
+    return .{ .resolved = resolved, .lines = tokenized, .tree = tree };
+}
+
+/// Compile a .ss file path to ResolvedAst (used by diff/migrate pipelines).
+pub fn compileToAst(io: std.Io, alloc: std.mem.Allocator, path: []const u8) !resolved_ast.ResolvedAst {
+    const file_data = try std.Io.Dir.cwd().readFileAlloc(io, path, alloc, .unlimited);
+    const pipeline = try compilePipeline(io, alloc, file_data);
+    return pipeline.resolved;
+}
+
+/// Compile .ss to SQL DDL (the default output path).
+pub fn handleCompile(io: std.Io, alloc: std.mem.Allocator, file_data: []const u8, input_name: []const u8, output_path: ?[]const u8, trace: bool, dialect: codegen.Dialect) !void {
+    _ = input_name;
+
+    const pipeline = try compilePipeline(io, alloc, file_data);
+
+    var tr = typed_ast.TypeResolver.init(alloc);
+    const typed = try tr.resolve(pipeline.resolved, dialect);
+
+    var cg = codegen.Codegen.init(alloc, dialect);
+    const output = try cg.generateFromTypedAst(typed);
+
+    if (trace) {
+        tokenizer.Tokenizer.diagnosticTrace(pipeline.lines);
+        parser.diagnosticTrace(pipeline.tree);
+        semantic.diagnosticTrace(pipeline.resolved);
+        codegen.diagnosticTrace(output);
+    }
+
+    try io_mod.writeOutput(io, output, output_path);
+}
+
+/// Compile .ss to JSON Schema (alternative output path).
+pub fn handleCompileJsonSchema(io: std.Io, alloc: std.mem.Allocator, file_data: []const u8, input_name: []const u8, output_path: ?[]const u8, trace: bool, dialect: codegen.Dialect) !void {
+    const json_schema = @import("../json_schema.zig");
+    _ = input_name;
+
+    const pipeline = try compilePipeline(io, alloc, file_data);
+
+    var tr = typed_ast.TypeResolver.init(alloc);
+    const typed = try tr.resolve(pipeline.resolved, dialect);
+
+    const output = try json_schema.generate(alloc, typed);
+
+    if (trace) {
+        tokenizer.Tokenizer.diagnosticTrace(pipeline.lines);
+        parser.diagnosticTrace(pipeline.tree);
+        semantic.diagnosticTrace(pipeline.resolved);
+    }
+
+    try io_mod.writeOutput(io, output, output_path);
+}
