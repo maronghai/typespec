@@ -4,9 +4,9 @@ const dialect_mod = @import("dialect.zig");
 const sql_type_mod = @import("sql_type.zig");
 const Dialect = dialect_enum.Dialect;
 
-// ─── Type Registry: Single source of truth for TPS types ─────
+// ─── Type Registry: Single source of truth for SS types ─────
 //
-// To add a new TPS type (e.g., UUID):
+// To add a new SS type (e.g., UUID):
 //   1. Add one entry to SYMBOL_MAP below
 //   2. Add the SqlType variant to sql_type.zig if needed
 //   3. All four pipelines (forward, reverse, diff, migrate) automatically recognize it
@@ -14,9 +14,9 @@ const Dialect = dialect_enum.Dialect;
 // Production code uses lookupSqlTypeDirect() which returns SqlType variants.
 // lookupSqlType() is a convenience wrapper for tests that need string output.
 
-/// Look up SqlType variant directly for a TPS symbol in a given dialect.
+/// Look up SqlType variant directly for a SS symbol in a given dialect.
 /// This is the primary lookup used by production code (SqlType.fromTypeInfo).
-/// Avoids the stringly-typed round-trip (TPS → SQL string → SqlType).
+/// Avoids the stringly-typed round-trip (SS → SQL string → SqlType).
 pub fn lookupSqlTypeDirect(sym: []const u8, dialect: Dialect) ?sql_type_mod.SqlType {
     const SYMBOL_MAP = [_]struct { sym: []const u8, mysql: sql_type_mod.SqlType, pg: sql_type_mod.SqlType, sqlite: sql_type_mod.SqlType }{
         .{ .sym = "n", .mysql = .int, .pg = .int, .sqlite = .int },
@@ -49,7 +49,7 @@ pub fn lookupSqlTypeDirect(sym: []const u8, dialect: Dialect) ?sql_type_mod.SqlT
     return null;
 }
 
-/// Look up SQL type name for a TPS symbol in a given dialect.
+/// Look up SQL type name for a SS symbol in a given dialect.
 /// Convenience wrapper — delegates to lookupSqlTypeDirect + SqlType.toSql.
 pub fn lookupSqlType(sym: []const u8, dialect: Dialect) ?[]const u8 {
     const sql_type = lookupSqlTypeDirect(sym, dialect) orelse return null;
@@ -58,11 +58,11 @@ pub fn lookupSqlType(sym: []const u8, dialect: Dialect) ?[]const u8 {
     return aw.toOwnedSlice(std.heap.page_allocator) catch null;
 }
 
-/// Look up TPS symbol for a SQL type in a given dialect.
+/// Look up SS symbol for a SQL type in a given dialect.
 /// Returns .{ .sym, .omit } where omit indicates the symbol should be omitted in reverse output.
 pub const ReverseResult = dialect_mod.ReverseResult;
 
-pub fn lookupTpsSymbol(sql_type: []const u8, dialect: Dialect) ?ReverseResult {
+pub fn lookupSymbol(sql_type: []const u8, dialect: Dialect) ?ReverseResult {
     // Parameterized types: check prefix matches
     if (std.mem.startsWith(u8, sql_type, "varchar(")) {
         return .{ .sym = "s", .omit = true, .is_parameterized = true };
@@ -85,7 +85,7 @@ pub fn lookupTpsSymbol(sql_type: []const u8, dialect: Dialect) ?ReverseResult {
     return null;
 }
 
-/// Check if a TPS symbol is a known core type.
+/// Check if a SS symbol is a known core type.
 pub fn isCoreType(sym: []const u8) bool {
     return lookupSqlTypeDirect(sym, .mysql) != null;
 }

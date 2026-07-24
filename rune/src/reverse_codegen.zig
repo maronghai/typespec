@@ -8,7 +8,7 @@ const rc = @import("reverse_column.zig");
 const rf = @import("reverse_fk.zig");
 
 // ─── Reverse Codegen ─────────────────────────────────────────────
-// Orchestrates SQL → TPS generation. Column-level logic is delegated
+// Orchestrates SQL → SS generation. Column-level logic is delegated
 // to reverse_column.zig, CHECK parsing to reverse_check.zig (via
 // reverse_column.zig), and FK classification to reverse_fk.zig.
 
@@ -137,8 +137,8 @@ fn emitTables(self: *ReverseCodegen, w: anytype, schema: sp.SqlSchema, tmpl_list
         defer check_map.deinit();
         for (table.checks) |ck| {
             if (ck.field_name.len > 0) {
-                if (rc.reverseCheck(self.alloc, ck.expr, ck.field_name)) |tps_expr| {
-                    try check_map.put(ck.field_name, tps_expr);
+                if (rc.reverseCheck(self.alloc, ck.expr, ck.field_name)) |sym_expr| {
+                    try check_map.put(ck.field_name, sym_expr);
                 }
             }
         }
@@ -292,7 +292,7 @@ test "ReverseCodegen basic generate" {
     try std.testing.expect(std.mem.indexOf(u8, output, "$ testdb") != null);
     // Should contain table definition
     try std.testing.expect(std.mem.indexOf(u8, output, "# users") != null);
-    // Should contain fields with TPS types from override
+    // Should contain fields with SS types from override
     try std.testing.expect(std.mem.indexOf(u8, output, "id n++") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "name s32") != null);
 }

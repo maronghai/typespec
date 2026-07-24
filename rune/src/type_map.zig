@@ -13,7 +13,7 @@ const sql_type_mod = @import("sql_type.zig");
 pub const Dialect = dialect_enum.Dialect;
 pub const SqlType = sql_type_mod.SqlType;
 
-// ─── Helper: classify TPS type symbols ───────────────────────
+// ─── Helper: classify SS type symbols ───────────────────────
 
 pub fn isNumericSymType(ti: TypeInfo) bool {
     switch (ti) {

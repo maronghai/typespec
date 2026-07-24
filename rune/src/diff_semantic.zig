@@ -7,7 +7,7 @@ const Dialect = dialect_enum.Dialect;
 // ─── Dialect-Aware Type Equivalence ──────────────────────────
 //
 // Determines if two TypeInfo values are semantically equivalent
-// within a given SQL dialect. Different TPS symbols that resolve
+// within a given SQL dialect. Different SS symbols that resolve
 // to the same SQL type are considered equivalent.
 //
 // Example: MySQL "n" and "N" both resolve to int → equivalent.
@@ -32,7 +32,7 @@ pub fn typeInfoEquiv(a: TypeInfo, b: TypeInfo, dialect: Dialect) bool {
     };
 }
 
-/// Canonical form of a TPS type symbol within a dialect.
+/// Canonical form of a SS type symbol within a dialect.
 /// Equivalent symbols map to the same canonical form.
 /// NOTE: n and N are NOT equivalent — they map to int vs bigint.
 fn canonicalSimple(sym: []const u8, dialect: Dialect) ?[]const u8 {
@@ -57,7 +57,7 @@ fn canonicalSimple(sym: []const u8, dialect: Dialect) ?[]const u8 {
     };
 }
 
-/// Check if two simple TPS type symbols are equivalent in a dialect.
+/// Check if two simple SS type symbols are equivalent in a dialect.
 fn simpleEquiv(a: []const u8, b: []const u8, dialect: Dialect) bool {
     if (std.mem.eql(u8, a, b)) return true;
     const ca = canonicalSimple(a, dialect) orelse return false;

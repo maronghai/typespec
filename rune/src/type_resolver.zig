@@ -137,7 +137,7 @@ pub const TypeResolver = struct {
         const is_enum = field.type_info == .enum_type;
         const enum_vals = if (is_enum) field.type_info.enum_type else &[_][]const u8{};
 
-        // Compute original TPS type string for roundtrip preservation
+        // Compute original SS type string for roundtrip preservation
         var sym_type: ?[]const u8 = switch (field.type_info) {
             .simple => |s| if (s.len == 1) s else null,
             .varchar_explicit => |n| if (n > 0) blk: {

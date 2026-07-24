@@ -27,15 +27,15 @@ for test_name in "${ROUNDTRIP_TESTS[@]}"; do
     continue
   fi
 
-  tps_file="$SCRIPT_DIR/${test_name}.ss"
-  if [ ! -f "$tps_file" ]; then
+  ss_file="$SCRIPT_DIR/${test_name}.ss"
+  if [ ! -f "$ss_file" ]; then
     skip "$test_name" "missing .ss file"
     continue
   fi
 
   for dialect in mysql pg sqlite; do
     # Step 1: .ss → SQL (original)
-    sql1=$("$COMPILER" "$tps_file" -d "$dialect" 2>/dev/null) || {
+    sql1=$("$COMPILER" "$ss_file" -d "$dialect" 2>/dev/null) || {
       fail "$test_name ($dialect): step 1" "compile failed"
       continue
     }

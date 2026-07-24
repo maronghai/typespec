@@ -87,7 +87,7 @@ fn sqliteEmitPrimaryKey(w: *Writer, auto_increment: bool) anyerror!void {
     }
 }
 
-fn sqliteEmitTpsTypeMetadata(w: *Writer, col_name: []const u8, sym_type: []const u8) anyerror!void {
+fn sqliteEmitTypeMetadata(w: *Writer, col_name: []const u8, sym_type: []const u8) anyerror!void {
     try w.print("-- @sym {s} {s}\n", .{ col_name, sym_type });
 }
 
@@ -243,7 +243,7 @@ pub const sqlite_backend = DialectBackend{
     .renderType = sqliteRenderType,
     .emitForeignKey = sqliteEmitForeignKey,
     // Optional: SQLite implements emitTypeMetadata, emitConfidenceComment, reverseLookup
-    .emitTypeMetadata = sqliteEmitTpsTypeMetadata,
+    .emitTypeMetadata = sqliteEmitTypeMetadata,
     .emitConfidenceComment = sqliteEmitConfidenceComment,
     .reverseLookup = sqliteReverseLookup,
     // emitCreateDatabase, emitUnsigned, emitAutoIncrement default to null (no-op)

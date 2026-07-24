@@ -1,7 +1,7 @@
 const sql_type_mod = @import("sql_type.zig");
 const SqlType = sql_type_mod.SqlType;
 
-// ─── Reverse Mapping Data: SQL → TPS ─────────────────────────
+// ─── Reverse Mapping Data: SQL → SS ─────────────────────────
 //
 // All entries that reverse codegen may encounter. Includes:
 //   - Core single-char entries (for SQLite which has lossy type affinity)
@@ -9,7 +9,7 @@ const SqlType = sql_type_mod.SqlType;
 //   - Passthrough types (uuid, real, float4, float8)
 //
 // Priority ordering: lower number = preferred when multiple SQL types
-// map to the same TPS symbol. Checked top-to-bottom; first match wins.
+// map to the same SS symbol. Checked top-to-bottom; first match wins.
 //
 // Canonical entries (rev_priority=10) carry a sql_type tag that links
 // to the SqlType union. The consistency test in type_map.zig verifies

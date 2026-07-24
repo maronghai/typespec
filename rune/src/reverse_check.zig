@@ -5,7 +5,7 @@ const CheckKind = ast_mod.CheckKind;
 
 // ─── CHECK Constraint Reverse ─────────────────────────────────
 // Parses SQL CHECK expressions back to structured CheckConstraint.
-// Used by reverse pipeline to convert SQL DDL back to TPS IR.
+// Used by reverse pipeline to convert SQL DDL back to SS IR.
 
 /// Parse a SQL CHECK expression into a structured CheckConstraint.
 /// Returns null if the expression doesn't match any known pattern.
@@ -21,16 +21,16 @@ pub fn parseSqlCheckExpr(alloc: std.mem.Allocator, sql_expr: []const u8, col_nam
     return null;
 }
 
-/// Legacy: parse SQL CHECK expression and return TPS bracket/brace syntax string.
+/// Legacy: parse SQL CHECK expression and return SS bracket/brace syntax string.
 pub fn reverseCheck(alloc: std.mem.Allocator, sql_expr: []const u8, col_name: []const u8) ?[]const u8 {
     if (parseSqlCheckExpr(alloc, sql_expr, col_name)) |cc| {
-        return checkConstraintToTps(alloc, cc);
+        return checkConstraintToSym(alloc, cc);
     }
     return null;
 }
 
-/// Convert a CheckConstraint to TPS bracket/brace syntax string.
-fn checkConstraintToTps(alloc: std.mem.Allocator, cc: CheckConstraint) ?[]const u8 {
+/// Convert a CheckConstraint to SS bracket/brace syntax string.
+fn checkConstraintToSym(alloc: std.mem.Allocator, cc: CheckConstraint) ?[]const u8 {
     return switch (cc.kind) {
         .range => std.fmt.allocPrint(alloc, "[{s}]", .{cc.expr}) catch null,
         .range_upper_exclusive => std.fmt.allocPrint(alloc, "[{s})", .{cc.expr}) catch null,

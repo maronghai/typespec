@@ -3,8 +3,8 @@ const ast = @import("../ast.zig");
 const PassContext = @import("../semantic.zig").PassContext;
 const TypeInfo = ast.TypeInfo;
 
-/// Check if two TypeInfo values represent the same TPS type.
-fn tpsTypeSame(a: TypeInfo, b: TypeInfo) bool {
+/// Check if two TypeInfo values represent the same SS type.
+fn symTypeSame(a: TypeInfo, b: TypeInfo) bool {
     if (std.meta.activeTag(a) != std.meta.activeTag(b)) return false;
     return switch (a) {
         .none => true,
@@ -39,7 +39,7 @@ pub fn run(ctx: *PassContext) !void {
                 for (tmpl.fields) |f| {
                     if (std.mem.eql(u8, f.name, "...")) continue;
                     if (parent_fields.get(f.name)) |parent_ti| {
-                        if (!tpsTypeSame(f.type_info, parent_ti)) {
+                        if (!symTypeSame(f.type_info, parent_ti)) {
                             const tname = tmpl.name orelse "";
                             ctx.diagnostics.push(.{
                                 .severity = .warning,

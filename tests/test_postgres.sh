@@ -12,9 +12,9 @@ EXPECTED_DIR="$SCRIPT_DIR/expected"
 
 FILTER="${1:-}"
 
-for tps_file in "$TEST_DIR"/*.ss; do
-  [ -f "$tps_file" ] || continue
-  base=$(basename "$tps_file" .ss)
+for ss_file in "$TEST_DIR"/*.ss; do
+  [ -f "$ss_file" ] || continue
+  base=$(basename "$ss_file" .ss)
 
   if [ -n "$FILTER" ] && [[ "$base" != *"$FILTER"* ]]; then
     continue
@@ -34,7 +34,7 @@ for tps_file in "$TEST_DIR"/*.ss; do
   tmp_file=$(mktemp)
   trap "rm -f '$tmp_file'" EXIT
 
-  if ! "$COMPILER" "$tps_file" -d pg -o "$tmp_file" 2>/dev/null; then
+  if ! "$COMPILER" "$ss_file" -d pg -o "$tmp_file" 2>/dev/null; then
     fail "$base" "compiler failed"
     rm -f "$tmp_file"
     continue

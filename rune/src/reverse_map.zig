@@ -10,7 +10,7 @@ pub const REVERSE_MAP = data.REVERSE_MAP;
 pub const ReverseResult = dialect_mod.ReverseResult;
 pub const canOmitType = dialect_mod.canOmitType;
 
-/// Reverse-lookup a SQL type string to its TPS symbol.
+/// Reverse-lookup a SQL type string to its SS symbol.
 /// Handles exact match from REVERSE_MAP + parameterized types (int(N), decimal(P,S), varchar(N)).
 /// For dialects with a vtable reverseLookup (e.g. SQLite), delegates to the backend.
 pub fn reverseLookup(sql_type: []const u8, col_name: []const u8, is_auto_inc: bool, is_default_ts: bool, dialect: Dialect) ReverseResult {

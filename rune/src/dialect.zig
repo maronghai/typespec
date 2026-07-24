@@ -85,7 +85,7 @@ pub const DialectBackend = struct {
     emitUnsigned: ?*const fn (w: *Writer) anyerror!void = null,
     /// AUTO_INCREMENT keyword — only MySQL uses; PG uses GENERATED AS IDENTITY, SQLite uses PRIMARY KEY AUTOINCREMENT.
     emitAutoIncrement: ?*const fn (w: *Writer) anyerror!void = null,
-    /// SQLite-specific TPS type metadata comment (e.g. `-- @sym col_type`).
+    /// SQLite-specific SS type metadata comment (e.g. `-- @sym col_type`).
     emitTypeMetadata: ?*const fn (w: *Writer, col_name: []const u8, sym_type: []const u8) anyerror!void = null,
     /// SQLite-specific confidence comment (e.g. ` -- [score:42]`).
     emitConfidenceComment: ?*const fn (w: *Writer, confidence: []const u8) anyerror!void = null,

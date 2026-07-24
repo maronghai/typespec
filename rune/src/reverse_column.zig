@@ -8,7 +8,7 @@ const Dialect = sp.Dialect;
 
 // ─── Column Reverse Output ─────────────────────────────────────
 // Extracted from reverse_codegen.zig for single-responsibility.
-// Handles writing TPS column definitions from SQL column metadata.
+// Handles writing SS column definitions from SQL column metadata.
 
 pub const TypeResult = dialect_mod.ReverseResult;
 
@@ -33,7 +33,7 @@ pub fn parseSqlCheckExpr(alloc: std.mem.Allocator, sql_expr: []const u8, col_nam
     return reverse_check.parseSqlCheckExpr(alloc, sql_expr, col_name);
 }
 
-/// Write TPS column suffix: type + modifiers + default + check + comment + confidence
+/// Write SS column suffix: type + modifiers + default + check + comment + confidence
 pub fn writeColumnSuffix(w: anytype, col: sp.SqlColumn, indexes: []const sp.SqlIndex, check_expr: ?[]const u8, dialect: Dialect, table_name: []const u8) !void {
     const tr = try writeColumnType(w, col, dialect);
     const has_inline_index = try writeColumnModifiers(w, col, indexes, tr, table_name);
@@ -43,7 +43,7 @@ pub fn writeColumnSuffix(w: anytype, col: sp.SqlColumn, indexes: []const sp.SqlI
     try writeColumnConfidence(w, col, tr, dialect, has_inline_index);
 }
 
-/// Resolve and write the TPS type symbol. Returns TypeResult for downstream use.
+/// Resolve and write the SS type symbol. Returns TypeResult for downstream use.
 fn writeColumnType(w: anytype, col: sp.SqlColumn, dialect: Dialect) !TypeResult {
     const is_ai = col.auto_increment;
     const is_ts = if (col.default_val) |dv| isCurrentTimestamp(dv) else false;

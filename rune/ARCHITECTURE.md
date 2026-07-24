@@ -42,7 +42,7 @@ TypeSpec is a compiler that transforms `.ss` schema files into SQL DDL. It consi
 
 **Key modules**:
 - `sql_type.zig`: `SqlType` union with `toSql()` delegating to `DialectBackend.renderType`. Variants: int, bigint, smallint, decimal, varchar, text, blob, json, jsonb, datetime, date, timestamptz, boolean, uuid, inet, serial, enum_values, raw_sql, passthrough. `toJsonSchema()` for JSON Schema output.
-- `type_map.zig`: Helper functions (`lookupCustomType`, `isNumericTpsType`, etc.) + `SqlType` re-export
+- `type_map.zig`: Helper functions (`lookupCustomType`, `isNumericSymType`, etc.) + `SqlType` re-export
 - `type_registry.zig`: SS symbol → `SqlType` direct mapping (`lookupSqlTypeDirect`) and reverse lookup. 17 core SS symbols: n, N, i, m, M, s, S, b, B, j, J, I, d, t, T, U, p
 
 ### Extracted Sub-Modules
@@ -122,7 +122,7 @@ Input (.ss text)
 | `Ast` | Parser output | Schema, templates, tables, SQL comments |
 | `[]ResolvedTable` | Template output | Tables with template fields merged |
 | `ResolvedAst` | Semantic output | Templates applied + passes run (autofk, suffix_inference, validate) |
-| `TypedAst` | TypeResolver output | SQL type strings resolved, modifiers as booleans, `tps_type` for roundtrip |
+| `TypedAst` | TypeResolver output | SQL type strings resolved, modifiers as booleans, `sym_type` for roundtrip |
 | `SchemaDiff` | Diff output | Table/field/index/FK diffs with rename detection |
 
 ## Reverse Pipeline
@@ -193,7 +193,7 @@ DialectBackend = struct {
     emitEnumTypeCheck:      fn(w, col_name, enum_values) -> !void,
     emitInlineColumnStandaloneIndex: fn(w, table_name, col_name) -> !void,
     // Metadata comments
-    emitTpsTypeMetadata:    fn(w, col_name, tps_type) -> !void,
+    emitTypeMetadata:    fn(w, col_name, sym_type) -> !void,
     emitConfidenceComment:  fn(w, confidence) -> !void,
     // ALTER TABLE migration
     emitAlterDropColumn:    fn(w, col_name) -> !void,
@@ -306,7 +306,7 @@ TypeSpec uses a three-layer type mapping system:
 
 - **`reverse_map.zig` (REVERSE_MAP)**: ~35 entries covering all SQL type variants → SS symbols. Used by `reverseLookup()` and `reverseLookupSqlite()`. Includes core entries (for SQLite lossy affinity) plus MySQL/PG variant types.
 
-- **`type_map.zig`**: Helper functions (`lookupCustomType`, `isNumericTpsType`, `isDatetimeTpsType`) + `SqlType` re-export for backward compatibility. No longer contains rendering logic.
+- **`type_map.zig`**: Helper functions (`lookupCustomType`, `isNumericSymType`, `isDatetimeSymType`) + `SqlType` re-export for backward compatibility. No longer contains rendering logic.
 
 ## Key Design Decisions
 

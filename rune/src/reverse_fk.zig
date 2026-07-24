@@ -3,7 +3,7 @@ const sp = @import("sql_parser.zig");
 
 // ─── FK Reverse Classification ─────────────────────────────────
 // Extracted from reverse_codegen.zig for single-responsibility.
-// Classifies SQL foreign keys into TPS shorthand/full forms.
+// Classifies SQL foreign keys into SS shorthand/full forms.
 
 pub const FkForm = enum { ultra, shorthand, full };
 

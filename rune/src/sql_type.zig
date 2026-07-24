@@ -14,7 +14,7 @@ const Dialect = dialect_enum.Dialect;
 //
 // toSql() is self-contained — no delegation to type_map.zig.
 // type_map.zig re-exports SqlType for backward compatibility and
-// provides helper functions (lookupCustomType, isNumericTpsType, etc.).
+// provides helper functions (lookupCustomType, isNumericSymType, etc.).
 
 pub const SqlType = union(enum) {
     int,
@@ -90,7 +90,7 @@ pub const SqlType = union(enum) {
         }
     }
 
-    /// Build a SqlType from a TypeInfo + dialect (resolves single-char TPS symbols).
+    /// Build a SqlType from a TypeInfo + dialect (resolves single-char SS symbols).
     /// Uses lookupSqlTypeDirect to avoid the stringly-typed round-trip.
     pub fn fromTypeInfo(type_info: TypeInfo, dialect: Dialect) SqlType {
         return switch (type_info) {

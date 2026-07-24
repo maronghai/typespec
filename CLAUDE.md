@@ -122,7 +122,7 @@ Run a single golden test by filter: `bash tests/test.sh 01` (matches test name s
 | `sqlite_hints.zig` | SQLite-specific type affinity hints + column name heuristics |
 | `reverse_map_data.zig` | REVERSE_MAP data table (SQL ↔ SS type mappings, 46 entries) |
 | `reverse_fk.zig` | FK classification for reverse pipeline |
-| `type_map.zig` | Helper functions (lookupCustomType, isNumericTpsType) + SqlType re-export |
+| `type_map.zig` | Helper functions (lookupCustomType, isNumericSymType) + SqlType re-export |
 | `type_registry.zig` | SS symbol → SqlType direct mapping (lookupSqlTypeDirect) + CORE_TYPES; re-exports dialect.ReverseResult |
 | `type_resolver.zig` | ResolvedAst → TypedAst type resolution |
 | `diff_indexes.zig` | Index diffing |
